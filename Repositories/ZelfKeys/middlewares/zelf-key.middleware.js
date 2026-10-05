@@ -75,8 +75,9 @@ const schemas = {
 		zelfProof: string().required(),
 		faceBase64: string().required(),
 		password: string(),
-		// Required for password/notes/cards transport encryption; accepted for all retrieve types
-		clientPublicKey: string().required(),
+		// Required for password/notes/cards transport encryption (enforced in the module once the
+		// stored type is known); zOTP metadata is returned as-is, so Android/iOS don't send it
+		clientPublicKey: string().optional().allow(""),
 		type: string().optional().allow(""),
 		v: string().optional().allow(""),
 		removePGP: boolean().optional(),

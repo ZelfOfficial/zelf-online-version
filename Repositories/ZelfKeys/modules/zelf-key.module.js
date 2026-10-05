@@ -554,6 +554,8 @@ const retrieveData = async (data, authToken) => {
     const resolvedType = type || zelfKey?.publicData?.type;
 
     if (TYPES_REQUIRING_TRANSPORT_ENCRYPTION.has(resolvedType) && zelfKey.metadata) {
+        if (!clientPublicKey) throw new Error("409:missing_client_public_key");
+
         try {
             pgp = await PGPKeyModule.encryptToPublicKey(zelfKey.metadata, clientPublicKey);
             zelfKey.metadata = {};
