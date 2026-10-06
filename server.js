@@ -1,5 +1,5 @@
 const Koa = require("koa");
-const { koaBody } = require("koa-body");
+const { createBodyParser } = require("./Core/request-body");
 const jwt = require("koa-jwt");
 const config = require("./Core/config");
 const secret = config.JWT_SECRET; // Replace with your secret key
@@ -11,19 +11,8 @@ const { loadOfficialLicenses } = require("./Repositories/License/modules/license
 const { getSupportedDomains } = require("./Repositories/Tags/config/supported-domains");
 const app = new Koa();
 app.proxy = true; // Trust the proxy's X-Forwarded-For header
-app.use(
-    koaBody({
-        parsedMethods: ['POST', 'PUT', 'PATCH', 'DELETE'],
-        multipart: true,
-        formLimit: '6mb',
-        jsonLimit: '10mb',
-        textLimit: '10mb',
-        formidable: {
-            keepExtensions: true,
-            maxFileSize: 6 * 1024 * 1024,
-        },
-    })
-);
+// Same koa-body options as before; the Stripe webhook also gets the raw body to verify its signature.
+app.use(createBodyParser());
 
 // Enable CORS
 app.use(cors());
