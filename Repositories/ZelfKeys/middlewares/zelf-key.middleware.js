@@ -90,6 +90,9 @@ const schemas = {
 		category: stringEnum(SUPPORTED_CATEGORIES).required(),
 		tagName: string().optional(),
 	},
+	proof: {
+		id: string().required(),
+	},
 	listAll: {
 		tagName: string().optional(),
 	},
@@ -246,6 +249,18 @@ const retrieveValidation = async (ctx, next) => {
 	await next();
 };
 
+const proofValidation = async (ctx, next) => {
+	const valid = validate(schemas.proof, ctx.request.query);
+
+	if (valid.error) {
+		ctx.status = 409;
+		ctx.body = { validationError: valid.error.message };
+		return;
+	}
+
+	await next();
+};
+
 const listValidation = async (ctx, next) => {
 	const valid = validate(schemas.list, ctx.request.query);
 
@@ -346,6 +361,7 @@ module.exports = {
 	storeCreditCardValidation,
 	retrieveValidation,
 	previewValidation,
+	proofValidation,
 	listValidation,
 	listAllValidation,
 	listDashboardValidation,

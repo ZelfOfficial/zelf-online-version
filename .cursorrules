@@ -8,7 +8,7 @@ This repo now uses a layered guidance setup:
 
 ## Keep these facts aligned
 
--   Public API docs use `https://v3.zelf.world`
+-   Public API docs use `https://v4.zelf.world`
 -   Public API documentation belongs in `zelf-documentation/docs/api/`
 -   Integration tests use a live backend and follow a strict no-mocking policy
 -   Protected API tests should create a session first, then use `Authorization: Bearer <token>` and `Origin: https://test.example.com`

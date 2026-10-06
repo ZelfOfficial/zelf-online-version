@@ -24,6 +24,7 @@ module.exports = (server) => {
     server.post(`${PATH}/add/credit-card`, Middleware.storeCreditCardValidation, Controller.storeCreditCard);
 
     server.get(`${PATH}/list`, Middleware.listValidation, Controller.listData);
+    server.get(`${PATH}/proof`, Middleware.proofValidation, Controller.getProof);
     server.get(`${PATH}/list-all`, Middleware.listAllValidation, Controller.listAllData);
     server.get(`${PATH}/summary`, Middleware.summaryValidation, Controller.summarizeData);
     server.post(`${PATH}/retrieve`, Middleware.retrieveValidation, Controller.retrieveData);

@@ -59,12 +59,12 @@ For a test file that expects another port, export that same `PORT` before starti
 
 ### ZelfID (online, ZelfEncrypt v4)
 
-- `/api/zelf-ids` is owned by `Repositories/ZelfID/` (not a Tags alias). Public host is `https://v4.zelf.world` (for example `GET https://v4.zelf.world/api/zelf-ids/search`). Do not document it on `https://v3.zelf.world`.
+- `/api/zelf-ids` is owned by `Repositories/ZelfID/` (not a Tags alias). Public host is `https://v4.zelf.world` (for example `GET https://v4.zelf.world/api/zelf-ids/search`).
 - Online encrypt/decrypt/preview go to `ZELF_PROOF_V4_URL` (default `https://v4.zelf.world`) + `ZELF_PROOF_V4_PATH_PREFIX` (default `/zelf-v4`).
-- `/api/tags` stays on `ZELF_PROOF_URL` + `/zelf` (ZelfEncrypt 3.1.6 on `https://v3.zelf.world`). Tags offline lease stays `POST /api/tags/lease-offline`. Zelf ID offline lease is `POST /api/zelf-ids/lease-offline` (v4 `previewHumanAuthn`).
+- `/api/tags` stays on `ZELF_PROOF_URL` + `/zelf` (ZelfEncrypt 3.1.6 on `https://v4.zelf.world`). Tags offline lease stays `POST /api/tags/lease-offline`. Zelf ID offline lease is `POST /api/zelf-ids/lease-offline` (v4 `previewHumanAuthn`).
 - Raw encrypt/decrypt/preview: `/api/zelf-proof` → 3.1.6 on v3; `/api/human-authn` → v4 on `https://v4.zelf.world` (`Repositories/HumanAuthn/`).
 - Upgrade 3.1.6 → v4: `POST /api/human-authn/upgrade` (402) and `POST /api/jwt/human-authn/upgrade` (dev JWT). Upstream `https://v4.zelf.world/zelf-v4/upgrade`. Focused check: `npm run test:encrypt-compat`.
-- Development-only JWT mirrors (no ZNS payment): `/api/jwt/zelf-proof` and `/api/jwt/human-authn`. Gated on `config.env === "development"`. Focused check: `npm run test:jwt-dev`. Never enable on `v3.zelf.world`.
+- Development-only JWT mirrors (no ZNS payment): `/api/jwt/zelf-proof` and `/api/jwt/human-authn`. Gated on `config.env === "development"`. Focused check: `npm run test:jwt-dev`. Never enable on `v4.zelf.world`.
 - v4 Face Certificates: `https://v4.zelf.world` has Face PKI (`pki_private_key`) only. Proofs stay unsigned so Android/iOS can encrypt/decrypt offline. Do not embed `ISSUERS_PUBLIC_KEY` on ZNS or Zelf ID APKs. Koa: `/api/face-certificates` (402) and `/api/my-face-certificates` (JWT). Root cert: `GET /api/face-certificates/root-certificate`. Focused check: `npm run test:face-certificates`. 3.1.6 stays unsigned.
 - Focused check: `npm run test:zelf-ids`.
 - Cross-platform availability regression: `npm run test:tag-registration` (Node 24; read-only real provider failure, no API server/Mongo required).
@@ -105,7 +105,7 @@ For a test file that expects another port, export that same `PORT` before starti
 ### Docs work
 
 - Public API docs belong in `zelf-documentation/docs/api/`.
-- Public examples: Tags / v3.6 use `https://v3.zelf.world`. Zelf ID (`/api/zelf-ids`) uses `https://v4.zelf.world`. Do not use localhost in published docs.
+- Public examples use `https://v4.zelf.world` for Tags, v3.6 surfaces, and Zelf ID (`/api/zelf-ids`). Do not use localhost in published docs.
 
 ## Maintenance
 

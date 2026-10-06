@@ -20,7 +20,7 @@
 		// Ensure domain is bdag for BlockDAG
 		const finalDomain = domain === "bdag" ? "bdag" : "bdag";
 
-		const apiUrl = isLocalhost ? "http://localhost:3050" : `https://v3.zelf.world`;
+		const apiUrl = isLocalhost ? "http://localhost:3050" : `https://v4.zelf.world`;
 
 		let bdagNameObject = {};
 		const apiBaseUrl = `${apiUrl}/api/tags/search`;

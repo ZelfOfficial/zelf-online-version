@@ -83,7 +83,7 @@ Content-Type: application/json
 ### Example: First Request (No Payment)
 
 ```bash
-curl -X POST https://v3.zelf.world/api/zelf-proof/encrypt \
+curl -X POST https://v4.zelf.world/api/zelf-proof/encrypt \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -121,7 +121,7 @@ curl -X POST https://v3.zelf.world/api/zelf-proof/encrypt \
 # 2. Get transaction signature
 # 3. Make request with payment headers
 
-curl -X POST https://v3.zelf.world/api/zelf-proof/encrypt \
+curl -X POST https://v4.zelf.world/api/zelf-proof/encrypt \
   -H "Authorization: Bearer <token>" \
   -H "x-payment-chain: solana" \
   -H "x-payment-tx: 5KqZ..." \

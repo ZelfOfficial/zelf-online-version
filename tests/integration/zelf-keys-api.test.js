@@ -227,6 +227,7 @@ describe("ZelfKeys API Integration Tests", () => {
             expect(response.body).toHaveProperty("data");
             expect(response.body.data).toHaveProperty("type", "notes");
             expect(response.body.data).toHaveProperty("zelfProof");
+            expect(response.body.data.ipfs?.publicData?.v).toBe("4");
 
             storedNotesZelfProof = response.body.data.zelfProof;
             console.log("✅ Notes stored successfully");
@@ -252,6 +253,7 @@ describe("ZelfKeys API Integration Tests", () => {
             expect(response.body).toHaveProperty("data");
             expect(response.body.data).toHaveProperty("type", "zotp");
             expect(response.body.data).toHaveProperty("zelfProof");
+            expect(response.body.data.ipfs?.publicData?.v).toBe("4");
 
             storedZotpZelfProof = response.body.data.zelfProof;
             console.log("✅ ZOTP stored successfully");
@@ -563,6 +565,7 @@ describe("ZelfKeys API Integration Tests", () => {
                 .send({
                     zelfProof,
                     type: "password",
+                    v: "4",
                     faceBase64,
                     removePGP: true,
                     clientPublicKey,
@@ -578,7 +581,7 @@ describe("ZelfKeys API Integration Tests", () => {
                 decryptionKeys: privateKey,
             });
             expect(JSON.parse(decrypted)).toHaveProperty("password", "v4Secret");
-            console.log("✅ Raw v4 password retrieved without a version hint via stack fallback");
+            console.log("✅ Raw v4 password retrieved with the pin stamp");
         });
 
         it("POST /zelf-keys/retrieve — decrypts a stored v4 password without a version hint", async () => {
@@ -600,6 +603,7 @@ describe("ZelfKeys API Integration Tests", () => {
                 .send({
                     zelfProof: storedPasswordZelfProof,
                     type: "password",
+                    v: "4",
                     faceBase64,
                     removePGP: true,
                     clientPublicKey,
@@ -615,7 +619,7 @@ describe("ZelfKeys API Integration Tests", () => {
                 decryptionKeys: privateKey,
             });
             expect(JSON.parse(decrypted)).toHaveProperty("password");
-            console.log("✅ v4 password retrieved without a version hint via stack fallback");
+            console.log("✅ Stored v4 password retrieved with the pin stamp");
         });
 
         it("POST /zelf-keys/retrieve — should decrypt a stored v4 credit card", async () => {
@@ -660,7 +664,19 @@ describe("ZelfKeys API Integration Tests", () => {
             console.log("✅ Credit card retrieved and client-decrypted successfully");
         });
 
-        it("POST /zelf-keys/retrieve — invalid version hint is accepted and falls back", async () => {
+        it("POST /zelf-keys/retrieve — a non-v4 hint stays on 3.1.6", async () => {
+            jest.setTimeout(60000);
+            const ZelfProofModule = require("../../Repositories/ZelfProof/modules/zelf-proof.module");
+            const { zelfProof } = await ZelfProofModule.encrypt({
+                _id: `v4_hint_${Date.now()}`,
+                addServerPassword: false,
+                faceBase64,
+                metadata: { password: "v4Secret", username: "v4-user" },
+                publicData: { type: "password", website: "v4.test", v: "4" },
+                tolerance: "REGULAR",
+                stack: "v4",
+            });
+
             const { publicKey: clientPublicKey } = await openpgp.generateKey({
                 type: "ecc",
                 curve: "curve25519",
@@ -672,7 +688,7 @@ describe("ZelfKeys API Integration Tests", () => {
                 .set("Origin", "https://test.example.com")
                 .set("Authorization", `Bearer ${authToken}`)
                 .send({
-                    zelfProof: storedPasswordZelfProof || "legacy-proof",
+                    zelfProof,
                     type: "password",
                     v: "99",
                     faceBase64,
@@ -680,10 +696,7 @@ describe("ZelfKeys API Integration Tests", () => {
                     clientPublicKey,
                 });
 
-            expect(response.status).not.toBe(409);
-            if (storedPasswordZelfProof) {
-                expect(response.status).toBe(200);
-            }
+            expect(response.status).not.toBe(200);
         });
 
         it("POST /zelf-keys/retrieve — decrypts a legacy unstamped v3.6 proof without v", async () => {

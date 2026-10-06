@@ -13,7 +13,7 @@ This report documents the security assessment performed on the Zelf Wallet Backe
 
 - **Target:** Zelf Wallet Backend API
 - **Base URL:** `http://localhost:3000` (Development)
-- **Production URL:** `https://v3.zelf.world` (Production)
+- **Production URL:** `https://v4.zelf.world` (Production)
 - **Testing Tools:** Manual testing, automated scripts, OWASP ZAP (optional)
 
 ## Test Results Summary

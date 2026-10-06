@@ -24,7 +24,6 @@ const { validate } = require("../../../Core/JoiUtils");
 const { BULK_PASSWORDS_MAX, passwordCredentialSchema } = require("../middlewares/zelf-key.middleware");
 
 const TYPES_REQUIRING_TRANSPORT_ENCRYPTION = new Set(["password", "notes", "note", "credit_card", "payment-card"]);
-const V4_TYPES = new Set(["password", "credit_card"]);
 const SUPPORTED_CATEGORIES = ["password", "notes", "credit_card", "contact", "zotp"];
 
 const normalizeOptionalString = (value) => {
@@ -93,19 +92,17 @@ const createMetadataAndPublicData = async (type, data, authToken) => {
                 ...(normalizeOptionalString(data.notes) ? { notes: `${data.notes}` } : {}),
             };
 
-            typePayload.publicData = stampV4PublicData(
-                withFolderMetadata(
-                    {
-                        alias: normalizeOptionalString(data.alias),
-                        category: `${fullTagName}_password`,
-                        keyOwner: fullTagName,
-                        timestamp: `${new Date().toISOString()}`,
-                        type,
-                        username: data.username,
-                        website: `${data.website}`,
-                    },
-                    normalizeOptionalString(data.folder),
-                ),
+            typePayload.publicData = withFolderMetadata(
+                {
+                    alias: normalizeOptionalString(data.alias),
+                    category: `${fullTagName}_password`,
+                    keyOwner: fullTagName,
+                    timestamp: `${new Date().toISOString()}`,
+                    type,
+                    username: data.username,
+                    website: `${data.website}`,
+                },
+                normalizeOptionalString(data.folder),
             );
 
             break;
@@ -132,29 +129,29 @@ const createMetadataAndPublicData = async (type, data, authToken) => {
                 expiryYear: `${data.expiryYear}`,
             };
 
-            typePayload.publicData = stampV4PublicData(
-                withFolderMetadata(
-                    {
-                        alias: normalizeOptionalString(data.alias),
-                        card: JSON.stringify({
-                            bankName: `${data.bankName}`,
-                            expires: `${data.expiryMonth}/${data.expiryYear.slice(-2)}`,
-                            name: `${data.cardName}`,
-                            number: `****-****-****-${data.cardNumber.slice(-4)}`,
-                        }),
-                        category: `${fullTagName}_credit_card`,
-                        keyOwner: fullTagName,
-                        timestamp: `${new Date().toISOString()}`,
-                        type,
-                    },
-                    normalizeOptionalString(data.folder),
-                ),
+            typePayload.publicData = withFolderMetadata(
+                {
+                    alias: normalizeOptionalString(data.alias),
+                    card: JSON.stringify({
+                        bankName: `${data.bankName}`,
+                        expires: `${data.expiryMonth}/${data.expiryYear.slice(-2)}`,
+                        name: `${data.cardName}`,
+                        number: `****-****-****-${data.cardNumber.slice(-4)}`,
+                    }),
+                    category: `${fullTagName}_credit_card`,
+                    keyOwner: fullTagName,
+                    timestamp: `${new Date().toISOString()}`,
+                    type,
+                },
+                normalizeOptionalString(data.folder),
             );
 
             break;
         default:
             throw new Error(`Unsupported data type: ${type}`);
     }
+
+    typePayload.publicData = stampV4PublicData(typePayload.publicData);
 
     return typePayload;
 };
@@ -172,7 +169,7 @@ const _store = async (publicData, metadata, faceBase64, identifier, authToken, t
         metadata,
         publicData,
         tolerance: "REGULAR",
-        ...(V4_TYPES.has(type) ? { stack: "v4" } : {}),
+        stack: "v4",
     };
 
     const { zelfProof } = await ZelfProofModule.encrypt(dataToEncrypt);
@@ -458,26 +455,6 @@ const storePasswordsBulk = async (data, authToken) => {
     };
 };
 
-const decryptOnStack = (payload, useV4) =>
-    ZelfProofModule.decrypt({
-        faceBase64: payload.faceBase64,
-        os: "DESKTOP",
-        password: payload.password,
-        zelfProof: payload.zelfProof,
-        ...(useV4 ? { stack: "v4" } : {}),
-    });
-
-const decryptProofWithFallback = async (payload) => {
-    const preferV4 = payload.preferV4 === true;
-
-    try {
-        return await decryptOnStack(payload, preferV4);
-    } catch (error) {
-        if (error?.code !== "ERR_PARSE_FAILED") throw error;
-        return decryptOnStack(payload, !preferV4);
-    }
-};
-
 /**
  * Retrieve stored data using ZelfProof
  * @param {Object} data
@@ -512,11 +489,12 @@ const retrieveData = async (data, authToken) => {
             ...(data.publicData && typeof data.publicData === "object" ? data.publicData : {}),
         });
 
-        zelfKey = await decryptProofWithFallback({
+        zelfKey = await ZelfProofModule.decrypt({
             faceBase64: decryptedParams.face,
+            os: "DESKTOP",
             password: decryptedParams.password,
             zelfProof,
-            preferV4: version === 4,
+            ...(version === 4 ? { stack: "v4" } : {}),
         });
     } catch (error) {
         console.error({ error });
@@ -729,50 +707,26 @@ const listData = async (data, authToken) => {
         // Search IPFS for tags where category matches
         const ipfsResults = await IPFS.filter("category", searchCategory);
 
-        // Format results to return publicData and relevant information
+        // List returns pin metadata only. The QR is decoded when one item is opened.
         if (ipfsResults && Array.isArray(ipfsResults)) {
-            // Process results asynchronously to get zelfProofQRCode
-            const formattedResults = await Promise.all(
-                ipfsResults.map(async (item) => {
-                    // Extract publicData from the item
+            results = ipfsResults
+                .map((item) => {
                     const publicData = item.publicData || {};
 
-                    // Only include items that match the category (filter in case of partial matches)
                     if (publicData.category !== searchCategory) {
                         return null;
                     }
 
-                    // Convert IPFS URL to base64 for zelfProofQRCode
-                    let zelfProofQRCode = item.zelfProofQRCode;
-                    let zelfProof = null;
-
-                    if (!zelfProofQRCode && item.url) {
-                        try {
-                            zelfProofQRCode = await TagsPartsModule.urlToBase64(item.url);
-                            zelfProof = await QRZelfProofExtractor.extractZelfProofFromQR(zelfProofQRCode);
-                        } catch (error) {
-                            console.error("Error converting URL to base64:", error);
-                            // Continue without zelfProofQRCode if conversion fails
-                        }
-                    }
-
-                    const formattedItem = {
+                    return {
                         id: item.id || item.cid,
                         cid: item.cid,
                         url: item.url,
                         publicData,
-                        zelfProofQRCode,
-                        zelfProof,
                         createdAt: item.created_at || item.createdAt,
                         updatedAt: item.updated_at || item.updatedAt,
                     };
-
-                    return formattedItem;
-                }),
-            );
-
-            // Remove null entries
-            results = formattedResults.filter(Boolean);
+                })
+                .filter(Boolean);
         }
 
         return {
@@ -952,6 +906,64 @@ const _isValidCreditCard = (cardNumber) => {
     return sum % 10 === 0;
 };
 
+const _ownsZelfKey = (publicData, fullTagName) => {
+    const keyOwner = publicData?.keyOwner || "";
+    const category = publicData?.category || "";
+
+    if (keyOwner === fullTagName) return true;
+
+    return SUPPORTED_CATEGORIES.some((name) => category === `${fullTagName}_${name}`);
+};
+
+/**
+ * Decode one pinned QR for an item the authenticated tag owns.
+ * The list endpoint does not download QRs.
+ * @param {{ id: string }} data
+ * @param {Object} authToken
+ */
+const getProof = async (data, authToken) => {
+    const identifier = authToken.tagName || authToken.identifier;
+    const domain = authToken.domain || "zelf";
+    const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
+
+    let item;
+
+    try {
+        item = await IPFS.getFileById(data.id);
+    } catch (error) {
+        throw new Error("404:ZelfKey not found");
+    }
+
+    const publicData = item.publicData || {};
+
+    if (!_ownsZelfKey(publicData, fullTagName)) {
+        throw new Error("403:Not authorized to read this ZelfKey");
+    }
+
+    if (!item.url) {
+        throw new Error("404:ZelfKey not found");
+    }
+
+    const zelfProofQRCode = await TagsPartsModule.urlToBase64(item.url);
+
+    if (!zelfProofQRCode) {
+        throw new Error("400:Failed to read ZelfKey QR");
+    }
+
+    const zelfProof = await QRZelfProofExtractor.extractZelfProofFromQR(zelfProofQRCode);
+
+    if (!zelfProof) {
+        throw new Error("400:Failed to extract ZelfProof");
+    }
+
+    return {
+        id: item.id || data.id,
+        cid: item.cid,
+        zelfProof,
+        zelfProofQRCode,
+    };
+};
+
 const summarizeData = async (_data, authToken) => {
     const identifier = authToken.tagName || authToken.identifier;
     const domain = authToken.domain || "zelf";
@@ -988,6 +1000,7 @@ module.exports = {
     previewData,
     createNFTReadyData,
     listData,
+    getProof,
     listAllData,
     listDataForDashboard,
     listAllDataForDashboard,

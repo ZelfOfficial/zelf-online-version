@@ -17,7 +17,7 @@
 		// Get the domain part (second segment after underscore, before any dots)
 		const domain = url.split("_")[1]?.split(".")[0] || url.split("_")[1];
 
-		const apiUrl = isLocalhost ? "http://localhost:3050" : `https://v3.zelf.world`;
+		const apiUrl = isLocalhost ? "http://localhost:3050" : `https://v4.zelf.world`;
 
 		let zelfNameObject = {};
 		const apiBaseUrl = `${apiUrl}/api/tags/search`;

@@ -28,7 +28,7 @@ const tccPhoneId = "624749820726878";
 const phoneId = useTcc ? tccPhoneId : defaultPhoneId;
 const token = useTcc ? process.env.TCC_WHATSAPP_API_KEY : process.env.WHATSAPP_API_TOKEN;
 const relayApiKey = process.env.VERIFIK_WHATSAPP_RELAY_API_KEY;
-const relayBaseUrl = (process.env.ZELF_WHATSAPP_URL || "https://v3.zelf.world").replace(/\/$/, "");
+const relayBaseUrl = (process.env.ZELF_WHATSAPP_URL || "https://v4.zelf.world").replace(/\/$/, "");
 const to = (positional[0] || "50765342766").replace(/\D/g, "");
 const otp = positional[1] || `${Math.floor(100000 + Math.random() * 900000)}`;
 

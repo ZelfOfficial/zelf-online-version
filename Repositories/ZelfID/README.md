@@ -1,10 +1,10 @@
 # ZelfID
 
-Online product API for names. Public host is **`https://v4.zelf.world`** (`GET https://v4.zelf.world/api/zelf-ids/search`). JWT required (protected registry). Do not call this product on `https://v3.zelf.world`.
+Online product API for names. Public host is **`https://v4.zelf.world`** (`GET https://v4.zelf.world/api/zelf-ids/search`). JWT required (protected registry).
 
 Encrypt/decrypt/preview always use **ZelfEncrypt v4** (`ZELF_PROOF_V4_URL`, default `https://v4.zelf.world`, path `/zelf-v4`). JSON field names stay `tagName` / `tagObject` so existing clients can retarget from `/api/tags` with little churn.
 
-v4 proofs from that host stay **unsigned** so Android/iOS can encrypt/decrypt offline. Face PKI: `GET https://v4.zelf.world/root-certificate`. Do not embed `ISSUERS_PUBLIC_KEY` on ZNS or Zelf ID APKs. `https://v3.zelf.world` / 3.1.6 (Tags, ZNS) stays unsigned.
+v4 proofs from that host stay **unsigned** so Android/iOS can encrypt/decrypt offline. Face PKI: `GET https://v4.zelf.world/root-certificate`. Do not embed `ISSUERS_PUBLIC_KEY` on ZNS or Zelf ID APKs. ZelfEncrypt 3.1.6 (Tags, ZNS) stays unsigned and is reached on `https://v4.zelf.world` at `/zelf`.
 
 `POST /lease-offline` pins an existing v4 proof (string and/or QR). Preview is **`previewHumanAuthn`** (Human Authn / `/zelf-v4`). Tags offline lease stays on `/api/tags/lease-offline`.
 

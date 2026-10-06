@@ -98,7 +98,7 @@ const configuration = {
         serverKey: process.env.ZELF_ENCRYPT_SERVER_KEY,
     },
     zelfProof: {
-        url: process.env.ZELF_PROOF_URL || "https://v3.zelf.world",
+        url: process.env.ZELF_PROOF_URL || "https://v4.zelf.world",
         apiKey: process.env.ZELF_PROOF_API_KEY || "password",
         skipArweave: process.env.SKIP_ARWEAVE || false,
     },
@@ -416,7 +416,7 @@ const configuration = {
         demoMode: process.env.CRYPTO_PAYMENTS_DEMO_MODE === "true" || false,
         demoMultiplier: 0.005, // 0.5% of original price for demo mode (max $0.049 for $9.99)
     },
-    /** VaultLegacy demo wills — never enable LEGACY_DEMO_MODE on production v3.zelf.world */
+    /** VaultLegacy demo wills — never enable LEGACY_DEMO_MODE on production v4.zelf.world */
     legacyDemo: {
         enabled: process.env.LEGACY_DEMO_MODE === "true",
         lawyerAddress: (process.env.LEGACY_DEMO_LAWYER_ADDRESS || "").trim().toLowerCase(),
