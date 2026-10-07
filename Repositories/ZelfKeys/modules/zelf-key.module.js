@@ -66,6 +66,57 @@ const resolveProtection = (value) => {
 
 const protectionRequiresKeyPassword = (protection) => protection === PROTECTION_FACE_PASSWORD;
 
+const protectionFromPreview = (preview) => {
+    const storedProtection = preview?.publicData?.protection;
+
+    if (storedProtection === PROTECTION_FACE_PASSWORD || storedProtection === PROTECTION_FACE) {
+        return resolveProtection(storedProtection);
+    }
+
+    const layerRequiresPassword = ZelfProofModule.passwordLayerRequiresPassword(preview?.passwordLayer);
+
+    if (layerRequiresPassword === true) return PROTECTION_FACE_PASSWORD;
+    if (layerRequiresPassword === false) return PROTECTION_FACE;
+
+    return null;
+};
+
+/**
+ * Resolve retrieve protection from the stored proof. Request fields are only a fallback
+ * when preview cannot read protection (e.g. upstream preview unavailable).
+ * @param {Object} data retrieve request body
+ * @returns {Promise<"face"|"face_password">}
+ */
+const resolveRetrieveProtection = async (data) => {
+    const requestHint = data.publicData?.protection ?? data.protection;
+
+    if (!data.zelfProof) {
+        return resolveProtection(requestHint);
+    }
+
+    try {
+        const version = resolveEncryptVersion({
+            v: data.v,
+            zelfEncryptVersion: data.zelfEncryptVersion,
+            encryptVersion: data.encryptVersion,
+            ...(data.publicData && typeof data.publicData === "object" ? data.publicData : {}),
+        });
+
+        const preview =
+            version === 4
+                ? await ZelfProofModule.preview({ zelfProof: data.zelfProof, stack: "v4" })
+                : await ZelfProofModule.previewWithLegacyFallback({ zelfProof: data.zelfProof });
+
+        const fromStored = protectionFromPreview(preview);
+
+        if (fromStored) return fromStored;
+    } catch (error) {
+        console.warn("resolveRetrieveProtection preview failed; falling back to request hint", error?.message);
+    }
+
+    return resolveProtection(requestHint);
+};
+
 const assertProtectionStoreRules = (protection, keyPassword) => {
     if (protectionRequiresKeyPassword(protection) && !keyPassword) {
         throw new Error("409:master_password_required_for_face_password_protection");
@@ -529,9 +580,7 @@ const retrieveData = async (data, authToken) => {
     let pgp = null;
     let zelfKey = null;
 
-    const protection = resolveProtection(
-        data.publicData?.protection ?? data.protection,
-    );
+    const protection = await resolveRetrieveProtection(data);
 
     decryptedParams = await TagsPartsModule.decryptParams(
         {
@@ -1288,5 +1337,6 @@ module.exports = {
     deleteZelfKey,
     changeMasterPassword,
     resolveProtection,
+    resolveRetrieveProtection,
     protectionRequiresKeyPassword,
 };

@@ -13,6 +13,13 @@ jest.mock("../../Repositories/Tags/modules/tags.module", () => ({
 jest.mock("../../Repositories/ZelfProof/modules/zelf-proof.module", () => ({
     encrypt: jest.fn(),
     decrypt: jest.fn(),
+    preview: jest.fn(),
+    previewWithLegacyFallback: jest.fn(),
+    passwordLayerRequiresPassword: jest.fn((layer) => {
+        if (layer === "WithPassword" || layer === "Password") return true;
+        if (layer === "WithoutPassword" || layer === "NoPassword") return false;
+        return undefined;
+    }),
 }));
 
 jest.mock("../../Repositories/Tags/modules/qr-zelfproof-extractor.module", () => ({
@@ -57,10 +64,20 @@ describe("ZelfKeys retrieve protection gating", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         jest.spyOn(console, "error").mockImplementation(() => {});
+        jest.spyOn(console, "warn").mockImplementation(() => {});
 
         TagsPartsModule.decryptParams.mockResolvedValue({
             face: "decrypted-face",
             password: "vault-password",
+        });
+
+        ZelfProofModule.preview.mockResolvedValue({
+            publicData: { protection: "face", type: "zotp", v: "4" },
+            passwordLayer: "WithoutPassword",
+        });
+        ZelfProofModule.previewWithLegacyFallback.mockResolvedValue({
+            publicData: { protection: "face", type: "zotp" },
+            passwordLayer: "WithoutPassword",
         });
 
         ZelfProofModule.decrypt.mockResolvedValue({
@@ -71,6 +88,7 @@ describe("ZelfKeys retrieve protection gating", () => {
 
     afterEach(() => {
         console.error.mockRestore();
+        console.warn.mockRestore();
     });
 
     it("clears password for face-only keys before decrypt", async () => {
@@ -93,6 +111,11 @@ describe("ZelfKeys retrieve protection gating", () => {
     });
 
     it("requires password for face_password keys", async () => {
+        ZelfProofModule.preview.mockResolvedValue({
+            publicData: { protection: "face_password", type: "password", v: "4" },
+            passwordLayer: "WithPassword",
+        });
+
         TagsPartsModule.decryptParams.mockResolvedValue({
             face: "decrypted-face",
             password: undefined,
@@ -104,7 +127,7 @@ describe("ZelfKeys retrieve protection gating", () => {
                     zelfProof: "proof",
                     faceBase64: "face",
                     type: "password",
-                    protection: "face_password",
+                    v: "4",
                 },
                 authToken,
             ),
@@ -114,13 +137,68 @@ describe("ZelfKeys retrieve protection gating", () => {
     });
 
     it("forwards password for face_password keys", async () => {
+        ZelfProofModule.preview.mockResolvedValue({
+            publicData: { protection: "face_password", type: "zotp", v: "4" },
+            passwordLayer: "WithPassword",
+        });
+
         await ZelfKeyModule.retrieveData(
             {
                 zelfProof: "proof",
                 faceBase64: "face",
                 password: "vault-password",
                 type: "zotp",
-                protection: "face_password",
+                v: "4",
+            },
+            authToken,
+        );
+
+        expect(ZelfProofModule.decrypt).toHaveBeenCalledWith(
+            expect.objectContaining({
+                password: "vault-password",
+            }),
+        );
+    });
+
+    it("uses stored protection when the request omits protection", async () => {
+        ZelfProofModule.preview.mockResolvedValue({
+            publicData: { protection: "face_password", type: "zotp", v: "4" },
+            passwordLayer: "WithPassword",
+        });
+
+        await ZelfKeyModule.retrieveData(
+            {
+                zelfProof: "proof",
+                faceBase64: "face",
+                password: "vault-password",
+                type: "zotp",
+                v: "4",
+            },
+            authToken,
+        );
+
+        expect(ZelfProofModule.preview).toHaveBeenCalled();
+        expect(ZelfProofModule.decrypt).toHaveBeenCalledWith(
+            expect.objectContaining({
+                password: "vault-password",
+            }),
+        );
+    });
+
+    it("does not let a face request hint override stored face_password", async () => {
+        ZelfProofModule.preview.mockResolvedValue({
+            publicData: { protection: "face_password", type: "zotp", v: "4" },
+            passwordLayer: "WithPassword",
+        });
+
+        await ZelfKeyModule.retrieveData(
+            {
+                zelfProof: "proof",
+                faceBase64: "face",
+                password: "vault-password",
+                type: "zotp",
+                v: "4",
+                protection: "face",
             },
             authToken,
         );
