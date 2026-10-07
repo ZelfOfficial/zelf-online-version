@@ -61,6 +61,28 @@ describe("ZelfKeys protection middleware", () => {
         expect(nextCalled).toBe(true);
     });
 
+    it("accepts retrieve with masterPassword instead of password", async () => {
+        const ctx = {
+            request: {
+                body: {
+                    zelfProof: "proof",
+                    faceBase64: "face",
+                    masterPassword: "vault-password",
+                    type: "zotp",
+                    v: "4",
+                },
+            },
+        };
+        let nextCalled = false;
+
+        await Middleware.retrieveValidation(ctx, async () => {
+            nextCalled = true;
+        });
+
+        expect(nextCalled).toBe(true);
+        expect(ctx.status).toBeUndefined();
+    });
+
     it("rejects change-master-password without oldMasterPassword", async () => {
         const ctx = {
             request: {

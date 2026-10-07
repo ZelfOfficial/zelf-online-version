@@ -280,6 +280,86 @@ describe("ZelfKeys store protection", () => {
         );
     });
 
+    it("round-trips face_password store masterPassword into retrieve password", async () => {
+        const keyPassword = "vault-password";
+        let encryptedWithPassword = null;
+
+        ZelfProofModule.encrypt.mockImplementation(async (payload) => {
+            encryptedWithPassword = payload.password;
+            return { zelfProof: "roundtrip-proof" };
+        });
+
+        await ZelfKeyModule.storeData(
+            {
+                type: "zotp",
+                username: "user@example.com",
+                setupKey: "JBSWY3DPEHPK3PXP",
+                issuer: "GitHub",
+                faceBase64: "face",
+                masterPassword: keyPassword,
+                protection: "face_password",
+                removePGP: true,
+            },
+            authToken,
+        );
+
+        expect(encryptedWithPassword).toBe(keyPassword);
+
+        ZelfProofModule.preview.mockResolvedValue({
+            publicData: { protection: "face_password", type: "zotp", v: "4" },
+            passwordLayer: "WithPassword",
+        });
+
+        await ZelfKeyModule.retrieveData(
+            {
+                zelfProof: "roundtrip-proof",
+                faceBase64: "face",
+                password: keyPassword,
+                type: "zotp",
+                v: "4",
+                removePGP: true,
+            },
+            authToken,
+        );
+
+        expect(ZelfProofModule.decrypt).toHaveBeenCalledWith(
+            expect.objectContaining({
+                password: encryptedWithPassword,
+            }),
+        );
+    });
+
+    it("retrieve accepts masterPassword with the same unwrap path as store", async () => {
+        ZelfProofModule.preview.mockResolvedValue({
+            publicData: { protection: "face_password", type: "zotp", v: "4" },
+            passwordLayer: "WithPassword",
+        });
+
+        await ZelfKeyModule.retrieveData(
+            {
+                zelfProof: "proof",
+                faceBase64: "face",
+                masterPassword: "vault-password",
+                type: "zotp",
+                v: "4",
+                removePGP: true,
+            },
+            authToken,
+        );
+
+        expect(TagsPartsModule.decryptParams).toHaveBeenCalledWith(
+            expect.objectContaining({
+                password: "vault-password",
+            }),
+            authToken,
+        );
+        expect(ZelfProofModule.decrypt).toHaveBeenCalledWith(
+            expect.objectContaining({
+                password: "vault-password",
+            }),
+        );
+    });
+
     it("stores face-only keys without a proof password", async () => {
         TagsPartsModule.decryptParams.mockResolvedValue({
             face: "decrypted-face",

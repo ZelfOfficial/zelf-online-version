@@ -123,6 +123,29 @@ const assertProtectionStoreRules = (protection, keyPassword) => {
     }
 };
 
+/**
+ * Client key-layer password on store (`masterPassword`) and retrieve (`password`) share the
+ * same session/PGP unwrap path. Accept either field name.
+ * @param {Object} data
+ * @returns {string|undefined}
+ */
+const resolveKeyPasswordInput = (data) => data.masterPassword ?? data.password;
+
+/**
+ * Decrypt face + key-layer password consistently for store and retrieve.
+ * @param {Object} data
+ * @param {Object} authToken
+ */
+const decryptKeyCredentials = async (data, authToken) =>
+    TagsPartsModule.decryptParams(
+        {
+            password: resolveKeyPasswordInput(data),
+            faceBase64: data.faceBase64,
+            removePGP: data.removePGP,
+        },
+        authToken,
+    );
+
 const stampV4PublicData = (publicData) =>
     compactPublicData({
         ...publicData,
@@ -374,14 +397,7 @@ const storeData = async (data, authToken) => {
     try {
         const { type, domain } = data;
 
-        const decryptedParams = await TagsPartsModule.decryptParams(
-            {
-                password: data.masterPassword,
-                faceBase64: data.faceBase64,
-                removePGP: data.removePGP,
-            },
-            authToken,
-        );
+        const decryptedParams = await decryptKeyCredentials(data, authToken);
 
         let decryptedSensitiveData = {};
 
@@ -408,7 +424,7 @@ const storeData = async (data, authToken) => {
 
         const faceBase64 = decryptedParams.face;
 
-        await _validateOwnership(data.faceBase64, data.masterPassword, authToken, data);
+        await _validateOwnership(data.faceBase64, resolveKeyPasswordInput(data), authToken, data);
 
         const { metadata, publicData, fullTagName, protection } = await createMetadataAndPublicData(
             type,
@@ -497,18 +513,11 @@ const _storePasswordRecord = async (itemData, authToken, sharedContext, identifi
  * @returns {Promise<Object>}
  */
 const storePasswordsBulk = async (data, authToken) => {
-    const { faceBase64, masterPassword, removePGP, passwords } = data;
+    const { faceBase64, removePGP, passwords } = data;
 
-    const decryptedParams = await TagsPartsModule.decryptParams(
-        {
-            password: masterPassword,
-            faceBase64,
-            removePGP,
-        },
-        authToken,
-    );
+    const decryptedParams = await decryptKeyCredentials({ faceBase64, removePGP, ...data }, authToken);
 
-    await _validateOwnership(faceBase64, masterPassword, authToken, data);
+    await _validateOwnership(faceBase64, resolveKeyPasswordInput(data), authToken, data);
 
     const batchProtection = resolveProtection(data.protection);
     assertProtectionStoreRules(batchProtection, decryptedParams.password);
@@ -574,7 +583,7 @@ const storePasswordsBulk = async (data, authToken) => {
  * @returns {Promise<Object>}
  */
 const retrieveData = async (data, authToken) => {
-    const { zelfProof, faceBase64, password, type, clientPublicKey } = data;
+    const { zelfProof, type, clientPublicKey } = data;
 
     let decryptedParams = null;
     let pgp = null;
@@ -582,14 +591,7 @@ const retrieveData = async (data, authToken) => {
 
     const protection = await resolveRetrieveProtection(data);
 
-    decryptedParams = await TagsPartsModule.decryptParams(
-        {
-            password,
-            faceBase64,
-            removePGP: data.removePGP,
-        },
-        authToken,
-    );
+    decryptedParams = await decryptKeyCredentials(data, authToken);
 
     if (protectionRequiresKeyPassword(protection)) {
         if (!decryptedParams.password) {
@@ -1338,5 +1340,7 @@ module.exports = {
     changeMasterPassword,
     resolveProtection,
     resolveRetrieveProtection,
+    resolveKeyPasswordInput,
+    decryptKeyCredentials,
     protectionRequiresKeyPassword,
 };
