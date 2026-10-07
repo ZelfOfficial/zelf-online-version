@@ -7,8 +7,15 @@ const { string, validate, boolean, stringEnum, object, array } = require("../../
 
 const SUPPORTED_CATEGORIES = ["password", "notes", "credit_card", "contact", "zotp"];
 
+/** Key protection modes exposed as `publicData.protection`. */
+const PROTECTION_MODES = ["face", "face_password"];
+const PROTECTION_FACE = "face";
+const PROTECTION_FACE_PASSWORD = "face_password";
+
 /** Maximum credentials per bulk password import request. */
 const BULK_PASSWORDS_MAX = 100;
+
+const protectionField = stringEnum(PROTECTION_MODES).optional();
 
 const passwordCredentialSchema = {
 	alias: string().optional().allow("").max(50),
@@ -18,6 +25,7 @@ const passwordCredentialSchema = {
 	folder: string().optional().allow(""),
 	insideFolder: boolean().optional().allow(false),
 	notes: string().optional().allow(""),
+	protection: protectionField,
 };
 
 const schemas = {
@@ -32,11 +40,13 @@ const schemas = {
 		notes: string().optional().allow(""),
 		faceBase64: string().required(),
 		masterPassword: string().optional().allow(""),
+		protection: protectionField,
 	},
 	bulkPasswords: {
 		faceBase64: string().required(),
 		masterPassword: string().optional().allow(""),
 		removePGP: boolean().optional(),
+		protection: protectionField,
 		// Rows are validated one by one in the module, so a bad row comes back in
 		// `failed[]` with its index instead of rejecting the whole batch with 409.
 		passwords: array().items(object().unknown(true)).min(1).max(BULK_PASSWORDS_MAX).required(),
@@ -49,6 +59,7 @@ const schemas = {
 		insideFolder: boolean().optional().allow(false),
 		faceBase64: string().required(),
 		masterPassword: string().optional().allow(""),
+		protection: protectionField,
 	},
 	notes: {
 		title: string().min(1).max(100).required(),
@@ -57,6 +68,7 @@ const schemas = {
 		folder: string().optional().allow(""),
 		insideFolder: boolean().optional().allow(false),
 		masterPassword: string().optional().allow(""),
+		protection: protectionField,
 	},
 	creditCard: {
 		alias: string().optional().allow("").max(50),
@@ -70,6 +82,13 @@ const schemas = {
 		folder: string().optional().allow(""),
 		insideFolder: boolean().optional().allow(false),
 		masterPassword: string().optional().allow(""),
+		protection: protectionField,
+	},
+	changeMasterPassword: {
+		faceBase64: string().required(),
+		oldMasterPassword: string().required(),
+		newMasterPassword: string().required(),
+		removePGP: boolean().optional(),
 	},
 	retrieve: {
 		zelfProof: string().required(),
@@ -81,6 +100,8 @@ const schemas = {
 		type: string().optional().allow(""),
 		v: string().optional().allow(""),
 		removePGP: boolean().optional(),
+		publicData: object().optional(),
+		protection: protectionField,
 	},
 	preview: {
 		zelfProof: string().required(),
@@ -334,6 +355,18 @@ const summaryValidation = async (_ctx, next) => {
 	await next();
 };
 
+const changeMasterPasswordValidation = async (ctx, next) => {
+	const valid = validate(schemas.changeMasterPassword, ctx.request.body);
+
+	if (valid.error) {
+		ctx.status = 409;
+		ctx.body = { validationError: valid.error.message };
+		return;
+	}
+
+	await next();
+};
+
 const deleteZelfKeyValidation = async (ctx, next) => {
 	const valid = validate(schemas.delete, {
 		id: ctx.request.params.id,
@@ -352,6 +385,9 @@ const deleteZelfKeyValidation = async (ctx, next) => {
 
 module.exports = {
 	SUPPORTED_CATEGORIES,
+	PROTECTION_MODES,
+	PROTECTION_FACE,
+	PROTECTION_FACE_PASSWORD,
 	BULK_PASSWORDS_MAX,
 	passwordCredentialSchema,
 	storePasswordValidation,
@@ -367,5 +403,6 @@ module.exports = {
 	listDashboardValidation,
 	listAllDashboardValidation,
 	summaryValidation,
+	changeMasterPasswordValidation,
 	deleteZelfKeyValidation,
 };

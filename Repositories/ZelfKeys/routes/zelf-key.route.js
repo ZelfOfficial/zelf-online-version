@@ -29,6 +29,7 @@ module.exports = (server) => {
     server.get(`${PATH}/summary`, Middleware.summaryValidation, Controller.summarizeData);
     server.post(`${PATH}/retrieve`, Middleware.retrieveValidation, Controller.retrieveData);
     server.post(`${PATH}/preview`, Middleware.previewValidation, Controller.previewData);
+    server.post(`${PATH}/change-master-password`, Middleware.changeMasterPasswordValidation, Controller.changeMasterPassword);
 
     server.put(`${PATH}/delete/:id`, Middleware.deleteZelfKeyValidation, Controller.deleteZelfKey);
 
