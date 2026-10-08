@@ -6,7 +6,7 @@ const TagsIPFSModule = require("../../Tags/modules/tags-ipfs.module");
 const TagsArweaveModule = require("../../Tags/modules/tags-arweave.module");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { cleanExtraParamsForPinata, resolveEncryptVersion, stampExtraParamsVersion } = require("../../Tags/modules/tags-addresses.module");
-const { ZELF_ID_RESERVATION_HOURS, FREE_EXPIRATION_YEARS, getBareName, getReservationPinName } = require("./zelf-id-plan.module");
+const { FREE_EXPIRATION_YEARS, getBareName, getReservationPinName, getReservationExpiresAt } = require("./zelf-id-plan.module");
 
 const attachReferral = (metadata, referralTagObject, storageKey) => {
     if (!referralTagObject) return;
@@ -85,7 +85,7 @@ const confirmZelfId = async (tagObject, referralTagObject, domainConfig, securit
 };
 
 /**
- * Five-hour unpaid reservation. IPFS only.
+ * Unpaid short-name reservation (default one year). IPFS only.
  * @param {Object} tagObject
  * @param {Object|null} referralTagObject
  * @param {Object} domainConfig
@@ -104,7 +104,7 @@ const reserveZelfId = async (tagObject, referralTagObject, domainConfig, securit
         type: "hold",
         origin: tagObject.origin || "online",
         registeredAt: moment().format("YYYY-MM-DD HH:mm:ss"),
-        expiresAt: moment().add(ZELF_ID_RESERVATION_HOURS, "hour").format("YYYY-MM-DD HH:mm:ss"),
+        expiresAt: getReservationExpiresAt(),
     };
 
     if (tagObject.price !== undefined && tagObject.price !== null && tagObject.price !== "") {

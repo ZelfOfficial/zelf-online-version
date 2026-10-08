@@ -1,6 +1,8 @@
 const moment = require("moment");
 const {
+	ZELF_ID_RESERVATION_DURATION,
 	ZELF_ID_RESERVATION_HOURS,
+	getReservationExpiresAt,
 	getBareName,
 	getBareNameLength,
 	getReservationPinName,
@@ -50,8 +52,13 @@ const licenseDomain = (priceByName = {}) => ({
 });
 
 describe("zelf-id-plan.module", () => {
-	test("reservation window is 5 hours", () => {
-		expect(ZELF_ID_RESERVATION_HOURS).toBe(5);
+	test("reservation window defaults to 1 year", () => {
+		expect(ZELF_ID_RESERVATION_DURATION).toEqual({ amount: 1, unit: "year" });
+		const expiresAt = getReservationExpiresAt();
+		const yearsUntilExpiry = moment(expiresAt, "YYYY-MM-DD HH:mm:ss").diff(moment(), "year", true);
+		expect(yearsUntilExpiry).toBeGreaterThanOrEqual(0.99);
+		expect(yearsUntilExpiry).toBeLessThan(1.1);
+		expect(ZELF_ID_RESERVATION_HOURS).toBeGreaterThan(8700);
 	});
 
 	test("getBareName strips TLD and .hold", () => {

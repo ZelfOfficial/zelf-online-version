@@ -472,7 +472,7 @@ const leaseConfirmation = async (params) => {
 };
 
 /**
- * Persist a Zelf ID lease: 6+ characters confirm as free; short names with price > 0 get a 5-hour hold.
+ * Persist a Zelf ID lease: 6+ characters confirm as free; short names with price > 0 get a one-year hold (configurable).
  * A leftover `$0` quote confirms as complimentary unlimited for short names; long names stay free.
  * @param {Object} tagObject
  * @param {Object|null} referralTagObject

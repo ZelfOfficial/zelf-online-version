@@ -8,7 +8,7 @@ v4 proofs from that host stay **unsigned** so Android/iOS can encrypt/decrypt of
 
 `POST /lease-offline` pins an existing v4 proof (string and/or QR). Preview is **`previewHumanAuthn`** (Human Authn / `/zelf-v4`). Tags offline lease stays on `/api/tags/lease-offline`.
 
-Names of 6–27 characters lease as `free` (no `.hold`) with a **100-year** internal `expiresAt` sentinel (UI: **No expiration**). A `$0` referral/complimentary quote on those names stays **free**. They can later buy **1–5 years** or **Lifetime** of **premium** or **unlimited** via `GET /payment-options?plan=` then `POST /payment-confirmation` or `POST /smart-contract-payment-confirmation` — not `/api/my-tags`. Lifetime charges the license 10-year price and stamps 100 years from today. Free → paid resets expiration from now; active paid yearly adds to the stored expiry; expired paid adds from today. Names of 5 characters or fewer are **unlimited only**. New unpaid short names use a **5-hour** `name.domain.hold` pin. Legacy Tags holds keep their original stored expiry (often 30 days). When a paid term ends, the name stays and the plan reads as `free`. See public docs: [Migration v4 changelog](https://docs.zelf.world/docs/changelog/2026-08-31-zelf-id-migration-v4) and [Unit tests](https://docs.zelf.world/docs/api/zelf-ids/unit-tests).
+Names of 6–27 characters lease as `free` (no `.hold`) with a **100-year** internal `expiresAt` sentinel (UI: **No expiration**). A `$0` referral/complimentary quote on those names stays **free**. They can later buy **1–5 years** or **Lifetime** of **premium** or **unlimited** via `GET /payment-options?plan=` then `POST /payment-confirmation` or `POST /smart-contract-payment-confirmation` — not `/api/my-tags`. Lifetime charges the license 10-year price and stamps 100 years from today. Free → paid resets expiration from now; active paid yearly adds to the stored expiry; expired paid adds from today. Names of 5 characters or fewer are **unlimited only**. New unpaid short names use a **one-year** `name.domain.hold` pin (override: `ZELF_ID_RESERVATION_AMOUNT` / `ZELF_ID_RESERVATION_UNIT`). Legacy Tags holds keep their original stored expiry (often 30 days). When a paid term ends, the name stays and the plan reads as `free`. See public docs: [Migration v4 changelog](https://docs.zelf.world/docs/changelog/2026-08-31-zelf-id-migration-v4) and [Unit tests](https://docs.zelf.world/docs/api/zelf-ids/unit-tests).
 
 Registered in `Routes/protected-repositories.js`.
 
@@ -37,7 +37,7 @@ Registered in `Routes/protected-repositories.js`.
 | POST | `/purchase-rewards` | — (super admin; releases the oldest pending Tags purchase reward, 202 while its transfer is unconfirmed) |
 | POST | `/referral-rewards` | — (super admin; 410, referral rewards are claimed per referral with `POST /api/my-tags/referrals/claim`) |
 
-`os`: `DESKTOP` | `ANDROID` | `IOS`. New leases stamp `origin: "online"` and short `v: 4`. Short unpaid holds last 5 hours; longer names lease as `free` and upgrade on payment.
+`os`: `DESKTOP` | `ANDROID` | `IOS`. New leases stamp `origin: "online"` and short `v: 4`. Short unpaid holds last one year by default; longer names lease as `free` and upgrade on payment.
 
 ## Example — POST `/api/zelf-ids/lease`
 

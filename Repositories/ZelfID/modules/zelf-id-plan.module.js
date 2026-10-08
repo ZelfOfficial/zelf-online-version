@@ -4,7 +4,8 @@
  * `domainConfig.getPrice`). Do not hardcode dollar amounts here.
  *
  * 1–5 characters: unlimited only. 6–27: free, or a yearly paid choice of
- * premium or unlimited. `.hold` is only for unpaid short names. An expired
+ * premium or unlimited. `.hold` is only for unpaid short names (default one-year
+ * hold; env-configurable). An expired
  * paid year reads as `plan: free`. Free registrations store a 100-year
  * sentinel; paid Lifetime also stores 100 years from payment. Upgrade expiry
  * starts from payment time unless the name already has an active paid lease
@@ -12,7 +13,25 @@
  */
 const moment = require("moment");
 
-const ZELF_ID_RESERVATION_HOURS = 5;
+/** Unpaid short-name hold window. Override via `ZELF_ID_RESERVATION_AMOUNT` / `ZELF_ID_RESERVATION_UNIT` (e.g. `5` + `hour` to revert). */
+const ZELF_ID_RESERVATION_DURATION = {
+    amount: Number(process.env.ZELF_ID_RESERVATION_AMOUNT || 1),
+    unit: process.env.ZELF_ID_RESERVATION_UNIT || "year",
+};
+
+/** @deprecated Prefer `ZELF_ID_RESERVATION_DURATION` or `getReservationExpiresAt`. */
+const ZELF_ID_RESERVATION_HOURS = moment
+    .duration(ZELF_ID_RESERVATION_DURATION.amount, ZELF_ID_RESERVATION_DURATION.unit)
+    .asHours();
+
+/**
+ * UTC `expiresAt` for a new unpaid `.hold` reservation (same format as lease stamps).
+ * @returns {string}
+ */
+const getReservationExpiresAt = () =>
+    moment()
+        .add(ZELF_ID_RESERVATION_DURATION.amount, ZELF_ID_RESERVATION_DURATION.unit)
+        .format("YYYY-MM-DD HH:mm:ss");
 const SHORT_NAME_MAX = 5;
 const LONG_NAME_MAX = 27;
 const FREE_EXPIRATION_YEARS = 100;
@@ -401,7 +420,9 @@ const resolveV4PaymentStamp = ({ tagName, encryptVersion, durationYears, duratio
 };
 
 module.exports = {
+    ZELF_ID_RESERVATION_DURATION,
     ZELF_ID_RESERVATION_HOURS,
+    getReservationExpiresAt,
     SHORT_NAME_MAX,
     LONG_NAME_MAX,
     FREE_EXPIRATION_YEARS,
