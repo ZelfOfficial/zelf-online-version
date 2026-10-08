@@ -8,6 +8,12 @@ const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const ZelfIdModule = require("./zelf-id.module");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
 const { getBareName } = require("./zelf-id-plan.module");
+const {
+    normalizeTagName,
+    applyAddressSyncToRecord,
+    verifyAddressSyncOwnership,
+    validateSyncPassword,
+} = require("./zelf-ids-address-sync.module");
 
 const normalizeName = (name, domain) => {
     if (!name) return name;
@@ -53,12 +59,14 @@ const previewHumanAuthn = async (params = {}) => {
  * @returns {Promise<Object>}
  */
 const leaseOffline = async (params, authUser) => {
-    const { tagName, domain, referralTagName, duration } = params;
+    const { tagName, domain, referralTagName, duration, sync, syncPublicData } = params;
     let zelfProof = params.zelfProof;
     let zelfProofQRCode = params.zelfProofQRCode;
 
     const domainConfig = getDomainConfig(domain);
     if (!domainConfig) throw new Error(`409:unsupported_domain`);
+
+    const tagKey = domainConfig.getTagKey() || "tagName";
 
     if (!zelfProof && zelfProofQRCode) {
         zelfProof = await extractZelfProofFromQR(zelfProofQRCode);
@@ -84,10 +92,77 @@ const leaseOffline = async (params, authUser) => {
         throw error;
     }
 
-    if (normalizeName(nameFromProof, resolvedDomain) !== normalizeName(tagName, resolvedDomain)) {
+    const normalizedProofTagName = normalizeName(nameFromProof, resolvedDomain);
+    const normalizedTagName = normalizeName(tagName, resolvedDomain);
+
+    if (normalizedProofTagName !== normalizedTagName) {
         const error = new Error("409:tag_does_not_match_in_zelfProof");
         error.status = 409;
         throw error;
+    }
+
+    if (sync && syncPublicData) {
+        const searchResult = await ZelfIdModule.searchTag(
+            {
+                tagName: normalizedTagName,
+                domain,
+                domainConfig,
+                environment: "all",
+                includeAllAddressPages: true,
+            },
+            authUser
+        );
+
+        if (searchResult.available || !searchResult.tagObject) {
+            const error = new Error("404:tag_not_found");
+            error.status = 404;
+            throw error;
+        }
+
+        const hasSignature = Boolean(syncPublicData._syncSignature);
+        if (hasSignature) {
+            if (
+                !verifyAddressSyncOwnership(
+                    normalizedTagName,
+                    syncPublicData,
+                    searchResult.tagObject.publicData?.ethAddress
+                )
+            ) {
+                const error = new Error("401:invalid_sync_ownership");
+                error.status = 401;
+                throw error;
+            }
+        } else if (
+            !(await validateSyncPassword(
+                zelfProof,
+                {
+                    password: params.password || params.syncPassword,
+                    faceBase64: params.faceBase64,
+                    removePGP: params.removePGP,
+                    os: params.os,
+                },
+                authUser
+            ))
+        ) {
+            const error = new Error("401:invalid_sync_password");
+            error.status = 401;
+            throw error;
+        }
+
+        const syncResult = await applyAddressSyncToRecord({
+            tagRecord: searchResult,
+            tagKey,
+            syncPublicData,
+            zelfProofQRCode,
+            domain,
+        });
+
+        return {
+            sync: true,
+            tagName: normalizedTagName,
+            domain,
+            ...syncResult,
+        };
     }
 
     await ZelfIdModule._findDuplicatedTag(tagName, domain, domainConfig);
@@ -96,8 +171,6 @@ const leaseOffline = async (params, authUser) => {
     const decrypted = await ZelfIdPartsModule.decryptParams({ password: params.password, removePGP: params.removePGP }, authUser);
     const password = decrypted.password;
     const securityType = password ? (/^\d{6}$/.test(password) ? "pin" : "password") : null;
-    const tagKey = domainConfig.getTagKey() || "tagName";
-
     const zelfIDObject = {
         ...publicData,
         [tagKey]: tagName.includes(".") ? tagName : `${tagName}.${domain}`,

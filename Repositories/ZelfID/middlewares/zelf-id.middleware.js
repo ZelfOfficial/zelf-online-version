@@ -1,4 +1,4 @@
-const { string, number, validate, stringEnum } = require("../../../Core/JoiUtils");
+const { string, number, boolean, validate, stringEnum, object } = require("../../../Core/JoiUtils");
 const jwt = require("jsonwebtoken");
 const moment = require("moment");
 const config = require("../../../Core/config");
@@ -15,6 +15,45 @@ const leaseOfflineSchema = {
     zelfProofQRCode: string(),
     referralTagName: string(),
     duration: string(),
+    sync: boolean(),
+    syncPublicData: object().unknown(true),
+    syncPassword: string(),
+    password: string(),
+};
+
+const syncAddressesSchema = {
+    tagName: string().required(),
+    domain: string().required(),
+    zelfProofQRCode: string(),
+    syncPublicData: object({
+        _syncSignature: string().required(),
+        _syncIssuedAt: string().required(),
+    }).unknown(true),
+};
+
+const syncAddressesValidation = async (ctx, next) => {
+    const valid = validate(syncAddressesSchema, ctx.request.body);
+
+    if (valid.error) {
+        ctx.status = 409;
+        ctx.body = { validationError: valid.error.message };
+        return;
+    }
+
+    const { tagName, domain } = ctx.request.body;
+    const { domain: extractedDomain, name } = TagsMiddleware.extractDomainAndName(tagName, domain);
+    const domainValidation = await TagsMiddleware.validateDomainAndName(extractedDomain, name);
+
+    if (!domainValidation.valid) {
+        ctx.status = 409;
+        ctx.body = { validationError: domainValidation.error };
+        return;
+    }
+
+    ctx.state.extractedDomain = extractedDomain;
+    ctx.state.extractedName = name;
+
+    await next();
 };
 
 const leaseOfflineValidation = async (ctx, next) => {
@@ -26,12 +65,22 @@ const leaseOfflineValidation = async (ctx, next) => {
         return;
     }
 
-    const { tagName, domain, zelfProof, zelfProofQRCode } = ctx.request.body;
+    const { tagName, domain, zelfProof, zelfProofQRCode, sync, syncPublicData } = ctx.request.body;
 
     if (!zelfProof && !zelfProofQRCode) {
         ctx.status = 409;
         ctx.body = { validationError: "missing zelfProof" };
         return;
+    }
+
+    if (sync && !syncPublicData) {
+        ctx.status = 409;
+        ctx.body = { validationError: "missing syncPublicData" };
+        return;
+    }
+
+    if (ctx.request.body.syncPassword && !ctx.request.body.password) {
+        ctx.request.body.password = ctx.request.body.syncPassword;
     }
 
     const { domain: extractedDomain, name } = TagsMiddleware.extractDomainAndName(tagName, domain);
@@ -238,6 +287,7 @@ module.exports = {
     searchByDomainValidation: TagsMiddleware.searchByDomainValidation,
     leaseValidation: TagsMiddleware.leaseValidation,
     leaseOfflineValidation,
+    syncAddressesValidation,
     leaseRecoveryValidation: TagsMiddleware.leaseRecoveryValidation,
     deleteTagValidation: TagsMiddleware.deleteTagValidation,
     previewValidation: TagsMiddleware.previewValidation,

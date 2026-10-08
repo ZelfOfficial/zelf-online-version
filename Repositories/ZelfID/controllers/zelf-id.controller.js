@@ -13,6 +13,7 @@ const { hasMissingOwner, applyPreviewPublicData } = require("../../Tags/modules/
 const TagWalletBalancesModule = require("../../Tags/modules/tag-wallet-balances.module");
 const MyZelfIdModule = require("../modules/my-zelf-id.module");
 const ZelfIdsOfflineModule = require("../modules/zelf-ids-offline.module");
+const ZelfIdsSyncAddressesModule = require("../modules/zelf-ids-sync-addresses.module");
 const ZelfIdsStripeModule = require("../modules/zelf-ids-stripe.module");
 const ZelfIdsRevenueCatModule = require("../modules/zelf-ids-revenue-cat.module");
 
@@ -153,6 +154,32 @@ const leaseOffline = async (ctx) => {
         ctx.status = _exception.status;
 
         ctx.body = { message: _exception.message, code: _exception.code };
+        if (error.rejected) {
+            ctx.body.rejected = error.rejected;
+        }
+    }
+};
+
+const syncAddresses = async (ctx) => {
+    try {
+        const { extractedDomain, extractedName } = ctx.state;
+
+        const requestData = {
+            ...ctx.request.body,
+            tagName: resolveFullTagNameForRequest(ctx.request.body.tagName, extractedName, extractedDomain),
+            domain: extractedDomain,
+        };
+
+        ctx.body = await ZelfIdsSyncAddressesModule.syncAddresses(requestData, ctx.state.user);
+    } catch (error) {
+        const _exception = errorHandler(error, ctx);
+
+        ctx.status = _exception.status;
+
+        ctx.body = { message: _exception.message, code: _exception.code };
+        if (error.rejected) {
+            ctx.body.rejected = error.rejected;
+        }
     }
 };
 
@@ -489,6 +516,7 @@ module.exports = {
     searchTagsByDomain,
     leaseTag,
     leaseOffline,
+    syncAddresses,
     leaseRecovery,
     previewTag,
     previewZelfProof,

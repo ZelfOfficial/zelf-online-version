@@ -210,30 +210,53 @@ const updateTags = async (tagObject, tagsToAdd, options = {}) => {
 
     metadata.extraParams = JSON.stringify(metadata.extraParams);
 
+    const oldPrimaryId = tagObject.id ? tagObject.ipfsId || tagObject.id : null;
+    const oldContinuationIds = await TagsIPFSModule.listContinuationSiblingPinIds(tagName);
+
+    const pinPayload = {
+        base64: zelfProofQRCode,
+        name: tagName,
+        reserved: metadata,
+        addresses: tagObject.publicData,
+        pinIt: true,
+    };
+
+    const ipfs = oldPrimaryId
+        ? await TagsIPFSModule.upsertSearchablePins({ ...pinPayload, existingPrimaryPinId: oldPrimaryId }, { pro: true })
+        : await TagsIPFSModule.insertSearchablePins(pinPayload, { pro: true });
+
     let arweave = {};
-
-    await TagsIPFSModule.unpinContinuationSiblings(tagName);
-    if (tagObject.id) await TagsIPFSModule.unPinFiles([tagObject.ipfsId || tagObject.id]);
-
-    if (metadata.type === "mainnet") {
-        arweave = await TagsArweaveModule.tagRegistration(zelfProofQRCode, {
-            hasPassword: metadata.hasPassword,
-            zelfProof: tagObject.publicData?.zelfProof,
-            publicData: { ...metadata },
-            fileName: tagName,
-        });
+    if (metadata.type === "mainnet" && domainConfig?.isArweaveEnabled?.()) {
+        try {
+            arweave = await TagsArweaveModule.tagRegistration(zelfProofQRCode, {
+                hasPassword: metadata.hasPassword,
+                zelfProof: tagObject.publicData?.zelfProof,
+                publicData: { ...metadata },
+                fileName: tagName,
+            });
+        } catch (error) {
+            console.error({
+                updateTagsArweave: error.code || error.message,
+                status: error.status,
+            });
+        }
     }
 
-    const ipfs = await TagsIPFSModule.insertSearchablePins(
-        {
-            base64: zelfProofQRCode,
-            name: tagName,
-            reserved: metadata,
-            addresses: tagObject.publicData,
-            pinIt: true,
-        },
-        { pro: true },
-    );
+    const newContinuationIds = await TagsIPFSModule.listContinuationSiblingPinIds(tagName);
+    const keepIds = new Set([ipfs?.id, ...newContinuationIds].filter(Boolean));
+    const idsToUnpin = [];
+
+    if (oldPrimaryId && !keepIds.has(oldPrimaryId)) {
+        idsToUnpin.push(oldPrimaryId);
+    }
+
+    for (const id of oldContinuationIds) {
+        if (!keepIds.has(id)) idsToUnpin.push(id);
+    }
+
+    if (idsToUnpin.length) {
+        await TagsIPFSModule.unPinFiles(idsToUnpin);
+    }
 
     return {
         ipfs,
