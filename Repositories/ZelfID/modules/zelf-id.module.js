@@ -34,7 +34,6 @@ const jwt = require("jsonwebtoken");
 const {
     resolveZelfIdPlan,
     resolveComplimentaryPlan,
-    requiresHoldReservation,
     isUnpaidExpiredReservation,
     effectivePlan,
     getZelfIdPrice,
@@ -472,8 +471,8 @@ const leaseConfirmation = async (params) => {
 };
 
 /**
- * Persist a Zelf ID lease: 6+ characters confirm as free; short names with price > 0 get a one-year hold (configurable).
- * A leftover `$0` quote confirms as complimentary unlimited for short names; long names stay free.
+ * Persist a Zelf ID lease: 1–27 characters confirm as `free` mainnet (`name.zelf`, 100-year sentinel).
+ * Upgrade pricing stays on the license quote for search/checkout; lease pins are always free.
  * @param {Object} tagObject
  * @param {Object|null} referralTagObject
  * @param {Object} domainConfig
@@ -505,14 +504,7 @@ const persistZelfIdLease = async (tagObject, referralTagObject, domainConfig, se
 
     const quotePrice = Number(priced.price);
 
-    if (requiresHoldReservation(tagName) && quotePrice > 0) {
-        await ZelfIdsRegistrationModule.reserveZelfId(tagObject, referralTagObject, domainConfig, securityType, authUser);
-        return;
-    }
-
-    if (!requiresHoldReservation(tagName)) {
-        tagObject.price = 0;
-    }
+    tagObject.price = 0;
 
     const complimentary = resolveComplimentaryPlan({ tagName, price: quotePrice });
 

@@ -7,6 +7,7 @@ const {
 	getBareNameLength,
 	getReservationPinName,
 	requiresHoldReservation,
+	isShortZelfIdName,
 	allowedPlansForName,
 	resolvePaidPlan,
 	resolveZelfIdPlan,
@@ -75,27 +76,28 @@ describe("zelf-id-plan.module", () => {
 		expect(getReservationPinName("alice.hold")).toBe("alice.zelf.hold");
 	});
 
-	test(".hold is only for names of 5 characters or fewer", () => {
-		expect(requiresHoldReservation("mik.zelf")).toBe(true);
-		expect(requiresHoldReservation("abcde")).toBe(true);
+	test("isShortZelfIdName and deprecated requiresHoldReservation", () => {
+		expect(isShortZelfIdName("mik.zelf")).toBe(true);
+		expect(isShortZelfIdName("abcde")).toBe(true);
+		expect(isShortZelfIdName("abcdef.zelf")).toBe(false);
+		expect(requiresHoldReservation("mik.zelf")).toBe(false);
 		expect(requiresHoldReservation("abcdef.zelf")).toBe(false);
-		expect(requiresHoldReservation("zid12345.zelf")).toBe(false);
-		expect(allowedPlansForName("mik.zelf")).toEqual(["unlimited"]);
+		expect(allowedPlansForName("mik.zelf")).toEqual(["free", "unlimited"]);
 		expect(allowedPlansForName("zid12345.zelf")).toEqual(["free", "premium", "unlimited"]);
 		expect(resolvePaidPlan("mik.zelf")).toBe("unlimited");
 		expect(resolvePaidPlan({ tagName: "abcdef.zelf", requestedPlan: "unlimited" })).toBe("unlimited");
 		expect(resolvePaidPlan({ tagName: "abcdef.zelf", requestedPlan: "premium" })).toBe("premium");
 	});
 
-	test("resolveZelfIdPlan: long names lease free; short confirms are unlimited", () => {
+	test("resolveZelfIdPlan: all valid names lease free", () => {
 		expect(resolveZelfIdPlan({ tagName: "zid12345.zelf" })).toBe("free");
-		expect(resolveZelfIdPlan({ tagName: "mik.zelf" })).toBe("unlimited");
+		expect(resolveZelfIdPlan({ tagName: "mik.zelf" })).toBe("free");
 		expect(getBareNameLength("mik.zelf")).toBe(3);
 	});
 
-	test("resolveComplimentaryPlan: $0 stays free for 6+ and unlimited for 1–5", () => {
+	test("resolveComplimentaryPlan: $0 stays free for all lengths", () => {
 		expect(resolveComplimentaryPlan({ tagName: "zid12345.zelf", price: 0 })).toBeUndefined();
-		expect(resolveComplimentaryPlan({ tagName: "mik.zelf", price: 0 })).toBe("unlimited");
+		expect(resolveComplimentaryPlan({ tagName: "mik.zelf", price: 0 })).toBeUndefined();
 		expect(resolveComplimentaryPlan({ tagName: "zid12345.zelf", price: 24 })).toBeUndefined();
 		expect(resolveComplimentaryPlan({ tagName: "mik.zelf", price: 40 })).toBeUndefined();
 	});
@@ -112,13 +114,13 @@ describe("zelf-id-plan.module", () => {
 		const domainConfig = licenseDomain({ mik: 40, alice: 55, zid12345: 24 });
 
 		const year = getZelfIdPrice({ tagName: "mik.zelf", duration: "1", domainConfig });
-		expect(year.plan).toBe("unlimited");
-		expect(year.allowedPlans).toEqual(["unlimited"]);
+		expect(year.plan).toBe("free");
+		expect(year.allowedPlans).toEqual(["free", "unlimited"]);
 		expect(year.price).toBe(40);
 
 		const twoYears = getZelfIdPrice({ tagName: "alice", duration: "2", domainConfig });
 		expect(twoYears.price).toBe(110);
-		expect(twoYears.plan).toBe("unlimited");
+		expect(twoYears.plan).toBe("free");
 
 		const referred = getZelfIdPrice({
 			tagName: "mik",
@@ -127,7 +129,7 @@ describe("zelf-id-plan.module", () => {
 			domainConfig,
 		});
 		expect(referred.price).toBe(36);
-		expect(referred.plan).toBe("unlimited");
+		expect(referred.plan).toBe("free");
 
 		const complimentary = getZelfIdPrice({
 			tagName: "mik",
@@ -136,7 +138,7 @@ describe("zelf-id-plan.module", () => {
 			domainConfig,
 		});
 		expect(complimentary.price).toBe(0);
-		expect(complimentary.plan).toBe("unlimited");
+		expect(complimentary.plan).toBe("free");
 	});
 
 	test("getZelfIdPrice: long names can stay free or pick a paid plan from the license", () => {
@@ -275,6 +277,17 @@ describe("zelf-id-plan.module", () => {
 		expect(() => getZelfIdPrice({ tagName: "mik.zelf" })).toThrow("409:license_price_required");
 	});
 
+	test("effectivePlan: short mainnet with plan free stays free", () => {
+		expect(
+			effectivePlan({
+				type: "mainnet",
+				plan: "free",
+				tagName: "mik.zelf",
+				expiresAt: moment().add(99, "year").format("YYYY-MM-DD HH:mm:ss"),
+			})
+		).toBe("free");
+	});
+
 	test("effectivePlan: expired mainnet reads as free, not a hold", () => {
 		expect(
 			effectivePlan({
@@ -364,7 +377,7 @@ describe("zelf-id-plan.module", () => {
 		expect(getBareNameLength("a".repeat(28))).toBe(28);
 		expect(allowedPlansForName("abcdef.zelf")).toEqual(["free", "premium", "unlimited"]);
 		expect(allowedPlansForName("a".repeat(27))).toEqual(["free", "premium", "unlimited"]);
-		expect(allowedPlansForName("abcde")).toEqual(["unlimited"]);
+		expect(allowedPlansForName("abcde")).toEqual(["free", "unlimited"]);
 		expect(allowedPlansForName("a".repeat(28))).toEqual([]);
 	});
 

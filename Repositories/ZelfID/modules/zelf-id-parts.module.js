@@ -122,7 +122,7 @@ const generateQRCode = async (params) => {
 
 /**
  * Same wallet assignment as Tags, then stamp the license quote and plan.
- * Short names are unlimited only; long names lease free unless they pay later.
+ * All names lease free; short names upgrade to unlimited only when they pay later.
  */
 const assignProperties = (tagObject, dataToEncrypt, addresses, payload, domainConfig) => {
     TagsPartsModule.assignProperties(tagObject, dataToEncrypt, addresses, payload, domainConfig);
