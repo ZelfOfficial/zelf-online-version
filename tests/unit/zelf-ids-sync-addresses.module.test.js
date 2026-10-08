@@ -10,7 +10,10 @@ jest.mock("../../Repositories/ZelfID/modules/zelf-id.module", () => ({
 }));
 
 jest.mock("../../Repositories/Tags/modules/tags-ipfs.module", () => ({
-    insertSearchablePins: jest.fn(async () => ({ id: "pin-new" })),
+    upsertSearchablePins: jest.fn(async (_data) => ({
+        id: _data.existingPrimaryPinId || "pin-new",
+        publicData: _data.addresses,
+    })),
     deleteFiles: jest.fn(async () => null),
 }));
 
@@ -125,8 +128,8 @@ describe("zelf-ids-sync-addresses.module", () => {
 
         expect(result.updated).toEqual(["ton"]);
         expect(result.rejected).toEqual({ bitcoin: "invalid_address" });
-        expect(TagsIPFSModule.insertSearchablePins).toHaveBeenCalled();
-        const addresses = TagsIPFSModule.insertSearchablePins.mock.calls[0][0].addresses;
+        expect(TagsIPFSModule.upsertSearchablePins).toHaveBeenCalled();
+        const addresses = TagsIPFSModule.upsertSearchablePins.mock.calls[0][0].addresses;
         expect(addresses.tonAddress).toBe(VALID_TON_B);
     });
 
@@ -137,7 +140,7 @@ describe("zelf-ids-sync-addresses.module", () => {
         const result = await syncAddresses({ tagName: "qa99", domain: "zelf", syncPublicData }, {});
 
         expect(result.updated).toEqual(["ton"]);
-        const addresses = TagsIPFSModule.insertSearchablePins.mock.calls[0][0].addresses;
+        const addresses = TagsIPFSModule.upsertSearchablePins.mock.calls[0][0].addresses;
         expect(addresses.tonAddress).toBe(VALID_TON_B);
     });
 

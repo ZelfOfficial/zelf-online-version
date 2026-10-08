@@ -23,11 +23,11 @@ jest.mock("../../Repositories/ZelfID/modules/zelf-id.module", () => ({
 }));
 
 jest.mock("../../Repositories/ZelfID/modules/zelf-id-parts.module", () => ({
-    decryptParams: jest.fn(async ({ password }) => ({ password })),
+    decryptParams: jest.fn(async ({ password }) => ({ password, face: "session-face" })),
 }));
 
 jest.mock("../../Repositories/Tags/modules/tags-ipfs.module", () => ({
-    insertSearchablePins: jest.fn(async () => ({ id: "pin-new" })),
+    upsertSearchablePins: jest.fn(async () => ({ id: "pin-new", publicData: {} })),
     deleteFiles: jest.fn(async () => null),
 }));
 
@@ -101,7 +101,7 @@ describe("zelf-ids-offline.module leaseOffline sync branch", () => {
         expect(result.sync).toBe(true);
         expect(result.updated).toEqual(["ton"]);
         expect(ZelfIdModule._findDuplicatedTag).not.toHaveBeenCalled();
-        expect(TagsIPFSModule.insertSearchablePins).toHaveBeenCalled();
+        expect(TagsIPFSModule.upsertSearchablePins).toHaveBeenCalled();
     });
 
     test("sync with password validates via Human Authn decrypt", async () => {
@@ -109,12 +109,18 @@ describe("zelf-ids-offline.module leaseOffline sync branch", () => {
         HumanAuthnModule.decrypt.mockResolvedValue({ metadata: { mnemonic: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" } });
 
         const result = await leaseOffline(
-            syncRequest({ tonAddress: VALID_TON_B }, { syncPassword: "secret" }),
+            syncRequest({ tonAddress: VALID_TON_B }, { syncPassword: "secret", faceBase64: "session-face" }),
             {}
         );
 
         expect(result.updated).toEqual(["ton"]);
-        expect(HumanAuthnModule.decrypt).toHaveBeenCalled();
+        expect(HumanAuthnModule.decrypt).toHaveBeenCalledWith(
+            expect.objectContaining({
+                faceBase64: "session-face",
+                password: "secret",
+                os: "DESKTOP",
+            })
+        );
     });
 
     test("sync returns 401 for bad signature", async () => {

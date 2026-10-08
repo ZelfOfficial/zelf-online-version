@@ -4,10 +4,12 @@
  */
 const TagsIPFSModule = require("../../Tags/modules/tags-ipfs.module");
 const TagsArweaveModule = require("../../Tags/modules/tags-arweave.module");
+const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { verifyAddressSyncOwnership } = require("../../Tags/modules/address-sync-ownership.util");
 const { resolveEncryptVersion, stampExtraParamsVersion } = require("../../Tags/modules/tags-addresses.module");
 const { validateNetworkAddress } = require("../../TxNotifications/modules/address-validation.util");
 const HumanAuthnModule = require("../../HumanAuthn/modules/human-authn.module");
+const ZelfIdPartsModule = require("./zelf-id-parts.module");
 
 const SYNC_FIELD_TO_NETWORK = {
     bitcoinAddress: "bitcoin",
@@ -126,10 +128,23 @@ const throwNoAddressesToSync = (rejected = {}) => {
  * @param {Object} addressSource
  * @returns {Promise<Object>}
  */
-const repinOfflineAddressSync = async (tagRecord, tagKey, addressSource) => {
+const mapArweaveSyncFailure = (error) => {
+    const status = error?.status || error?.response?.status || error?.statusCode;
+    const message = String(error?.message || error || "");
+    if (status === 402 || message.includes("402") || /payment required/i.test(message)) {
+        const err = new Error("402:arweave_payment_required");
+        err.status = 402;
+        throw err;
+    }
+};
+
+const repinOfflineAddressSync = async (tagRecord, tagKey, addressSource, options = {}) => {
     const tagObject = tagRecord.tagObject;
     const ipfsRecord = tagRecord.ipfs?.length ? tagRecord.ipfs[0] : null;
     const ipfsHash = ipfsRecord?.ipfs_pin_hash || ipfsRecord?.ipfsHash || ipfsRecord?.cid;
+    const zelfProofQRCode = options.zelfProofQRCode || tagObject.zelfProofQRCode;
+    const domain = tagObject.publicData?.domain || options.domain || "zelf";
+    const domainConfig = getDomainConfig(domain);
 
     const extraParams = stampExtraParamsVersion(
         {
@@ -157,13 +172,14 @@ const repinOfflineAddressSync = async (tagRecord, tagKey, addressSource) => {
 
     metadata.extraParams = JSON.stringify(metadata.extraParams);
 
-    const ipfs = await TagsIPFSModule.insertSearchablePins(
+    const ipfs = await TagsIPFSModule.upsertSearchablePins(
         {
-            base64: tagObject.zelfProofQRCode,
+            base64: zelfProofQRCode,
             name: tagObject.publicData[tagKey],
             reserved: metadata,
             addresses: addressSource,
             pinIt: true,
+            existingPrimaryPinId: ipfsRecord?.id,
         },
         { pro: true }
     );
@@ -172,14 +188,19 @@ const repinOfflineAddressSync = async (tagRecord, tagKey, addressSource) => {
         await TagsIPFSModule.deleteFiles([ipfsRecord.id]);
     }
 
-    let arweave = null;
+    let arweave = tagObject.arweave || null;
 
-    if (metadata.type === "mainnet") {
-        arweave = await TagsArweaveModule.tagRegistration(tagObject.zelfProofQRCode, {
-            hasPassword: metadata.hasPassword,
-            zelfProof: metadata.zelfProof,
-            publicData: { ...tagObject.publicData, ...addressSource, ...metadata },
-        });
+    if (metadata.type === "mainnet" && domainConfig?.isArweaveEnabled?.()) {
+        try {
+            arweave = await TagsArweaveModule.tagRegistration(zelfProofQRCode, {
+                hasPassword: metadata.hasPassword,
+                zelfProof: tagObject.zelfProof || tagObject.publicData?.zelfProof,
+                publicData: { ...tagObject.publicData, ...addressSource, ...metadata },
+            });
+        } catch (error) {
+            mapArweaveSyncFailure(error);
+            console.error({ addressSyncArweave: error?.message || error });
+        }
     }
 
     return {
@@ -192,29 +213,17 @@ const repinOfflineAddressSync = async (tagRecord, tagKey, addressSource) => {
     };
 };
 
-const resolvePasswordCheckFaceBase64 = () => {
-    const fs = require("fs");
-    const path = require("path");
-
+const validateSyncPassword = async (zelfProof, params, authUser) => {
     try {
-        const jsonfile = require(path.join(__dirname, "../../../config/0012589021.json"));
-        if (jsonfile.mFace || jsonfile.faceBase64) return jsonfile.mFace || jsonfile.faceBase64;
-    } catch (_error) {
-        // Fall back to the shared integration-test face asset when config sample is absent.
-    }
+        const { face, password } = await ZelfIdPartsModule.decryptParams(params, authUser);
+        if (!password) return false;
 
-    return fs.readFileSync(path.join(__dirname, "../../../Core/assets/selfie_girl.jpg")).toString("base64");
-};
-
-const validateSyncPassword = async (zelfProof, password) => {
-    if (!password) return false;
-
-    try {
         const decrypted = await HumanAuthnModule.decrypt({
-            faceBase64: resolvePasswordCheckFaceBase64(),
+            faceBase64: face,
             password,
             zelfProof,
             addServerPassword: false,
+            os: params.os || "DESKTOP",
         });
 
         if (decrypted?.error) {
@@ -223,7 +232,7 @@ const validateSyncPassword = async (zelfProof, password) => {
             return false;
         }
 
-        return true;
+        return Boolean(decrypted?.metadata || decrypted?.cleartext_data || decrypted?.zelfProof);
     } catch (exception) {
         const message = String(exception?.message || exception);
         if (message.toLowerCase().includes("password")) return false;
@@ -239,7 +248,7 @@ const validateSyncPassword = async (zelfProof, password) => {
  * @param {Object} params.syncPublicData
  * @returns {Promise<{ updated: string[], rejected: Record<string, string> }>}
  */
-const applyAddressSyncToRecord = async ({ tagRecord, tagKey, syncPublicData }) => {
+const applyAddressSyncToRecord = async ({ tagRecord, tagKey, syncPublicData, zelfProofQRCode, domain }) => {
     if (!listSyncAddressKeys(syncPublicData).length) {
         throwNoAddressesToSync();
     }
@@ -252,7 +261,10 @@ const applyAddressSyncToRecord = async ({ tagRecord, tagKey, syncPublicData }) =
         throwNoAddressesToSync(rejected);
     }
 
-    const tagObject = await repinOfflineAddressSync(tagRecord, tagKey, addressSource);
+    const tagObject = await repinOfflineAddressSync(tagRecord, tagKey, addressSource, {
+        zelfProofQRCode,
+        domain,
+    });
 
     return { updated, rejected, tagObject };
 };

@@ -24,6 +24,7 @@ const leaseOfflineSchema = {
 const syncAddressesSchema = {
     tagName: string().required(),
     domain: string().required(),
+    zelfProofQRCode: string(),
     syncPublicData: object({
         _syncSignature: string().required(),
         _syncIssuedAt: string().required(),

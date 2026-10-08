@@ -66,7 +66,13 @@ const syncAddresses = async (params, authUser) => {
         throwNoAddressesToSync(rejected);
     }
 
-    return applyAddressSyncToRecord({ tagRecord: searchResult, tagKey, syncPublicData });
+    return applyAddressSyncToRecord({
+        tagRecord: searchResult,
+        tagKey,
+        syncPublicData,
+        zelfProofQRCode: params.zelfProofQRCode,
+        domain,
+    });
 };
 
 module.exports = {

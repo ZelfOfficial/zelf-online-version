@@ -132,23 +132,29 @@ const leaseOffline = async (params, authUser) => {
                 error.status = 401;
                 throw error;
             }
-        } else {
-            const decrypted = await ZelfIdPartsModule.decryptParams(
-                { password: params.password || params.syncPassword, removePGP: params.removePGP },
+        } else if (
+            !(await validateSyncPassword(
+                zelfProof,
+                {
+                    password: params.password || params.syncPassword,
+                    faceBase64: params.faceBase64,
+                    removePGP: params.removePGP,
+                    os: params.os,
+                },
                 authUser
-            );
-            const password = decrypted.password;
-            if (!(await validateSyncPassword(zelfProof, password))) {
-                const error = new Error("401:invalid_sync_password");
-                error.status = 401;
-                throw error;
-            }
+            ))
+        ) {
+            const error = new Error("401:invalid_sync_password");
+            error.status = 401;
+            throw error;
         }
 
         const syncResult = await applyAddressSyncToRecord({
             tagRecord: searchResult,
             tagKey,
             syncPublicData,
+            zelfProofQRCode,
+            domain,
         });
 
         return {

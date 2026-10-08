@@ -365,6 +365,100 @@ const insertSearchablePins = async (data, authUser) => {
 	return formatted;
 };
 
+const _findContinuationPinRow = async (page) => {
+	const byName = await IPFS.filter("name", page.name);
+	if (byName?.length) {
+		const exact = byName.find((row) => String(row.name || "").toLowerCase() === String(page.name).toLowerCase());
+		if (exact) return exact;
+		return byName[0];
+	}
+
+	const linkValue = page.keyvalues?.[page.linkKey];
+	if (page.linkKey && linkValue) {
+		const rows = await IPFS.filter(page.linkKey, linkValue);
+		if (rows?.length) {
+			const exact = rows.find((row) => String(row.name || "").toLowerCase() === String(page.name).toLowerCase());
+			return exact || rows[0];
+		}
+	}
+
+	return null;
+};
+
+/**
+ * Update searchable pin metadata when the QR bytes are unchanged (Pinata CID dedupe).
+ * Falls back to {@link insertSearchablePins} when no existing primary pin id is known.
+ *
+ * @param {Object} data
+ * @param {string} [data.existingPrimaryPinId]
+ * @param {string} data.base64
+ * @param {Object} data.reserved
+ * @param {Object} data.addresses
+ * @param {string} data.name
+ * @param {boolean} data.pinIt
+ * @param {Object} authUser
+ * @returns {Promise<Object>}
+ */
+const upsertSearchablePins = async (data, authUser) => {
+	const { base64, reserved, addresses, name, pinIt, existingPrimaryPinId } = data;
+	const pages = buildSearchablePinPages({
+		reserved,
+		addresses: addresses || extractAddressKeyvaluesFromPublicData(data.addressSource || {}),
+		tagName: name,
+	});
+
+	let primaryRow = null;
+
+	if (existingPrimaryPinId) {
+		primaryRow = await IPFS.updateFileKeyvalues(existingPrimaryPinId, pages.primary.keyvalues);
+		primaryRow = { ...primaryRow, name: pages.primary.name };
+	} else {
+		const inserted = await insert(
+			{
+				base64,
+				name: pages.primary.name,
+				metadata: pages.primary.keyvalues,
+				pinIt,
+			},
+			authUser
+		);
+
+		if (existingPrimaryPinId && inserted?.id === existingPrimaryPinId) {
+			primaryRow = await IPFS.updateFileKeyvalues(existingPrimaryPinId, pages.primary.keyvalues);
+			primaryRow = { ...primaryRow, name: pages.primary.name };
+		} else {
+			primaryRow = inserted;
+		}
+	}
+
+	for (const page of pages.continuations) {
+		const existing = await _findContinuationPinRow(page);
+		if (existing?.id) {
+			await IPFS.updateFileKeyvalues(existing.id, page.keyvalues);
+			continue;
+		}
+
+		if (base64) {
+			await insert(
+				{
+					base64,
+					name: page.name,
+					metadata: page.keyvalues,
+					pinIt,
+				},
+				authUser
+			);
+		}
+	}
+
+	const formatted = _formatRecord(primaryRow);
+	for (const page of pages.continuations) {
+		mergeContinuationAddresses(formatted.publicData, page.keyvalues);
+	}
+
+	return formatted;
+};
+
 const unpinContinuationSiblings = async (canonicalName) => {
 	if (!canonicalName) return null;
 
@@ -670,6 +764,7 @@ module.exports = {
 	show,
 	insert,
 	insertSearchablePins,
+	upsertSearchablePins,
 	tagRegistration,
 	unPinFiles,
 	unpinContinuationSiblings,
