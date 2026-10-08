@@ -896,7 +896,7 @@ describe("Zelf IDs API Integration Tests", () => {
                 });
         });
 
-        it("POST /zelf-ids/lease — short paid name is a 5-hour .zelf.hold reservation", async () => {
+        it("POST /zelf-ids/lease — short paid name is a one-year .zelf.hold reservation", async () => {
             reservedName = shortUniqueTagName();
 
             const leaseResponse = await request(API_BASE_URL)
@@ -920,9 +920,9 @@ describe("Zelf IDs API Integration Tests", () => {
             expect(leaseResponse.body.data.walrus).toBeFalsy();
 
             const expiresAt = moment(reservedPublicData.expiresAt);
-            const hoursUntilExpiry = expiresAt.diff(moment(), "hour", true);
-            expect(hoursUntilExpiry).toBeGreaterThan(4);
-            expect(hoursUntilExpiry).toBeLessThanOrEqual(5.1);
+            const yearsUntilExpiry = expiresAt.diff(moment(), "year", true);
+            expect(yearsUntilExpiry).toBeGreaterThanOrEqual(0.99);
+            expect(yearsUntilExpiry).toBeLessThan(1.1);
         });
 
         it("GET /zelf-ids/search — unexpired reservation is not available", async () => {

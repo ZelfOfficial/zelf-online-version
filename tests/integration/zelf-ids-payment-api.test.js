@@ -73,7 +73,7 @@ describe("Zelf IDs payment API", () => {
 		);
 	});
 
-	it("POST /zelf-ids/lease — selfie face creates a 5-hour paid reservation", async () => {
+	it("POST /zelf-ids/lease — selfie face creates a one-year paid reservation", async () => {
 		reservedName = shortUniqueTagName();
 
 		const leaseResponse = await request(API_BASE_URL)
@@ -97,9 +97,9 @@ describe("Zelf IDs payment API", () => {
 		expect(publicData.origin).toBe("online");
 		expect(leaseResponse.body.data.walrus).toBeFalsy();
 
-		const hoursUntilExpiry = moment(publicData.expiresAt).diff(moment(), "hour", true);
-		expect(hoursUntilExpiry).toBeGreaterThan(4);
-		expect(hoursUntilExpiry).toBeLessThanOrEqual(5.1);
+		const yearsUntilExpiry = moment(publicData.expiresAt).diff(moment(), "year", true);
+		expect(yearsUntilExpiry).toBeGreaterThanOrEqual(0.99);
+		expect(yearsUntilExpiry).toBeLessThan(1.1);
 	});
 
 	it("GET /zelf-ids/payment-options — 401 without auth", async () => {
