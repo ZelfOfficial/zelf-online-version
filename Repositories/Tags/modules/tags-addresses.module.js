@@ -406,6 +406,37 @@ const collectAddressEntries = (addresses = {}) => {
  * Split reserved metadata + addresses into a primary pin and overflow pages.
  * Primary always keeps the domain storage key, domain, and extraParams.
  */
+/**
+ * Primary-pin keyvalues for metadata-only upserts (same QR CID). Packs overflow chains
+ * into `addresses` / `addresses2` JSON chunks so search expands them without continuation pins.
+ */
+const buildUpsertPrimarySearchableKeyvalues = (reserved = {}, addresses = {}) => {
+    const reservedKeyvalues = collectReservedKeyvalues(reserved);
+    const topLevel = buildTopLevelAddressKeyvalues(addresses);
+    const packed = serializeAddressBundleToPinataKeyvalues(buildAddressBundle(addresses));
+
+    const merged = { ...reservedKeyvalues };
+    const room = () => PINATA_KEYVALUE_MAX_COUNT - Object.keys(merged).length;
+
+    for (const appKey of TOP_LEVEL_ADDRESS_FIELDS) {
+        if (!topLevel[appKey] || room() <= 0) break;
+        merged[appKey] = topLevel[appKey];
+    }
+
+    for (const chunkKey of ADDRESS_CHUNK_KEYS) {
+        if (!packed[chunkKey] || room() <= 0) break;
+        merged[chunkKey] = packed[chunkKey];
+    }
+
+    if (Object.keys(merged).length > PINATA_KEYVALUE_MAX_COUNT) {
+        const error = new Error("tags_addresses_primary_keyvalues_overflow");
+        error.status = 400;
+        throw error;
+    }
+
+    return merged;
+};
+
 const buildSearchablePinPages = ({ reserved = {}, addresses = {}, tagName } = {}) => {
     const reservedKeyvalues = collectReservedKeyvalues(reserved);
     const addressEntries = collectAddressEntries(addresses);
@@ -502,6 +533,7 @@ module.exports = {
     TOP_LEVEL_ADDRESS_FIELDS,
     buildAddressBundle,
     buildAddressKeyvalues,
+    buildUpsertPrimarySearchableKeyvalues,
     buildSearchablePinPages,
     buildTopLevelAddressKeyvalues,
     cleanExtraParamsForPinata,

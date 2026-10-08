@@ -9,7 +9,6 @@ const {
     applyAddressSyncToRecord,
     verifyAddressSyncOwnership,
     throwNoAddressesToSync,
-    partitionSyncAddresses,
 } = require("./zelf-ids-address-sync.module");
 
 /**
@@ -59,11 +58,6 @@ const syncAddresses = async (params, authUser) => {
         const error = new Error("401:invalid_sync_ownership");
         error.status = 401;
         throw error;
-    }
-
-    const { updated, rejected } = partitionSyncAddresses(syncPublicData);
-    if (!updated.length) {
-        throwNoAddressesToSync(rejected);
     }
 
     return applyAddressSyncToRecord({

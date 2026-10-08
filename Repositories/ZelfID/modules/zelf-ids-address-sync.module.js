@@ -6,7 +6,12 @@ const TagsIPFSModule = require("../../Tags/modules/tags-ipfs.module");
 const TagsArweaveModule = require("../../Tags/modules/tags-arweave.module");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { verifyAddressSyncOwnership } = require("../../Tags/modules/address-sync-ownership.util");
-const { resolveEncryptVersion, stampExtraParamsVersion } = require("../../Tags/modules/tags-addresses.module");
+const {
+    resolveEncryptVersion,
+    stampExtraParamsVersion,
+    mergeAddressKeyvaluesIntoPublicData,
+    expandPackedAddresses,
+} = require("../../Tags/modules/tags-addresses.module");
 const { validateNetworkAddress } = require("../../TxNotifications/modules/address-validation.util");
 const HumanAuthnModule = require("../../HumanAuthn/modules/human-authn.module");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
@@ -26,7 +31,7 @@ const SYNC_FIELD_TO_NETWORK = {
 };
 
 const CANONICAL_FIELD_ALIASES = {
-    btcAddress: ["bitcoinAddress"],
+    btcAddress: ["btcAddress", "bitcoinAddress"],
     xlmAddress: ["stellarAddress", "xlmAddress"],
     dotAddress: ["polkadotAddress", "dotAddress"],
     ksmAddress: ["kusamaAddress", "ksmAddress"],
@@ -109,10 +114,61 @@ const buildAddressSourceFromSync = (publicData, accepted) => {
     return next;
 };
 
+const PERSISTED_ADDRESS_FIELDS = [
+    "suiAddress",
+    "xlmAddress",
+    "btcAddress",
+    "dotAddress",
+    "ksmAddress",
+    "tonAddress",
+    "aptosAddress",
+];
+
 const addressFieldsChanged = (before, after) =>
-    ["suiAddress", "xlmAddress", "btcAddress", "dotAddress", "ksmAddress", "tonAddress", "aptosAddress"].some(
-        (field) => (before[field] || "") !== (after[field] || "")
-    );
+    PERSISTED_ADDRESS_FIELDS.some((field) => (before[field] || "") !== (after[field] || ""));
+
+const resolveCanonicalAddressField = (syncKey) => {
+    if (syncKey === "bitcoinAddress") return "btcAddress";
+    if (syncKey === "stellarAddress" || syncKey === "xlmAddress") return "xlmAddress";
+    if (syncKey === "polkadotAddress" || syncKey === "dotAddress") return "dotAddress";
+    if (syncKey === "kusamaAddress" || syncKey === "ksmAddress") return "ksmAddress";
+    return syncKey;
+};
+
+/**
+ * Networks whose canonical address field actually changed on the persisted pin (post re-read).
+ * @param {Object} beforePublicData
+ * @param {Object} afterPublicData
+ * @param {Object} accepted
+ * @returns {string[]}
+ */
+const expandPersistedAddressView = (publicData = {}) => {
+    const view = { ...publicData };
+    mergeAddressKeyvaluesIntoPublicData(view);
+    expandPackedAddresses(view);
+    return view;
+};
+
+const computePersistedUpdatedNetworks = (beforePublicData, afterPublicData, accepted) => {
+    const before = expandPersistedAddressView(beforePublicData);
+    const after = expandPersistedAddressView(afterPublicData);
+    const updated = [];
+
+    for (const key of listSyncAddressKeys(accepted)) {
+        const network = SYNC_FIELD_TO_NETWORK[key];
+        if (!network) continue;
+
+        const canonical = resolveCanonicalAddressField(key);
+        const afterVal = after[canonical];
+        const beforeVal = before[canonical];
+
+        if (afterVal && afterVal !== (beforeVal || "")) {
+            if (!updated.includes(network)) updated.push(network);
+        }
+    }
+
+    return updated;
+};
 
 const throwNoAddressesToSync = (rejected = {}) => {
     const error = new Error("409:no_addresses_to_sync");
@@ -203,9 +259,11 @@ const repinOfflineAddressSync = async (tagRecord, tagKey, addressSource, options
         }
     }
 
+    const persistedPublic = ipfs?.publicData ? { ...ipfs.publicData } : { ...tagObject.publicData, ...addressSource };
+
     return {
         ...tagObject,
-        publicData: { ...tagObject.publicData, ...addressSource },
+        publicData: persistedPublic,
         ipfs,
         arweave,
         origin: "offline",
@@ -253,18 +311,21 @@ const applyAddressSyncToRecord = async ({ tagRecord, tagKey, syncPublicData, zel
         throwNoAddressesToSync();
     }
 
-    const { updated, rejected, accepted } = partitionSyncAddresses(syncPublicData);
-    const addressSource = buildAddressSourceFromSync(tagRecord.tagObject.publicData, accepted);
-    const changed = addressFieldsChanged(tagRecord.tagObject.publicData, addressSource);
-
-    if (!changed) {
-        throwNoAddressesToSync(rejected);
-    }
+    const { rejected, accepted } = partitionSyncAddresses(syncPublicData);
+    const beforePublicData = { ...tagRecord.tagObject.publicData };
+    const addressSource = buildAddressSourceFromSync(beforePublicData, accepted);
 
     const tagObject = await repinOfflineAddressSync(tagRecord, tagKey, addressSource, {
         zelfProofQRCode,
         domain,
     });
+
+    const afterPublicData = tagObject.ipfs?.publicData || tagObject.publicData || {};
+    const updated = computePersistedUpdatedNetworks(beforePublicData, afterPublicData, accepted);
+
+    if (!updated.length) {
+        throwNoAddressesToSync(rejected);
+    }
 
     return { updated, rejected, tagObject };
 };
@@ -276,6 +337,7 @@ module.exports = {
     partitionSyncAddresses,
     buildAddressSourceFromSync,
     addressFieldsChanged,
+    computePersistedUpdatedNetworks,
     repinOfflineAddressSync,
     applyAddressSyncToRecord,
     verifyAddressSyncOwnership,

@@ -14,7 +14,10 @@ jest.mock("../../Repositories/Tags/config/supported-domains", () => ({
 }));
 
 jest.mock("../../Repositories/Tags/modules/tags-ipfs.module", () => ({
-    upsertSearchablePins: jest.fn(async () => ({ id: "pin-1", publicData: { tonAddress: "EQNEW" } })),
+    upsertSearchablePins: jest.fn(async (data) => ({
+        id: "pin-1",
+        publicData: { ...(data.addresses || {}), tagName: data.name },
+    })),
     deleteFiles: jest.fn(),
 }));
 
@@ -29,6 +32,8 @@ const {
     partitionSyncAddresses,
     addressFieldsChanged,
     validateSyncPassword,
+    computePersistedUpdatedNetworks,
+    applyAddressSyncToRecord,
     repinOfflineAddressSync,
 } = require("../../Repositories/ZelfID/modules/zelf-ids-address-sync.module");
 
@@ -41,6 +46,14 @@ describe("zelf-ids-address-sync.module", () => {
         const { accepted } = partitionSyncAddresses({ tonAddress: VALID_TON_B });
         const merged = buildAddressSourceFromSync(publicData, accepted);
         expect(merged.tonAddress).toBe(VALID_TON_B);
+    });
+
+    test("buildAddressSourceFromSync applies btcAddress from sync payload", () => {
+        const VALID_BTC = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh";
+        const publicData = { tagName: "qa99.zelf" };
+        const { accepted } = partitionSyncAddresses({ btcAddress: VALID_BTC });
+        const merged = buildAddressSourceFromSync(publicData, accepted);
+        expect(merged.btcAddress).toBe(VALID_BTC);
     });
 
     test("addressFieldsChanged detects TON updates", () => {
@@ -67,6 +80,39 @@ describe("zelf-ids-address-sync.module", () => {
                 os: "ANDROID",
             })
         );
+    });
+
+    test("computePersistedUpdatedNetworks ignores in-memory-only changes", () => {
+        const accepted = { tonAddress: "EQDSMp6iTSQkQYqi9TfHLyYa-EwGdD1MH-4AQliWeII0V_8K" };
+        const before = { tonAddress: "EQDSMp6iTSQkQYqi9TfHLyYa-EwGdD1MH-4AQliWeII0V_8K" };
+        const after = { tonAddress: "EQDSMp6iTSQkQYqi9TfHLyYa-EwGdD1MH-4AQliWeII0V_8K" };
+        expect(computePersistedUpdatedNetworks(before, after, accepted)).toEqual([]);
+    });
+
+    test("applyAddressSyncToRecord returns 409 when persisted addresses are unchanged", async () => {
+        const ton = "EQDSMp6iTSQkQYqi9TfHLyYa-EwGdD1MH-4AQliWeII0V_8K";
+        const TagsIPFSModule = require("../../Repositories/Tags/modules/tags-ipfs.module");
+        TagsIPFSModule.upsertSearchablePins.mockResolvedValueOnce({
+            id: "pin-1",
+            publicData: { tagName: "qa99.zelf", tonAddress: ton },
+        });
+
+        const tagRecord = {
+            tagObject: {
+                publicData: { tagName: "qa99.zelf", tonAddress: ton, ethAddress: "0x01" },
+                zelfProofQRCode: "data:image/png;base64,abc",
+            },
+            ipfs: [{ id: "pin-1" }],
+        };
+
+        await expect(
+            applyAddressSyncToRecord({
+                tagRecord,
+                tagKey: "tagName",
+                syncPublicData: { tonAddress: ton },
+                zelfProofQRCode: "data:image/png;base64,abc",
+            })
+        ).rejects.toMatchObject({ message: "409:no_addresses_to_sync", status: 409 });
     });
 
     test("repinOfflineAddressSync skips Arweave when domain gate is off", async () => {

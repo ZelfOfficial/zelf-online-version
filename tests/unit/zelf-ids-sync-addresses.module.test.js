@@ -10,9 +10,9 @@ jest.mock("../../Repositories/ZelfID/modules/zelf-id.module", () => ({
 }));
 
 jest.mock("../../Repositories/Tags/modules/tags-ipfs.module", () => ({
-    upsertSearchablePins: jest.fn(async (_data) => ({
-        id: _data.existingPrimaryPinId || "pin-new",
-        publicData: _data.addresses,
+    upsertSearchablePins: jest.fn(async (data) => ({
+        id: data.existingPrimaryPinId || "pin-new",
+        publicData: { ...(data.addresses || {}) },
     })),
     deleteFiles: jest.fn(async () => null),
 }));
@@ -41,16 +41,20 @@ const buildSignedSync = async (tagName, fields, now = Date.now()) => {
 };
 
 const mockTagSearch = (publicDataOverrides = {}) => {
+    const publicData = {
+        tagName: "qa99.zelf",
+        ethAddress: owner.address,
+        type: "hold",
+        ...publicDataOverrides,
+    };
+    for (const key of Object.keys(publicDataOverrides)) {
+        if (publicDataOverrides[key] === undefined) delete publicData[key];
+    }
+
     ZelfIdModule.searchTag.mockResolvedValue({
         available: false,
         tagObject: {
-            publicData: {
-                tagName: "qa99.zelf",
-                ethAddress: owner.address,
-                tonAddress: VALID_TON,
-                type: "hold",
-                ...publicDataOverrides,
-            },
+            publicData,
             zelfProofQRCode: "data:image/png;base64,abc",
         },
         ipfs: [{ id: "pin-1", ipfs_pin_hash: "QmOld" }],
@@ -145,7 +149,7 @@ describe("zelf-ids-sync-addresses.module", () => {
     });
 
     test("syncAddresses succeeds for a valid signature and multiple addresses", async () => {
-        mockTagSearch();
+        mockTagSearch({ ethAddress: owner.address, tonAddress: undefined, btcAddress: undefined });
         const syncPublicData = await buildSignedSync("qa99.zelf", {
             tonAddress: VALID_TON_B,
             btcAddress: VALID_BTC,

@@ -27,7 +27,10 @@ jest.mock("../../Repositories/ZelfID/modules/zelf-id-parts.module", () => ({
 }));
 
 jest.mock("../../Repositories/Tags/modules/tags-ipfs.module", () => ({
-    upsertSearchablePins: jest.fn(async () => ({ id: "pin-new", publicData: {} })),
+    upsertSearchablePins: jest.fn(async (data) => ({
+        id: "pin-new",
+        publicData: { tagName: data.name, ...(data.addresses || {}) },
+    })),
     deleteFiles: jest.fn(async () => null),
 }));
 
