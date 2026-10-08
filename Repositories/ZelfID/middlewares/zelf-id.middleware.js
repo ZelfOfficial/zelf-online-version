@@ -17,6 +17,40 @@ const leaseOfflineSchema = {
     duration: string(),
 };
 
+const syncAddressesSchema = {
+    tagName: string().required(),
+    domain: string().required(),
+    syncPublicData: object({
+        _syncSignature: string().required(),
+        _syncIssuedAt: string().required(),
+    }).unknown(true),
+};
+
+const syncAddressesValidation = async (ctx, next) => {
+    const valid = validate(syncAddressesSchema, ctx.request.body);
+
+    if (valid.error) {
+        ctx.status = 409;
+        ctx.body = { validationError: valid.error.message };
+        return;
+    }
+
+    const { tagName, domain } = ctx.request.body;
+    const { domain: extractedDomain, name } = TagsMiddleware.extractDomainAndName(tagName, domain);
+    const domainValidation = await TagsMiddleware.validateDomainAndName(extractedDomain, name);
+
+    if (!domainValidation.valid) {
+        ctx.status = 409;
+        ctx.body = { validationError: domainValidation.error };
+        return;
+    }
+
+    ctx.state.extractedDomain = extractedDomain;
+    ctx.state.extractedName = name;
+
+    await next();
+};
+
 const leaseOfflineValidation = async (ctx, next) => {
     const valid = validate(leaseOfflineSchema, ctx.request.body);
 
@@ -238,6 +272,7 @@ module.exports = {
     searchByDomainValidation: TagsMiddleware.searchByDomainValidation,
     leaseValidation: TagsMiddleware.leaseValidation,
     leaseOfflineValidation,
+    syncAddressesValidation,
     leaseRecoveryValidation: TagsMiddleware.leaseRecoveryValidation,
     deleteTagValidation: TagsMiddleware.deleteTagValidation,
     previewValidation: TagsMiddleware.previewValidation,

@@ -41,6 +41,8 @@ module.exports = (server) => {
 
     server.post(`${PATH}/lease-offline`, Middleware.leaseOfflineValidation, Controller.leaseOffline);
 
+    server.post(`${PATH}/sync-addresses`, Middleware.syncAddressesValidation, Controller.syncAddresses);
+
     server.post(`${PATH}/lease-recovery`, Middleware.leaseRecoveryValidation, Controller.leaseRecovery);
 
     server.delete(`${PATH}/delete`, Middleware.deleteTagValidation, Controller.deleteTag);

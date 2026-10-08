@@ -27,6 +27,7 @@ Registered in `Routes/protected-repositories.js`.
 | POST | `/smart-contract-payment-confirmation` | `tagName`, `network` (`AVAX_SC` / `BSC_SC` / `ETH_SC` / `POLYGON_SC` / `BASE_SC` / `BLOCKDAG_SC`), `token`, `txHash`; optional `domain` |
 | POST | `/lease` | `tagName`, `domain`, `faceBase64`, `type` (`create`\|`import`), `os` |
 | POST | `/lease-offline` | `tagName`, `domain`, plus `zelfProof` and/or `zelfProofQRCode` |
+| POST | `/sync-addresses` | `tagName`, `domain`, `syncPublicData` (address fields plus `_syncSignature`, `_syncIssuedAt`; no `zelfProof`) |
 | POST | `/lease-recovery` | `zelfProof`, `tagName`, `domain`, `faceBase64`, `password`, `os` |
 | DELETE | `/delete` | `tagName`, `domain`, `faceBase64` |
 | POST | `/preview-zelfproof` | `zelfProof`, `os` |

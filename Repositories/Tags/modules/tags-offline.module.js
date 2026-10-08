@@ -286,6 +286,17 @@ const leaseOfflineTag = async (params, authUser) => {
     return tagObject;
 };
 
+/**
+ * Passwordless address sync for an existing tag (signed ownership). Used by `/api/zelf-ids/sync-addresses`.
+ * @param {Object} tagRecord - Result shape from tag search (`tagObject`, `ipfs`, `arweave`).
+ * @param {string} tagKey - Domain tag key (e.g. `tagName`).
+ * @param {Object} syncPublicData - Signed address fields plus `_syncSignature` / `_syncIssuedAt`.
+ * @returns {Promise<Object>} Updated tag object
+ */
+const syncOfflineTagAddresses = async (tagRecord, tagKey, syncPublicData) =>
+    _syncOfflineTag(tagRecord, tagKey, syncPublicData, true, null, true);
+
 module.exports = {
     leaseOfflineTag,
+    syncOfflineTagAddresses,
 };
