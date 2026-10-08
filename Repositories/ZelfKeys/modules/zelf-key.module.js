@@ -21,7 +21,12 @@ const { resolveEncryptVersion } = require("../../Tags/modules/tags-addresses.mod
 const config = require("../../../Core/config");
 const { errorHandler } = require("../../../Core/http-handler");
 const { validate } = require("../../../Core/JoiUtils");
-const { BULK_PASSWORDS_MAX, passwordCredentialSchema } = require("../middlewares/zelf-key.middleware");
+const {
+    BULK_PASSWORDS_MAX,
+    PROTECTION_FACE,
+    PROTECTION_FACE_PASSWORD,
+    passwordCredentialSchema,
+} = require("../middlewares/zelf-key.middleware");
 
 const TYPES_REQUIRING_TRANSPORT_ENCRYPTION = new Set(["password", "notes", "note", "credit_card", "payment-card"]);
 const SUPPORTED_CATEGORIES = ["password", "notes", "credit_card", "contact", "zotp"];
@@ -48,6 +53,99 @@ const withFolderMetadata = (publicData, folder) =>
         folder,
     });
 
+/**
+ * Resolve protection for a key. Legacy keys without `publicData.protection` default to
+ * `face` because v4 ZelfKeys were encrypted without a proof password layer.
+ * @param {string|undefined} value
+ * @returns {"face"|"face_password"}
+ */
+const resolveProtection = (value) => {
+    if (value === PROTECTION_FACE_PASSWORD) return PROTECTION_FACE_PASSWORD;
+    return PROTECTION_FACE;
+};
+
+const protectionRequiresKeyPassword = (protection) => protection === PROTECTION_FACE_PASSWORD;
+
+const protectionFromPreview = (preview) => {
+    const storedProtection = preview?.publicData?.protection;
+
+    if (storedProtection === PROTECTION_FACE_PASSWORD || storedProtection === PROTECTION_FACE) {
+        return resolveProtection(storedProtection);
+    }
+
+    const layerRequiresPassword = ZelfProofModule.passwordLayerRequiresPassword(preview?.passwordLayer);
+
+    if (layerRequiresPassword === true) return PROTECTION_FACE_PASSWORD;
+    if (layerRequiresPassword === false) return PROTECTION_FACE;
+
+    return null;
+};
+
+/**
+ * Resolve retrieve protection from the stored proof. Request fields are only a fallback
+ * when preview cannot read protection (e.g. upstream preview unavailable).
+ * @param {Object} data retrieve request body
+ * @returns {Promise<"face"|"face_password">}
+ */
+const resolveRetrieveProtection = async (data) => {
+    const requestHint = data.publicData?.protection ?? data.protection;
+
+    if (!data.zelfProof) {
+        return resolveProtection(requestHint);
+    }
+
+    try {
+        const version = resolveEncryptVersion({
+            v: data.v,
+            zelfEncryptVersion: data.zelfEncryptVersion,
+            encryptVersion: data.encryptVersion,
+            ...(data.publicData && typeof data.publicData === "object" ? data.publicData : {}),
+        });
+
+        const preview =
+            version === 4
+                ? await ZelfProofModule.preview({ zelfProof: data.zelfProof, stack: "v4" })
+                : await ZelfProofModule.previewWithLegacyFallback({ zelfProof: data.zelfProof });
+
+        const fromStored = protectionFromPreview(preview);
+
+        if (fromStored) return fromStored;
+    } catch (error) {
+        console.warn("resolveRetrieveProtection preview failed; falling back to request hint", error?.message);
+    }
+
+    return resolveProtection(requestHint);
+};
+
+const assertProtectionStoreRules = (protection, keyPassword) => {
+    if (protectionRequiresKeyPassword(protection) && !keyPassword) {
+        throw new Error("409:master_password_required_for_face_password_protection");
+    }
+};
+
+/**
+ * Client key-layer password on store (`masterPassword`) and retrieve (`password`) share the
+ * same session/PGP unwrap path. Accept either field name.
+ * @param {Object} data
+ * @returns {string|undefined}
+ */
+const resolveKeyPasswordInput = (data) => data.masterPassword ?? data.password;
+
+/**
+ * Decrypt face + key-layer password consistently for store and retrieve.
+ * @param {Object} data
+ * @param {Object} authToken
+ */
+const decryptKeyCredentials = async (data, authToken) =>
+    TagsPartsModule.decryptParams(
+        {
+            password: resolveKeyPasswordInput(data),
+            faceBase64: data.faceBase64,
+            removePGP: data.removePGP,
+        },
+        authToken,
+    );
+
 const stampV4PublicData = (publicData) =>
     compactPublicData({
         ...publicData,
@@ -58,11 +156,13 @@ const createMetadataAndPublicData = async (type, data, authToken) => {
     const identifier = authToken.tagName || authToken.identifier;
 
     const fullTagName = `${identifier}${authToken.domain ? "." + authToken.domain : ""}`;
+    const protection = resolveProtection(data.protection);
 
     const typePayload = {
         metadata: {},
         publicData: {},
         fullTagName,
+        protection,
     };
 
     switch (type) {
@@ -77,6 +177,7 @@ const createMetadataAndPublicData = async (type, data, authToken) => {
                     category: `${fullTagName}_zotp`,
                     issuer: `${data.issuer}`,
                     keyOwner: fullTagName,
+                    protection,
                     type,
                     username: `${data.username}`,
                 },
@@ -97,6 +198,7 @@ const createMetadataAndPublicData = async (type, data, authToken) => {
                     alias: normalizeOptionalString(data.alias),
                     category: `${fullTagName}_password`,
                     keyOwner: fullTagName,
+                    protection,
                     timestamp: `${new Date().toISOString()}`,
                     type,
                     username: data.username,
@@ -113,6 +215,7 @@ const createMetadataAndPublicData = async (type, data, authToken) => {
                 {
                     category: `${fullTagName}_notes`,
                     keyOwner: fullTagName,
+                    protection,
                     timestamp: `${new Date().toISOString()}`,
                     title: `${data.title}`,
                     type,
@@ -140,6 +243,7 @@ const createMetadataAndPublicData = async (type, data, authToken) => {
                     }),
                     category: `${fullTagName}_credit_card`,
                     keyOwner: fullTagName,
+                    protection,
                     timestamp: `${new Date().toISOString()}`,
                     type,
                 },
@@ -156,11 +260,14 @@ const createMetadataAndPublicData = async (type, data, authToken) => {
     return typePayload;
 };
 
-const _store = async (publicData, metadata, faceBase64, identifier, authToken, type) => {
+const _store = async (publicData, metadata, faceBase64, identifier, authToken, type, keyPassword) => {
     const zelfKey = {
         zelfProof: null,
         zelfProofQRCode: null,
     };
+
+    const protection = resolveProtection(publicData?.protection);
+    assertProtectionStoreRules(protection, keyPassword);
 
     const dataToEncrypt = {
         _id: identifier,
@@ -168,6 +275,7 @@ const _store = async (publicData, metadata, faceBase64, identifier, authToken, t
         faceBase64,
         metadata,
         publicData,
+        password: protectionRequiresKeyPassword(protection) ? keyPassword : undefined,
         tolerance: "REGULAR",
         stack: "v4",
     };
@@ -289,14 +397,7 @@ const storeData = async (data, authToken) => {
     try {
         const { type, domain } = data;
 
-        const decryptedParams = await TagsPartsModule.decryptParams(
-            {
-                password: data.masterPassword,
-                faceBase64: data.faceBase64,
-                removePGP: data.removePGP,
-            },
-            authToken,
-        );
+        const decryptedParams = await decryptKeyCredentials(data, authToken);
 
         let decryptedSensitiveData = {};
 
@@ -323,19 +424,29 @@ const storeData = async (data, authToken) => {
 
         const faceBase64 = decryptedParams.face;
 
-        await _validateOwnership(data.faceBase64, data.masterPassword, authToken, data);
+        await _validateOwnership(data.faceBase64, resolveKeyPasswordInput(data), authToken, data);
 
-        const { metadata, publicData, fullTagName } = await createMetadataAndPublicData(
+        const { metadata, publicData, fullTagName, protection } = await createMetadataAndPublicData(
             type,
             { ...data, faceBase64, ...decryptedSensitiveData },
             authToken,
         );
 
+        assertProtectionStoreRules(protection, decryptedParams.password);
+
         const shortTimestamp = getShortTimestamp();
 
         const identifier = `${fullTagName}_${shortTimestamp}`;
 
-        const result = await _store(publicData, metadata, faceBase64, identifier, authToken, type);
+        const result = await _store(
+            publicData,
+            metadata,
+            faceBase64,
+            identifier,
+            authToken,
+            type,
+            decryptedParams.password,
+        );
 
         return {
             ...result,
@@ -358,23 +469,31 @@ const formatStoreError = (error) => {
 };
 
 const _storePasswordRecord = async (itemData, authToken, sharedContext, identifierSuffix = "") => {
-    const { faceBase64, face, removePGP } = sharedContext;
+    const { faceBase64, face, removePGP, keyPassword, defaultProtection } = sharedContext;
 
     const decryptedSensitiveData = await TagsPartsModule.decryptPasswordParams(
         { ...itemData, removePGP },
         authToken,
     );
 
-    const { metadata, publicData, fullTagName } = await createMetadataAndPublicData(
+    const { metadata, publicData, fullTagName, protection } = await createMetadataAndPublicData(
         "password",
-        { ...itemData, faceBase64, face, ...decryptedSensitiveData },
+        {
+            ...itemData,
+            faceBase64,
+            face,
+            protection: itemData.protection ?? defaultProtection,
+            ...decryptedSensitiveData,
+        },
         authToken,
     );
+
+    assertProtectionStoreRules(protection, keyPassword);
 
     const shortTimestamp = getShortTimestamp();
     const identifier = `${fullTagName}_${shortTimestamp}${identifierSuffix ? `_${identifierSuffix}` : ""}`;
 
-    const result = await _store(publicData, metadata, face, identifier, authToken, "password");
+    const result = await _store(publicData, metadata, face, identifier, authToken, "password", keyPassword);
 
     return {
         ...result,
@@ -394,23 +513,21 @@ const _storePasswordRecord = async (itemData, authToken, sharedContext, identifi
  * @returns {Promise<Object>}
  */
 const storePasswordsBulk = async (data, authToken) => {
-    const { faceBase64, masterPassword, removePGP, passwords } = data;
+    const { faceBase64, removePGP, passwords } = data;
 
-    const decryptedParams = await TagsPartsModule.decryptParams(
-        {
-            password: masterPassword,
-            faceBase64,
-            removePGP,
-        },
-        authToken,
-    );
+    const decryptedParams = await decryptKeyCredentials({ faceBase64, removePGP, ...data }, authToken);
 
-    await _validateOwnership(faceBase64, masterPassword, authToken, data);
+    await _validateOwnership(faceBase64, resolveKeyPasswordInput(data), authToken, data);
+
+    const batchProtection = resolveProtection(data.protection);
+    assertProtectionStoreRules(batchProtection, decryptedParams.password);
 
     const sharedContext = {
         faceBase64,
         face: decryptedParams.face,
         removePGP,
+        keyPassword: decryptedParams.password,
+        defaultProtection: data.protection,
     };
 
     const success = [];
@@ -466,22 +583,25 @@ const storePasswordsBulk = async (data, authToken) => {
  * @returns {Promise<Object>}
  */
 const retrieveData = async (data, authToken) => {
-    const { zelfProof, faceBase64, password, type, clientPublicKey } = data;
+    const { zelfProof, type, clientPublicKey } = data;
 
     let decryptedParams = null;
     let pgp = null;
     let zelfKey = null;
 
-    try {
-        decryptedParams = await TagsPartsModule.decryptParams(
-            {
-                password,
-                faceBase64,
-                removePGP: data.removePGP,
-            },
-            authToken,
-        );
+    const protection = await resolveRetrieveProtection(data);
 
+    decryptedParams = await decryptKeyCredentials(data, authToken);
+
+    if (protectionRequiresKeyPassword(protection)) {
+        if (!decryptedParams.password) {
+            throw new Error("400:ERR_MISSING_PASSWORD");
+        }
+    } else {
+        decryptedParams.password = undefined;
+    }
+
+    try {
         const version = resolveEncryptVersion({
             v: data.v,
             zelfEncryptVersion: data.zelfEncryptVersion,
@@ -964,6 +1084,217 @@ const getProof = async (data, authToken) => {
     };
 };
 
+const _listOwnedKeyItems = async (authToken) => {
+    const identifier = authToken.tagName || authToken.identifier;
+    const domain = authToken.domain || "zelf";
+    const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
+    const items = [];
+
+    for (const category of SUPPORTED_CATEGORIES) {
+        const searchCategory = `${fullTagName}_${category}`;
+        const ipfsResults = await IPFS.filter("category", searchCategory);
+
+        if (!Array.isArray(ipfsResults)) continue;
+
+        for (const row of ipfsResults) {
+            const publicData = row.publicData || {};
+
+            if (publicData.category !== searchCategory) continue;
+            if (!_ownsZelfKey(publicData, fullTagName)) continue;
+
+            items.push({
+                id: row.id || row.cid,
+                cid: row.cid,
+                name: row.name,
+                url: row.url,
+                publicData,
+                category,
+            });
+        }
+    }
+
+    return items;
+};
+
+const _extractZelfProofFromItem = async (item) => {
+    if (!item?.url) throw new Error("404:ZelfKey not found");
+
+    const zelfProofQRCode = await TagsPartsModule.urlToBase64(item.url);
+
+    if (!zelfProofQRCode) throw new Error("400:Failed to read ZelfKey QR");
+
+    const zelfProof = await QRZelfProofExtractor.extractZelfProofFromQR(zelfProofQRCode);
+
+    if (!zelfProof) throw new Error("400:Failed to extract ZelfProof");
+
+    return { zelfProof, zelfProofQRCode };
+};
+
+const _prepareKeyReencrypt = async (item, faceBase64, oldPassword, newPassword) => {
+    const { zelfProof } = await _extractZelfProofFromItem(item);
+
+    const decrypted = await ZelfProofModule.decrypt({
+        faceBase64,
+        os: "DESKTOP",
+        password: oldPassword,
+        zelfProof,
+        stack: "v4",
+    });
+
+    const publicData = stampV4PublicData({
+        ...(decrypted.publicData || item.publicData || {}),
+        protection: PROTECTION_FACE_PASSWORD,
+    });
+
+    const identifier = item.name || item.publicData?.timestamp || item.id;
+
+    const { zelfProof: nextProof } = await ZelfProofModule.encrypt({
+        _id: identifier,
+        addServerPassword: false,
+        faceBase64,
+        metadata: decrypted.metadata,
+        publicData,
+        password: newPassword,
+        tolerance: "REGULAR",
+        stack: "v4",
+    });
+
+    const zelfProofQRCode = await QRZelfProofExtractor.generateQRFromZelfProof(nextProof);
+
+    return {
+        oldId: item.id,
+        filename: item.name || identifier,
+        publicData,
+        zelfProof: nextProof,
+        zelfProofQRCode,
+    };
+};
+
+/**
+ * Re-encrypt every `face_password` key with a new master password.
+ * Atomic: preparation and pinning must all succeed, or no IPFS records are replaced.
+ * @param {Object} data
+ * @param {string} data.faceBase64
+ * @param {string} data.oldMasterPassword
+ * @param {string} data.newMasterPassword
+ * @param {boolean} [data.removePGP]
+ * @param {Object} authToken
+ * @returns {Promise<Object>}
+ */
+const changeMasterPassword = async (data, authToken) => {
+    const { faceBase64, oldMasterPassword, newMasterPassword, removePGP } = data;
+
+    const oldDecrypted = await TagsPartsModule.decryptParams(
+        {
+            password: oldMasterPassword,
+            faceBase64,
+            removePGP,
+        },
+        authToken,
+    );
+
+    const { password: newPassword } = await TagsPartsModule.decryptParams(
+        {
+            password: newMasterPassword,
+            removePGP,
+        },
+        authToken,
+    );
+
+    if (!oldDecrypted.password) {
+        throw new Error("409:old_master_password_required");
+    }
+
+    if (!newPassword) {
+        throw new Error("409:new_master_password_required");
+    }
+
+    if (oldDecrypted.password === newPassword) {
+        throw new Error("409:new_master_password_must_differ");
+    }
+
+    await _validateOwnership(faceBase64, oldMasterPassword, authToken, data);
+
+    const ownedItems = await _listOwnedKeyItems(authToken);
+    const targets = ownedItems.filter(
+        (item) => resolveProtection(item.publicData?.protection) === PROTECTION_FACE_PASSWORD,
+    );
+
+    if (!targets.length) {
+        return {
+            success: true,
+            message: "No face_password keys to update",
+            updatedCount: 0,
+            skippedCount: ownedItems.length,
+            updated: [],
+        };
+    }
+
+    const prepared = [];
+
+    for (const item of targets) {
+        try {
+            const payload = await _prepareKeyReencrypt(
+                item,
+                oldDecrypted.face,
+                oldDecrypted.password,
+                newPassword,
+            );
+            prepared.push({ item, payload });
+        } catch (error) {
+            console.error("changeMasterPassword prepare failed", { id: item.id, error });
+            throw new Error("409:failed_to_prepare_master_password_change");
+        }
+    }
+
+    const pinned = [];
+
+    try {
+        for (const entry of prepared) {
+            const pin = await IPFS.pinFile(
+                entry.payload.zelfProofQRCode,
+                entry.payload.filename,
+                null,
+                entry.payload.publicData,
+            );
+
+            pinned.push({
+                oldId: entry.item.id,
+                newId: pin.id || pin.ID,
+            });
+        }
+
+        await IPFS.deleteFiles(prepared.map((entry) => entry.item.id));
+    } catch (error) {
+        if (pinned.length) {
+            const rollbackIds = pinned.map((entry) => entry.newId).filter(Boolean);
+            if (rollbackIds.length) {
+                try {
+                    await IPFS.deleteFiles(rollbackIds);
+                } catch (rollbackError) {
+                    console.error("changeMasterPassword rollback failed", rollbackError);
+                }
+            }
+        }
+
+        console.error("changeMasterPassword apply failed", error);
+        throw new Error("409:failed_to_apply_master_password_change");
+    }
+
+    return {
+        success: true,
+        message: "Master password updated for face_password keys",
+        updatedCount: prepared.length,
+        skippedCount: ownedItems.length - prepared.length,
+        updated: prepared.map((entry) => ({
+            id: entry.item.id,
+            category: entry.item.category,
+            protection: PROTECTION_FACE_PASSWORD,
+            publicData: entry.payload.publicData,
+        })),
+    };
+};
+
 const summarizeData = async (_data, authToken) => {
     const identifier = authToken.tagName || authToken.identifier;
     const domain = authToken.domain || "zelf";
@@ -1006,4 +1337,10 @@ module.exports = {
     listAllDataForDashboard,
     summarizeData,
     deleteZelfKey,
+    changeMasterPassword,
+    resolveProtection,
+    resolveRetrieveProtection,
+    resolveKeyPasswordInput,
+    decryptKeyCredentials,
+    protectionRequiresKeyPassword,
 };

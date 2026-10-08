@@ -263,6 +263,24 @@ const summarizeData = async (ctx) => {
 };
 
 /**
+ * Change master password for all face_password keys
+ * @param {Object} ctx - Koa context
+ */
+const changeMasterPassword = async (ctx) => {
+	try {
+		const data = await Module.changeMasterPassword(ctx.request.body, ctx.state.user);
+
+		ctx.body = { data };
+	} catch (error) {
+		const _exception = errorHandler(error, ctx);
+
+		ctx.status = _exception.status;
+
+		ctx.body = { message: _exception.message, code: _exception.code };
+	}
+};
+
+/**
  * Delete ZelfKey
  * @param {Object} ctx - Koa context
  */
@@ -302,5 +320,6 @@ module.exports = {
 	listDataDashboard,
 	listAllDataDashboard,
 	summarizeData,
+	changeMasterPassword,
 	deleteZelfKey,
 };
