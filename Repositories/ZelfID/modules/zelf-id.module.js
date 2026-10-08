@@ -37,6 +37,7 @@ const {
     isUnpaidExpiredReservation,
     effectivePlan,
     getZelfIdPrice,
+    getZelfIdCheckoutPrice,
 } = require("./zelf-id-plan.module");
 
 /**
@@ -227,12 +228,19 @@ const searchTag = async (params, authUser) => {
         );
 
         const released = applyExpiredPlanDowngrade(
-            await releaseExpiredUnpaidReservation(result, {
-                tagName,
-                domain,
-                domainConfig: _domainConfig,
-                duration: duration || "1",
-            })
+            attachAvailableZelfIdPricing(
+                await releaseExpiredUnpaidReservation(result, {
+                    tagName,
+                    domain,
+                    domainConfig: _domainConfig,
+                    duration: duration || "1",
+                }),
+                {
+                    tagName,
+                    duration: duration || "1",
+                    domainConfig: _domainConfig,
+                }
+            )
         );
 
         if (released.ipfs?.length) {
@@ -368,7 +376,7 @@ const decryptTag = async (params, authUser) => {
  * @returns {Promise<Object>} `{ preview, tagObject }` or availability/price payload
  */
 const previewTag = async (params, authUser) => {
-    const domainConfig = getDomainConfig(params.domain);
+    const domainConfig = params.domainConfig || getDomainConfig(params.domain);
 
     const searchResult = await searchTag({ ...params, domainConfig, environment: "all" }, authUser);
 
@@ -525,6 +533,44 @@ const applyExpiredPlanDowngrade = (result) => {
 };
 
 /**
+ * Available-name search/preview pricing via the Zelf ID license (not Tags `getPrice`).
+ * `price` matches payment-options upgrade USD (`getZelfIdCheckoutPrice`); lease plan stays `free`.
+ * @param {Object} result
+ * @param {Object} context
+ * @param {string} context.tagName
+ * @param {string} [context.duration]
+ * @param {Object} context.domainConfig
+ * @returns {Object}
+ */
+const attachAvailableZelfIdPricing = (result, { tagName, duration, domainConfig }) => {
+    if (!result?.available || !domainConfig) return result;
+
+    const leaseQuote = getZelfIdPrice({
+        tagName,
+        duration: duration || "1",
+        domainConfig,
+    });
+    const upgradeQuote = getZelfIdCheckoutPrice({
+        tagName,
+        duration: duration || "1",
+        domainConfig,
+    });
+
+    const price = {
+        ...upgradeQuote,
+        plan: leaseQuote.plan,
+        allowedPlans: leaseQuote.allowedPlans,
+    };
+
+    return {
+        ...result,
+        price,
+        plan: leaseQuote.plan,
+        allowedPlans: leaseQuote.allowedPlans,
+    };
+};
+
+/**
  * Unpin an unpaid reservation whose window has passed and mark the name available.
  * Paid mainnet records are left alone.
  * @param {Object} result - search result
@@ -563,15 +609,11 @@ const releaseExpiredUnpaidReservation = async (result, context = {}) => {
 
     delete available.tagObject;
 
-    if (context.domainConfig) {
-        available.price = getZelfIdPrice({
-            tagName: context.tagName,
-            duration: context.duration || "1",
-            domainConfig: context.domainConfig,
-        });
-    }
-
-    return available;
+    return attachAvailableZelfIdPricing(available, {
+        tagName: context.tagName,
+        duration: context.duration || "1",
+        domainConfig: context.domainConfig,
+    });
 };
 
 const _findDuplicatedTag = async (tagName, domain, domainConfig) => {
