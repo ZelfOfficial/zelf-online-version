@@ -496,8 +496,8 @@ const upsertSearchablePins = async (data, authUser) => {
 	return formatted;
 };
 
-const unpinContinuationSiblings = async (canonicalName) => {
-	if (!canonicalName) return null;
+const listContinuationSiblingPinIds = async (canonicalName) => {
+	if (!canonicalName) return [];
 
 	const ids = [];
 
@@ -509,6 +509,11 @@ const unpinContinuationSiblings = async (canonicalName) => {
 		}
 	}
 
+	return ids;
+};
+
+const unpinContinuationSiblings = async (canonicalName) => {
+	const ids = await listContinuationSiblingPinIds(canonicalName);
 	if (!ids.length) return null;
 
 	return unPinFiles(ids);
@@ -804,6 +809,7 @@ module.exports = {
 	upsertSearchablePins,
 	tagRegistration,
 	unPinFiles,
+	listContinuationSiblingPinIds,
 	unpinContinuationSiblings,
 	searchByDomain,
 	searchByStorageKey,

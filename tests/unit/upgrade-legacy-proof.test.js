@@ -17,9 +17,11 @@ jest.mock("../../Repositories/Tags/modules/qr-zelfproof-extractor.module", () =>
 
 jest.mock("../../Repositories/Tags/modules/tags-ipfs.module", () => ({
 	hydrateContinuationAddresses: jest.fn(async (publicData) => publicData),
+	listContinuationSiblingPinIds: jest.fn(async () => []),
 	unpinContinuationSiblings: jest.fn(async () => null),
 	unPinFiles: jest.fn(async () => null),
 	insertSearchablePins: jest.fn(async () => ({ id: "ipfs-1" })),
+	upsertSearchablePins: jest.fn(async () => ({ id: "ipfs-1" })),
 }));
 
 jest.mock("../../Repositories/Tags/modules/tags-arweave.module", () => ({
@@ -31,6 +33,7 @@ jest.mock("../../Repositories/Tags/config/supported-domains", () => ({
 		name: "zelf",
 		getTagKey: () => "tagName",
 		tags: { storage: { keyPrefix: "tagName" } },
+		isArweaveEnabled: () => false,
 	}),
 }));
 
