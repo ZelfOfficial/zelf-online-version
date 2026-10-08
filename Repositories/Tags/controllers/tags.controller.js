@@ -197,6 +197,9 @@ const leaseOfflineTag = async (ctx) => {
         ctx.status = _exception.status;
 
         ctx.body = { message: _exception.message, code: _exception.code };
+        if (error.rejected) {
+            ctx.body.rejected = error.rejected;
+        }
     }
 };
 

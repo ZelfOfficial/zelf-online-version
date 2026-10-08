@@ -10,6 +10,50 @@ const TagsRegistrationModule = require("./tags-registration.module");
 const { extractZelfProofFromQR, generateQRFromZelfProof } = require("./qr-zelfproof-extractor.module");
 const { resolveEncryptVersion, stampExtraParamsVersion } = require("./tags-addresses.module");
 
+const _isV4SenseCryptProof = async (zelfProof) => {
+    if (!zelfProof || typeof zelfProof !== "string") return false;
+
+    const ZelfProofModule = require("../../ZelfProof/modules/zelf-proof.module");
+
+    try {
+        const preview = await ZelfProofModule.preview({ zelfProof, stack: "v4" });
+        return Boolean(preview?.passwordLayer || preview?.publicData || preview?.cleartext_data);
+    } catch (_error) {
+        return false;
+    }
+};
+
+const _mapZelfIdOfflineResultToTagsShape = (result) => {
+    if (result?.sync) {
+        const tagObject = result.tagObject || {};
+        return {
+            ...tagObject,
+            publicData: tagObject.publicData || {},
+            updated: result.updated,
+            rejected: result.rejected,
+        };
+    }
+
+    const zelfIDObject = result?.zelfIDObject || {};
+    const publicData = zelfIDObject.publicData || {};
+
+    return {
+        ...publicData,
+        zelfProof: zelfIDObject.zelfProof,
+        zelfProofQRCode: zelfIDObject.zelfProofQRCode,
+        ipfs: result?.ipfs?.[0] || zelfIDObject,
+        arweave: result?.arweave?.[0] || zelfIDObject.arweave,
+        origin: publicData.origin || "offline",
+        tagName: publicData.tagName || result?.tagName,
+    };
+};
+
+const _delegateV4LeaseOfflineToZelfId = async (params, authUser) => {
+    const { leaseOffline } = require("../../ZelfID/modules/zelf-ids-offline.module");
+    const delegated = await leaseOffline(params, authUser);
+    return _mapZelfIdOfflineResultToTagsShape(delegated);
+};
+
 const _getExtraPublicData = async (password, zelfProof, syncPublicData) => {
     if (!password || !zelfProof || !syncPublicData) {
         return {};
@@ -197,6 +241,21 @@ const leaseOfflineTag = async (params, authUser) => {
         zelfProofQRCode = await generateQRFromZelfProof(zelfProof);
     }
 
+    if (await _isV4SenseCryptProof(zelfProof)) {
+        return await _delegateV4LeaseOfflineToZelfId(
+            {
+                ...params,
+                tagName,
+                domain,
+                zelfProof,
+                zelfProofQRCode,
+                password: password || syncPassword,
+                syncPassword,
+            },
+            authUser
+        );
+    }
+
     const { preview } = await previewZelfProof({ zelfProof }, authUser);
 
     const _normalizeTagName = (name, _domain) => {
@@ -286,17 +345,6 @@ const leaseOfflineTag = async (params, authUser) => {
     return tagObject;
 };
 
-/**
- * Passwordless address sync for an existing tag (signed ownership). Used by `/api/zelf-ids/sync-addresses`.
- * @param {Object} tagRecord - Result shape from tag search (`tagObject`, `ipfs`, `arweave`).
- * @param {string} tagKey - Domain tag key (e.g. `tagName`).
- * @param {Object} syncPublicData - Signed address fields plus `_syncSignature` / `_syncIssuedAt`.
- * @returns {Promise<Object>} Updated tag object
- */
-const syncOfflineTagAddresses = async (tagRecord, tagKey, syncPublicData) =>
-    _syncOfflineTag(tagRecord, tagKey, syncPublicData, true, null, true);
-
 module.exports = {
     leaseOfflineTag,
-    syncOfflineTagAddresses,
 };

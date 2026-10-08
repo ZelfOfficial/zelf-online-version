@@ -9,20 +9,23 @@ jest.mock("../../Repositories/ZelfID/modules/zelf-id.module", () => ({
     searchTag: jest.fn(),
 }));
 
-jest.mock("../../Repositories/Tags/modules/tags-offline.module", () => ({
-    syncOfflineTagAddresses: jest.fn(async () => ({ tagName: "qa99.zelf" })),
+jest.mock("../../Repositories/Tags/modules/tags-ipfs.module", () => ({
+    insertSearchablePins: jest.fn(async () => ({ id: "pin-new" })),
+    deleteFiles: jest.fn(async () => null),
+}));
+
+jest.mock("../../Repositories/Tags/modules/tags-arweave.module", () => ({
+    tagRegistration: jest.fn(async () => null),
 }));
 
 const ZelfIdModule = require("../../Repositories/ZelfID/modules/zelf-id.module");
-const { syncOfflineTagAddresses } = require("../../Repositories/Tags/modules/tags-offline.module");
-const {
-    syncAddresses,
-    partitionSyncAddresses,
-    listSyncAddressKeys,
-} = require("../../Repositories/ZelfID/modules/zelf-ids-sync-addresses.module");
+const TagsIPFSModule = require("../../Repositories/Tags/modules/tags-ipfs.module");
+const { syncAddresses } = require("../../Repositories/ZelfID/modules/zelf-ids-sync-addresses.module");
+const { listSyncAddressKeys, partitionSyncAddresses } = require("../../Repositories/ZelfID/modules/zelf-ids-address-sync.module");
 
 const owner = new Wallet("0x" + "01".repeat(32));
 const VALID_TON = "EQDSMp6iTSQkQYqi9TfHLyYa-EwGdD1MH-4AQliWeII0V_8K";
+const VALID_TON_B = "EQBHyu-oZVDHRYQ1-rKlGqpHy5yAqanPBirEQNMNOmfHLotW";
 const VALID_BTC = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh";
 
 const buildSignedSync = async (tagName, fields, now = Date.now()) => {
@@ -34,11 +37,17 @@ const buildSignedSync = async (tagName, fields, now = Date.now()) => {
     return payload;
 };
 
-const mockTagSearch = (ethAddress = owner.address) => {
+const mockTagSearch = (publicDataOverrides = {}) => {
     ZelfIdModule.searchTag.mockResolvedValue({
         available: false,
         tagObject: {
-            publicData: { tagName: "qa99.zelf", ethAddress },
+            publicData: {
+                tagName: "qa99.zelf",
+                ethAddress: owner.address,
+                tonAddress: VALID_TON,
+                type: "hold",
+                ...publicDataOverrides,
+            },
             zelfProofQRCode: "data:image/png;base64,abc",
         },
         ipfs: [{ id: "pin-1", ipfs_pin_hash: "QmOld" }],
@@ -78,7 +87,7 @@ describe("zelf-ids-sync-addresses.module", () => {
 
     test("syncAddresses returns 404 when the name is not registered", async () => {
         ZelfIdModule.searchTag.mockResolvedValue({ available: true });
-        const syncPublicData = await buildSignedSync("qa99.zelf", { tonAddress: VALID_TON });
+        const syncPublicData = await buildSignedSync("qa99.zelf", { tonAddress: VALID_TON_B });
 
         await expect(
             syncAddresses({ tagName: "qa99", domain: "zelf", syncPublicData }, {})
@@ -87,7 +96,7 @@ describe("zelf-ids-sync-addresses.module", () => {
 
     test("syncAddresses returns 401 when the signature is invalid", async () => {
         mockTagSearch();
-        const syncPublicData = await buildSignedSync("qa99.zelf", { tonAddress: VALID_TON });
+        const syncPublicData = await buildSignedSync("qa99.zelf", { tonAddress: VALID_TON_B });
         syncPublicData._syncSignature = "0x" + "11".repeat(65);
 
         await expect(
@@ -98,7 +107,7 @@ describe("zelf-ids-sync-addresses.module", () => {
     test("syncAddresses returns 401 when the signature is expired", async () => {
         mockTagSearch();
         const expiredAt = Date.now() - 301_000;
-        const syncPublicData = await buildSignedSync("qa99.zelf", { tonAddress: VALID_TON }, expiredAt);
+        const syncPublicData = await buildSignedSync("qa99.zelf", { tonAddress: VALID_TON_B }, expiredAt);
 
         await expect(
             syncAddresses({ tagName: "qa99", domain: "zelf", syncPublicData }, {})
@@ -108,7 +117,7 @@ describe("zelf-ids-sync-addresses.module", () => {
     test("syncAddresses applies valid fields and reports partial rejection", async () => {
         mockTagSearch();
         const syncPublicData = await buildSignedSync("qa99.zelf", {
-            tonAddress: VALID_TON,
+            tonAddress: VALID_TON_B,
             btcAddress: "bad-btc",
         });
 
@@ -116,18 +125,26 @@ describe("zelf-ids-sync-addresses.module", () => {
 
         expect(result.updated).toEqual(["ton"]);
         expect(result.rejected).toEqual({ bitcoin: "invalid_address" });
-        expect(syncOfflineTagAddresses).toHaveBeenCalledTimes(1);
-        expect(syncOfflineTagAddresses.mock.calls[0][2]).toMatchObject({
-            tonAddress: VALID_TON,
-            _syncSignature: syncPublicData._syncSignature,
-        });
-        expect(syncOfflineTagAddresses.mock.calls[0][2].btcAddress).toBeUndefined();
+        expect(TagsIPFSModule.insertSearchablePins).toHaveBeenCalled();
+        const addresses = TagsIPFSModule.insertSearchablePins.mock.calls[0][0].addresses;
+        expect(addresses.tonAddress).toBe(VALID_TON_B);
     });
 
-    test("syncAddresses succeeds for a valid signature and ton address", async () => {
+    test("syncAddresses overwrites TON and repins", async () => {
+        mockTagSearch({ tonAddress: VALID_TON });
+        const syncPublicData = await buildSignedSync("qa99.zelf", { tonAddress: VALID_TON_B });
+
+        const result = await syncAddresses({ tagName: "qa99", domain: "zelf", syncPublicData }, {});
+
+        expect(result.updated).toEqual(["ton"]);
+        const addresses = TagsIPFSModule.insertSearchablePins.mock.calls[0][0].addresses;
+        expect(addresses.tonAddress).toBe(VALID_TON_B);
+    });
+
+    test("syncAddresses succeeds for a valid signature and multiple addresses", async () => {
         mockTagSearch();
         const syncPublicData = await buildSignedSync("qa99.zelf", {
-            tonAddress: VALID_TON,
+            tonAddress: VALID_TON_B,
             btcAddress: VALID_BTC,
         });
 
@@ -135,6 +152,5 @@ describe("zelf-ids-sync-addresses.module", () => {
 
         expect(result.updated.sort()).toEqual(["bitcoin", "ton"].sort());
         expect(result.rejected).toEqual({});
-        expect(syncOfflineTagAddresses).toHaveBeenCalled();
     });
 });

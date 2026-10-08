@@ -154,6 +154,9 @@ const leaseOffline = async (ctx) => {
         ctx.status = _exception.status;
 
         ctx.body = { message: _exception.message, code: _exception.code };
+        if (error.rejected) {
+            ctx.body.rejected = error.rejected;
+        }
     }
 };
 
@@ -174,6 +177,9 @@ const syncAddresses = async (ctx) => {
         ctx.status = _exception.status;
 
         ctx.body = { message: _exception.message, code: _exception.code };
+        if (error.rejected) {
+            ctx.body.rejected = error.rejected;
+        }
     }
 };
 

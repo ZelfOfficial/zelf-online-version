@@ -1,4 +1,4 @@
-const { string, number, validate, stringEnum } = require("../../../Core/JoiUtils");
+const { string, number, boolean, validate, stringEnum, object } = require("../../../Core/JoiUtils");
 const jwt = require("jsonwebtoken");
 const moment = require("moment");
 const config = require("../../../Core/config");
@@ -15,6 +15,10 @@ const leaseOfflineSchema = {
     zelfProofQRCode: string(),
     referralTagName: string(),
     duration: string(),
+    sync: boolean(),
+    syncPublicData: object().unknown(true),
+    syncPassword: string(),
+    password: string(),
 };
 
 const syncAddressesSchema = {
@@ -60,12 +64,22 @@ const leaseOfflineValidation = async (ctx, next) => {
         return;
     }
 
-    const { tagName, domain, zelfProof, zelfProofQRCode } = ctx.request.body;
+    const { tagName, domain, zelfProof, zelfProofQRCode, sync, syncPublicData } = ctx.request.body;
 
     if (!zelfProof && !zelfProofQRCode) {
         ctx.status = 409;
         ctx.body = { validationError: "missing zelfProof" };
         return;
+    }
+
+    if (sync && !syncPublicData) {
+        ctx.status = 409;
+        ctx.body = { validationError: "missing syncPublicData" };
+        return;
+    }
+
+    if (ctx.request.body.syncPassword && !ctx.request.body.password) {
+        ctx.request.body.password = ctx.request.body.syncPassword;
     }
 
     const { domain: extractedDomain, name } = TagsMiddleware.extractDomainAndName(tagName, domain);
