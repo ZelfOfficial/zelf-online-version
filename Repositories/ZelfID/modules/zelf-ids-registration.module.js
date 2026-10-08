@@ -85,7 +85,8 @@ const confirmZelfId = async (tagObject, referralTagObject, domainConfig, securit
 };
 
 /**
- * Unpaid short-name reservation (default one year). IPFS only.
+ * Legacy unpaid short-name `.hold` reservation (default one year). IPFS only.
+ * @deprecated New v4 leases no longer call this; kept for imports and existing hold payment flows.
  * @param {Object} tagObject
  * @param {Object|null} referralTagObject
  * @param {Object} domainConfig

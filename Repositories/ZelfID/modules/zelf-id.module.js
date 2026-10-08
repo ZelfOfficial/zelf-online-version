@@ -34,10 +34,10 @@ const jwt = require("jsonwebtoken");
 const {
     resolveZelfIdPlan,
     resolveComplimentaryPlan,
-    requiresHoldReservation,
     isUnpaidExpiredReservation,
     effectivePlan,
     getZelfIdPrice,
+    getZelfIdCheckoutPrice,
 } = require("./zelf-id-plan.module");
 
 /**
@@ -228,12 +228,19 @@ const searchTag = async (params, authUser) => {
         );
 
         const released = applyExpiredPlanDowngrade(
-            await releaseExpiredUnpaidReservation(result, {
-                tagName,
-                domain,
-                domainConfig: _domainConfig,
-                duration: duration || "1",
-            })
+            attachAvailableZelfIdPricing(
+                await releaseExpiredUnpaidReservation(result, {
+                    tagName,
+                    domain,
+                    domainConfig: _domainConfig,
+                    duration: duration || "1",
+                }),
+                {
+                    tagName,
+                    duration: duration || "1",
+                    domainConfig: _domainConfig,
+                }
+            )
         );
 
         if (released.ipfs?.length) {
@@ -369,7 +376,7 @@ const decryptTag = async (params, authUser) => {
  * @returns {Promise<Object>} `{ preview, tagObject }` or availability/price payload
  */
 const previewTag = async (params, authUser) => {
-    const domainConfig = getDomainConfig(params.domain);
+    const domainConfig = params.domainConfig || getDomainConfig(params.domain);
 
     const searchResult = await searchTag({ ...params, domainConfig, environment: "all" }, authUser);
 
@@ -472,8 +479,8 @@ const leaseConfirmation = async (params) => {
 };
 
 /**
- * Persist a Zelf ID lease: 6+ characters confirm as free; short names with price > 0 get a one-year hold (configurable).
- * A leftover `$0` quote confirms as complimentary unlimited for short names; long names stay free.
+ * Persist a Zelf ID lease: 1–27 characters confirm as `free` mainnet (`name.zelf`, 100-year sentinel).
+ * Upgrade pricing stays on the license quote for search/checkout; lease pins are always free.
  * @param {Object} tagObject
  * @param {Object|null} referralTagObject
  * @param {Object} domainConfig
@@ -505,14 +512,7 @@ const persistZelfIdLease = async (tagObject, referralTagObject, domainConfig, se
 
     const quotePrice = Number(priced.price);
 
-    if (requiresHoldReservation(tagName) && quotePrice > 0) {
-        await ZelfIdsRegistrationModule.reserveZelfId(tagObject, referralTagObject, domainConfig, securityType, authUser);
-        return;
-    }
-
-    if (!requiresHoldReservation(tagName)) {
-        tagObject.price = 0;
-    }
+    tagObject.price = 0;
 
     const complimentary = resolveComplimentaryPlan({ tagName, price: quotePrice });
 
@@ -530,6 +530,44 @@ const applyExpiredPlanDowngrade = (result) => {
 
     result.tagObject.publicData = { ...publicData, plan };
     return result;
+};
+
+/**
+ * Available-name search/preview pricing via the Zelf ID license (not Tags `getPrice`).
+ * `price` matches payment-options upgrade USD (`getZelfIdCheckoutPrice`); lease plan stays `free`.
+ * @param {Object} result
+ * @param {Object} context
+ * @param {string} context.tagName
+ * @param {string} [context.duration]
+ * @param {Object} context.domainConfig
+ * @returns {Object}
+ */
+const attachAvailableZelfIdPricing = (result, { tagName, duration, domainConfig }) => {
+    if (!result?.available || !domainConfig) return result;
+
+    const leaseQuote = getZelfIdPrice({
+        tagName,
+        duration: duration || "1",
+        domainConfig,
+    });
+    const upgradeQuote = getZelfIdCheckoutPrice({
+        tagName,
+        duration: duration || "1",
+        domainConfig,
+    });
+
+    const price = {
+        ...upgradeQuote,
+        plan: leaseQuote.plan,
+        allowedPlans: leaseQuote.allowedPlans,
+    };
+
+    return {
+        ...result,
+        price,
+        plan: leaseQuote.plan,
+        allowedPlans: leaseQuote.allowedPlans,
+    };
 };
 
 /**
@@ -571,15 +609,11 @@ const releaseExpiredUnpaidReservation = async (result, context = {}) => {
 
     delete available.tagObject;
 
-    if (context.domainConfig) {
-        available.price = getZelfIdPrice({
-            tagName: context.tagName,
-            duration: context.duration || "1",
-            domainConfig: context.domainConfig,
-        });
-    }
-
-    return available;
+    return attachAvailableZelfIdPricing(available, {
+        tagName: context.tagName,
+        duration: context.duration || "1",
+        domainConfig: context.domainConfig,
+    });
 };
 
 const _findDuplicatedTag = async (tagName, domain, domainConfig) => {
