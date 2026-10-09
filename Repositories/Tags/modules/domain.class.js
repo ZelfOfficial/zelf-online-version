@@ -127,6 +127,14 @@ class Domain {
             return planTable;
         }
 
+        if (String(this.name || "").toLowerCase() === "zelf") {
+            const { defaultZelfIdPlanPricingTables } = require("../../ZelfID/modules/zelf-ids-revenue-cat-products.module");
+            const defaults = defaultZelfIdPlanPricingTables()[plan];
+            if (defaults && Object.keys(defaults).length > 0) {
+                return defaults;
+            }
+        }
+
         return fallback;
     }
 

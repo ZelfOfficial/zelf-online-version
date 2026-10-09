@@ -33,7 +33,7 @@ Registered in `Routes/protected-repositories.js`.
 | POST | `/preview-zelfproof` | `zelfProof`, `os` |
 | POST | `/preview-zelf-id-qr` | `zelfProofQRCode`, `os` |
 | POST | `/decrypt` | `tagName`, `domain`, `faceBase64`, `os` |
-| POST | `/revenue-cat` | RevenueCat `event` object |
+| POST | `/revenue-cat` | RevenueCat `event` object (`INITIAL_PURCHASE`, `RENEWAL`, `NON_RENEWING_PURCHASE`, `EXPIRATION`; products `zelf_premium_*` / `zelf_unlimited_*`) |
 | POST | `/purchase-rewards` | — (super admin; releases the oldest pending Tags purchase reward, 202 while its transfer is unconfirmed) |
 | POST | `/referral-rewards` | — (super admin; 410, referral rewards are claimed per referral with `POST /api/my-tags/referrals/claim`) |
 
