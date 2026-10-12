@@ -461,6 +461,15 @@ const upgrade = async (data) => {
     }
 };
 
+/** ZelfProof error codes caused by user input (wrong password, wrong face, bad proof bytes). */
+const ZELFPROOF_CLIENT_ERROR_STATUS = {
+    ERR_INVALID_PASSWORD: 401,
+    ERR_PASSWORD_REQUIRED: 409,
+    ERR_VERIFICATION_FAILED: 409,
+    ERR_INVALID_ZELFPROOF_BYTES: 400,
+    ERR_INVALID_ZELFPROOF: 400,
+};
+
 /**
  * Normalize upstream error `code`/`message` and assign HTTP `status` (422 face, 401 auth, 400 image, 409 password, else 500).
  * @param {Object} [error]
@@ -475,6 +484,13 @@ const _formattingError = (error = {}) => {
 
     if (error.message?.includes(config.terms.zk)) {
         error.message = error.message.replaceAll(config.terms.zk, config.terms._zk).toUpperCase();
+    }
+
+    // Known ZelfProof client errors map to 4xx even when upstream reported 500.
+    const clientStatus = ZELFPROOF_CLIENT_ERROR_STATUS[error.code];
+
+    if (clientStatus && (!error.status || error.status >= 500)) {
+        error.status = clientStatus;
     }
 
     // Determine appropriate HTTP status code based on error type
@@ -528,6 +544,8 @@ const _formattingError = (error = {}) => {
 };
 
 module.exports = {
+    _formattingError,
+    ZELFPROOF_CLIENT_ERROR_STATUS,
     encrypt,
     encryptQRCode,
     decrypt,

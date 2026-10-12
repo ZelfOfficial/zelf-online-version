@@ -51,7 +51,8 @@ const schemas = {
         tagName: string().required(),
         domain: string().required(),
         faceBase64: string().required(),
-        password: string().required(),
+        password: string().allow("", null),
+        securityType: stringEnum(["pin", "password", "securePassword", "withoutPassword"]).optional(),
         os: stringEnum(["DESKTOP", "ANDROID", "IOS"]).required(),
         captchaToken: stringOptionalEmptyAsNull().optional(),
     },
@@ -363,7 +364,7 @@ const leaseValidation = async (ctx, next) => {
  * @param {*} next - Next middleware
  */
 const leaseRecoveryValidation = async (ctx, next) => {
-    const { zelfProof, tagName, domain, faceBase64, password, os, captchaToken } = ctx.request.body;
+    const { zelfProof, tagName, domain, faceBase64, password, securityType, os, captchaToken } = ctx.request.body;
 
     const valid = validate(schemas.leaseRecovery, {
         zelfProof,
@@ -371,6 +372,7 @@ const leaseRecoveryValidation = async (ctx, next) => {
         domain,
         faceBase64,
         password,
+        securityType,
         os,
         captchaToken,
     });

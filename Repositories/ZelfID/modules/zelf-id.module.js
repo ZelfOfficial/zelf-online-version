@@ -5,6 +5,7 @@ const { assertTagAvailable } = require("../../Tags/modules/tag-availability");
  */
 const moment = require("moment");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
+const { NO_PASSWORD_PLACEHOLDER, effectivePassword } = require("./zelf-id-password.module");
 const TagsSearchModule = require("../../Tags/modules/tags-search.module");
 const { generateMnemonic } = require("../../Wallet/modules/helpers");
 const { createEthWallet } = require("../../Wallet/modules/eth");
@@ -102,6 +103,9 @@ const leaseTag = async (params, authUser) => {
     const { face, password } = decryptedParams;
 
     if (!face) throw new Error("409:face_not_found");
+
+    // Face-only clients send the placeholder; treat it as "no password" (backward compatible).
+    if (password === NO_PASSWORD_PLACEHOLDER) securityType = "withoutPassword";
 
     if (!password && securityType !== "withoutPassword") throw new Error("409:password_not_found");
 
@@ -273,13 +277,20 @@ const decryptTag = async (params, authUser) => {
 
     const searchResult = await searchTag({ tagName, domain, domainConfig, environment: "all", includeAllAddressPages: true }, authUser);
 
-    if (searchResult.available) return searchResult;
+    if (searchResult.available) throw new Error("404:tag_not_found");
 
     const tagObject = searchResult.tagObject;
 
     if (!tagObject?.zelfProof) throw new Error("404:tag_not_found");
 
-    const { face, password } = await _decryptParams(params, authUser);
+    const { face, password: rawPassword } = await _decryptParams(params, authUser);
+
+    // Face-only proofs must be decrypted without a password; clients may still send the placeholder.
+    const password = effectivePassword({
+        password: rawPassword,
+        securityType: params.securityType,
+        hasPassword: tagObject.publicData?.hasPassword,
+    });
 
     const decryptPayload = {
         addServerPassword: Boolean(params.addServerPassword),
@@ -311,7 +322,7 @@ const decryptTag = async (params, authUser) => {
         zkProof,
         solanaSecretKey,
         arweavePrivateKey: arweave.privateKey,
-        password,
+        password: password || rawPassword,
     });
 
     let upgradedLegacy = false;
