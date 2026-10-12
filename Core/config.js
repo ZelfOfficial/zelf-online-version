@@ -221,6 +221,8 @@ const configuration = {
     },
     revenueCat: {
         allowedEmail: process.env.REVENUECAT_ALLOWED_EMAIL,
+        /** Optional static bearer for RevenueCat dashboard Authorization (requires unprotected route or JWT bypass). */
+        webhookAuthorization: process.env.REVENUECAT_WEBHOOK_AUTHORIZATION,
     },
     solana: {
         rpcUrl:

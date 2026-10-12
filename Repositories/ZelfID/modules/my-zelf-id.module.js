@@ -97,11 +97,7 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token) => {
     };
 };
 
-const addDurationToTag = async (params, tagObject) => {
-    const { domain } = params;
-    const domainConfig = params.domainConfig || getDomainConfig(domain || "zelf");
-    const { metadata } = ZelfIdsPaymentModule.buildMetadata(params, tagObject, domainConfig);
-
+const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata) => {
     await ZelfIdsPaymentModule.ensureZelfProofQRCode(tagObject);
 
     if (domainConfig.isIPFSEnabled()) {
@@ -117,6 +113,12 @@ const addDurationToTag = async (params, tagObject) => {
         if (metadata?.extraParams && typeof metadata.extraParams === "string") {
             const parsed = JSON.parse(metadata.extraParams);
             expiresAt = parsed.expiresAt || null;
+            if (parsed.plan) {
+                tagObject.publicData = { ...tagObject.publicData, plan: parsed.plan, expiresAt, eventID: parsed.eventID };
+            }
+            if (parsed.revenueCatOriginalTransactionId) {
+                tagObject.publicData.revenueCatOriginalTransactionId = parsed.revenueCatOriginalTransactionId;
+            }
         }
     } catch (_error) {
         /* optional */
@@ -143,6 +145,22 @@ const addDurationToTag = async (params, tagObject) => {
     };
 };
 
+const addDurationToTag = async (params, tagObject) => {
+    const { domain } = params;
+    const domainConfig = params.domainConfig || getDomainConfig(domain || "zelf");
+    const { metadata } = ZelfIdsPaymentModule.buildMetadata(params, tagObject, domainConfig);
+
+    return persistZelfIdMetadata(params, tagObject, domainConfig, metadata);
+};
+
+const revertZelfIdToFreePlan = async (params, tagObject) => {
+    const { domain } = params;
+    const domainConfig = params.domainConfig || getDomainConfig(domain || "zelf");
+    const { metadata } = ZelfIdsPaymentModule.buildFreePlanRevertMetadata(params, tagObject, domainConfig);
+
+    return persistZelfIdMetadata(params, tagObject, domainConfig, metadata);
+};
+
 const getPaymentOptions = (tagName, domain, duration, authUser, requestOptions = {}) =>
     ZelfIdsPaymentModule.getPaymentOptions(tagName, domain, duration, authUser, requestOptions);
 
@@ -153,5 +171,6 @@ module.exports = {
     verifyPaymentConfirmation,
     verifySmartContractPayment,
     addDurationToTag,
+    revertZelfIdToFreePlan,
     getPaymentOptions,
 };

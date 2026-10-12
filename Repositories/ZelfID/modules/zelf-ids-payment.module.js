@@ -26,6 +26,7 @@ const {
     normalizePaymentDuration,
     getCanonicalMainnetName,
     getZelfIdCheckoutPrice,
+    FREE_EXPIRATION_YEARS,
 } = require("./zelf-id-plan.module");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
 
@@ -424,6 +425,7 @@ const buildMetadata = (params, tagObject, domainConfig) => {
         hasPassword: tagObject.publicData.hasPassword,
         eventID: params.eventID || undefined,
         eventPrice: params.eventPrice || undefined,
+        revenueCatOriginalTransactionId: params.revenueCatOriginalTransactionId || tagObject.publicData.revenueCatOriginalTransactionId || undefined,
         plan,
     };
 
@@ -442,6 +444,44 @@ const buildMetadata = (params, tagObject, domainConfig) => {
         metadata.referralTagName = metadata.referral.tagName;
         metadata.referral = JSON.stringify(metadata.referral);
     }
+
+    metadata.extraParams = JSON.stringify(cleanExtraParamsForPinata(metadata.extraParams));
+
+    return { metadata, fullTagName: tagObject.fullTagName };
+};
+
+/**
+ * Stamp `free` with the 100-year lease sentinel after a subscription expires.
+ * @param {Object} params
+ * @param {Object} tagObject
+ * @param {Object} domainConfig
+ */
+const buildFreePlanRevertMetadata = (params, tagObject, domainConfig) => {
+    const domain = params.domain || domainConfig.name;
+    tagObject.fullTagName = getCanonicalMainnetName(params.tagName || tagObject.publicData.tagName || tagObject.publicData.zelfName, domain);
+
+    const storageKey = domainConfig.getTagKey();
+    const encryptVersion = resolveEncryptVersion(tagObject.publicData);
+
+    const extraParams = {
+        origin: tagObject.publicData.origin || "online",
+        price: tagObject.publicData.price,
+        duration: "1",
+        registeredAt: tagObject.publicData.registeredAt || moment().format("YYYY-MM-DD HH:mm:ss"),
+        renewedAt: moment().format("YYYY-MM-DD HH:mm:ss"),
+        expiresAt: moment().add(FREE_EXPIRATION_YEARS, "year").format("YYYY-MM-DD HH:mm:ss"),
+        type: "mainnet",
+        hasPassword: tagObject.publicData.hasPassword,
+        eventID: params.eventID || undefined,
+        revenueCatOriginalTransactionId: tagObject.publicData.revenueCatOriginalTransactionId || params.revenueCatOriginalTransactionId || undefined,
+        plan: "free",
+    };
+
+    const metadata = {
+        [storageKey]: tagObject.fullTagName,
+        domain,
+        extraParams: stampExtraParamsVersion(extraParams, encryptVersion),
+    };
 
     metadata.extraParams = JSON.stringify(cleanExtraParamsForPinata(metadata.extraParams));
 
@@ -858,6 +898,7 @@ const storeInArweave = async (tagObject, domainConfig, metadata) => {
 
 module.exports = {
     buildMetadata,
+    buildFreePlanRevertMetadata,
     getPaymentOptions,
     isTagPayReducedFeeClientHeaderHonored,
     ensureZelfProofQRCode,
