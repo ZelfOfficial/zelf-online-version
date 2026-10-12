@@ -132,14 +132,21 @@ const assertProtectionStoreRules = (protection, keyPassword) => {
 const resolveKeyPasswordInput = (data) => data.masterPassword ?? data.password;
 
 /**
+ * Store payloads carry the secret being saved in `password` (password keys), so on store the
+ * key-layer password is `masterPassword` ONLY. Falling back to `password` would treat the stored
+ * site password as the Zelf ID password and break face-only IDs (VERIFICATION FAILED).
+ */
+const resolveStoreKeyPassword = (data) => data.masterPassword;
+
+/**
  * Decrypt face + key-layer password consistently for store and retrieve.
  * @param {Object} data
  * @param {Object} authToken
  */
-const decryptKeyCredentials = async (data, authToken) =>
+const decryptKeyCredentials = async (data, authToken, { store = false } = {}) =>
     TagsPartsModule.decryptParams(
         {
-            password: resolveKeyPasswordInput(data),
+            password: store ? resolveStoreKeyPassword(data) : resolveKeyPasswordInput(data),
             faceBase64: data.faceBase64,
             removePGP: data.removePGP,
         },
@@ -397,7 +404,7 @@ const storeData = async (data, authToken) => {
     try {
         const { type, domain } = data;
 
-        const decryptedParams = await decryptKeyCredentials(data, authToken);
+        const decryptedParams = await decryptKeyCredentials(data, authToken, { store: true });
 
         let decryptedSensitiveData = {};
 
@@ -424,7 +431,7 @@ const storeData = async (data, authToken) => {
 
         const faceBase64 = decryptedParams.face;
 
-        await _validateOwnership(data.faceBase64, resolveKeyPasswordInput(data), authToken, data);
+        await _validateOwnership(data.faceBase64, resolveStoreKeyPassword(data), authToken, data);
 
         const { metadata, publicData, fullTagName, protection } = await createMetadataAndPublicData(
             type,
