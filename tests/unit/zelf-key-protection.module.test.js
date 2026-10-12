@@ -255,6 +255,25 @@ describe("ZelfKeys store protection", () => {
         expect(ZelfProofModule.encrypt).not.toHaveBeenCalled();
     });
 
+    it("face-only password store does not treat the stored site password as the Zelf ID password", async () => {
+        const TagsModule = require("../../Repositories/Tags/modules/tags.module");
+
+        await ZelfKeyModule.storeData(
+            {
+                type: "password",
+                website: "https://example.com",
+                username: "user@example.com",
+                password: "site-secret",
+                faceBase64: "face",
+                removePGP: true,
+            },
+            authToken,
+        );
+
+        expect(TagsPartsModule.decryptParams).toHaveBeenCalledWith(expect.objectContaining({ password: undefined }), authToken);
+        expect(TagsModule.decryptTag).toHaveBeenCalledWith(expect.objectContaining({ password: undefined }), authToken);
+    });
+
     it("encrypts face_password keys with the master password", async () => {
         await ZelfKeyModule.storeData(
             {
