@@ -7,7 +7,7 @@
 | GET | `/api/mail/inbound?status=&since=&classification=&limit=` | `x-api-key: $SUPER_ADMINS_JWT_SECRET` or `Bearer <JWT signed with it>` |
 | GET | `/api/mail/inbound/:id` | same: full body, headers, attachment metadata and inline bytes |
 | PATCH | `/api/mail/inbound/:id` `{status?, action?, note?}` | same: appends to `actionLog` |
-| POST | `/api/mail/webhook` | legacy stub, now Mailgun-signature protected, no longer echoes the body |
+| POST | `/api/mail/webhook` | Mailgun signature. Acknowledges `{ received: true, stored: false }` and does not persist. Inbound mail uses `/api/mail/inbound/jim`. |
 
 Every signed message to `JIM_INBOUND_RECIPIENTS` is stored (`InboundEmail` collection). The
 `JIM_INBOUND_ALLOWED_SENDERS` list only sets `senderAllowed`, which gates actions. Staff invites
@@ -16,7 +16,7 @@ A short notification (masked token, 280-char snippet) goes to `JIM_INBOUND_FORWA
 `X-Jim-Timestamp` and `X-Jim-Signature` = HMAC-SHA256(`JIM_INBOUND_FORWARD_SECRET`, `ts.body`)), else to `JIM_INBOUND_DISCORD_WEBHOOK_URL`.
 
 Attachments: sha256 and metadata always. Bytes are stored inline only for pdf/ics/txt/csv/images ≤ 2 MB.
-Larger files are fetched from Mailgun storage (`store()`) with `MAILGUN_API_KEY`. The koa-body form limit is 6 MB.
+When the route also calls `store()`, files missing from the forward (or not inlined) are filled in the background from `message-url` with `MAILGUN_API_KEY`. Downloads stop at 8 MB; larger files keep `mailgunUrl` and the size Mailgun reported. The koa-body form limit is 6 MB.
 
 ## Mailgun setup (Receiving → Routes)
 Inbound MX for `mg.zelf.world`: `mxa.mailgun.org` and `mxb.mailgun.org`, priority 10.

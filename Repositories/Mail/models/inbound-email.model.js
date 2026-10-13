@@ -9,6 +9,7 @@ const AttachmentSchema = new Schema(
 		sha256: String,
 		contentBase64: { type: String, select: false },
 		storedInline: { type: Boolean, default: false },
+		mailgunUrl: String,
 	},
 	{ _id: false }
 );
@@ -61,6 +62,7 @@ const InboundEmailSchema = new Schema(
 		status: { type: String, enum: ["received", "forwarded", "actioned", "error"], default: "received", index: true },
 		forwardedAt: Date,
 		forwardError: String,
+		attachmentError: String,
 		actionLog: [ActionLogSchema],
 		receivedAt: { type: Date, default: Date.now, index: true },
 	},
