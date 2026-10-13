@@ -66,7 +66,18 @@ const configuration = {
         mailgun: {
             proxyEmail: process.env.MAILGUN_PROXY_EMAIL || "miguel@zelf.world",
             apiKey: process.env.MAILGUN_API_KEY,
+            domain: process.env.MAILGUN_DOMAIN || "mg.zelf.world",
+            apiBase: (process.env.MAILGUN_API_BASE || "https://api.mailgun.net").replace(/\/$/, ""),
+            webhookSigningKey: process.env.MAILGUN_WEBHOOK_SIGNING_KEY,
         },
+    },
+    jimInbound: {
+        recipients: process.env.JIM_INBOUND_RECIPIENTS || "jim@mg.zelf.world",
+        allowedSenders: process.env.JIM_INBOUND_ALLOWED_SENDERS || "",
+        forwardUrl: process.env.JIM_INBOUND_FORWARD_URL,
+        forwardSecret: process.env.JIM_INBOUND_FORWARD_SECRET,
+        discordWebhookUrl: process.env.JIM_INBOUND_DISCORD_WEBHOOK_URL,
+        maxTimestampSkewSec: Number(process.env.JIM_INBOUND_MAX_SKEW_SEC || 300),
     },
     signedData: {
         key: process.env.SECRET_KEY_PRICI,
