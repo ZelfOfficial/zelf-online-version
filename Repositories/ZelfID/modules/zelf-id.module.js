@@ -39,6 +39,7 @@ const {
     effectivePlan,
     getZelfIdPrice,
     getZelfIdCheckoutPrice,
+    getBareNameLength,
 } = require("./zelf-id-plan.module");
 
 /**
@@ -211,7 +212,7 @@ const leaseTag = async (params, authUser) => {
  * @returns {Promise<Object>} search result (`available`, `tagName`, `tagObject?`, `price?`)
  */
 const searchTag = async (params, authUser) => {
-    const { tagName, domain, key, value, environment, type, domainConfig, duration, includeAllAddressPages } = params;
+    const { tagName, domain, key, value, environment, type, domainConfig, duration, includeAllAddressPages, plan } = params;
 
     try {
         const _domainConfig = domainConfig || getDomainConfig(domain);
@@ -238,11 +239,13 @@ const searchTag = async (params, authUser) => {
                     domain,
                     domainConfig: _domainConfig,
                     duration: duration || "1",
+                    plan,
                 }),
                 {
                     tagName,
                     duration: duration || "1",
                     domainConfig: _domainConfig,
+                    plan,
                 }
             )
         );
@@ -553,31 +556,60 @@ const applyExpiredPlanDowngrade = (result) => {
  * @param {Object} context.domainConfig
  * @returns {Object}
  */
-const attachAvailableZelfIdPricing = (result, { tagName, duration, domainConfig }) => {
+/**
+ * Every paid plan the license prices for this name length, with each offered duration's USD price.
+ * Plans, durations and length groups all come from the license `tags.payment.planPricing`.
+ * @param {Object} domainConfig
+ * @param {string} tagName
+ * @returns {Record<string, Record<string, number>>} e.g. { premium: { "1": 29, lifetime: 144.99 }, unlimited: {...} }
+ */
+const licensePlansForName = (domainConfig, tagName) => {
+    const planPricing = domainConfig?.tags?.payment?.planPricing;
+    if (!planPricing || typeof planPricing !== "object" || typeof domainConfig.licensePlanDurations !== "function") return {};
+
+    const length = getBareNameLength(tagName);
+    const plans = {};
+    for (const planName of Object.keys(planPricing)) {
+        const durations = domainConfig.licensePlanDurations(planName, length);
+        if (!durations.length) continue;
+        plans[planName] = Object.fromEntries(durations.map((d) => [d, domainConfig.licensePlanPrice(planName, length, d)]));
+    }
+    return plans;
+};
+
+const attachAvailableZelfIdPricing = (result, { tagName, duration, domainConfig, plan }) => {
     if (!result?.available || !domainConfig) return result;
 
-    const leaseQuote = getZelfIdPrice({
-        tagName,
-        duration: duration || "1",
-        domainConfig,
-    });
+    const plans = licensePlansForName(domainConfig, tagName);
+    const requestedPlan = typeof plan === "string" && plan.trim() && plan.trim().toLowerCase() !== "free" ? plan.trim().toLowerCase() : undefined;
+
+    // An explicit plan must be one the license prices for this length (same rule as payment-options).
+    if (requestedPlan && domainConfig?.tags?.payment?.planPricing && !plans[requestedPlan]) {
+        throw new Error("409:plan_not_offered_for_name");
+    }
+
     const upgradeQuote = getZelfIdCheckoutPrice({
         tagName,
         duration: duration || "1",
         domainConfig,
+        requestedPlan,
     });
 
+    // Record plan stays as today: an available name starts free. Only the quote follows `plan`.
+    const recordPlan = "free";
     const price = {
         ...upgradeQuote,
-        plan: leaseQuote.plan,
-        allowedPlans: leaseQuote.allowedPlans,
+        plan: recordPlan,
+        allowedPlans: upgradeQuote.allowedPlans,
+        ...(requestedPlan ? { quotedPlan: requestedPlan } : {}),
     };
 
     return {
         ...result,
         price,
-        plan: leaseQuote.plan,
-        allowedPlans: leaseQuote.allowedPlans,
+        plan: recordPlan,
+        allowedPlans: upgradeQuote.allowedPlans,
+        plans,
     };
 };
 
@@ -624,6 +656,7 @@ const releaseExpiredUnpaidReservation = async (result, context = {}) => {
         tagName: context.tagName,
         duration: context.duration || "1",
         domainConfig: context.domainConfig,
+        plan: context.plan,
     });
 };
 
