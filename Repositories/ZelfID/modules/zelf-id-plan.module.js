@@ -157,6 +157,24 @@ const getZelfIdPrice = ({ tagName, duration = "1", referralTagName = "", domainC
 };
 
 /**
+ * Reject a plan/duration the license does not price for this name (e.g. 4y, premium on 1–5 chars).
+ * @param {Object} params
+ * @param {Object} params.domainConfig
+ * @param {string} params.tagName
+ * @param {"premium"|"unlimited"} params.plan
+ * @param {string|number} params.duration
+ */
+const assertLicenseOffersPlan = ({ domainConfig, tagName, plan, duration }) => {
+    if (typeof domainConfig?.licensePlanDurations !== "function") throw new Error("409:license_price_required");
+    const offered = domainConfig.licensePlanDurations(plan, getBareNameLength(tagName));
+    const raw = `${duration ?? ""}`.trim().toLowerCase();
+    const wanted = raw === "999" ? "lifetime" : raw;
+    if (!offered.includes(wanted)) {
+        throw new Error(offered.length ? "409:plan_duration_not_offered_by_license" : "409:plan_not_offered_for_name");
+    }
+};
+
+/**
  * Checkout quote: priced with the same paid plan the payment will stamp.
  * Without an explicit plan a long name pays (and is stamped) premium, never
  * the Tags default table; short names always pay unlimited.
@@ -196,13 +214,14 @@ const resolveComplimentaryPlan = ({ price } = {}) => {
 /**
  * API / UI duration → license key. `999` is the checkout alias for `lifetime`.
  * @param {string|number} [duration]
- * @returns {"1"|"2"|"3"|"4"|"5"|"lifetime"}
+ * Any whole number of years is passed through; whether it is offered is decided by the license.
+ * @returns {string}
  */
 const normalizePaymentDuration = (duration = "1") => {
     const raw = `${duration ?? "1"}`.trim().toLowerCase();
     if (raw === "999" || raw === "lifetime") return "lifetime";
-    if (["1", "2", "3", "4", "5"].includes(raw)) return raw;
-    return "1";
+    if (/^\d+$/.test(raw) && Number(raw) > 0) return String(Number(raw));
+    return raw || "1";
 };
 
 /**
@@ -442,6 +461,7 @@ module.exports = {
     resolvePaidPlan,
     getZelfIdPrice,
     getZelfIdCheckoutPrice,
+    assertLicenseOffersPlan,
     resolveZelfIdPlan,
     resolveComplimentaryPlan,
     resolveUpgradePlan,

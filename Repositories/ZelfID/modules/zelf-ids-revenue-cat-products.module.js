@@ -1,5 +1,5 @@
 /**
- * RevenueCat store product ids → Zelf ID plan + term, and default in-app plan pricing.
+ * RevenueCat store product ids → Zelf ID plan + term, (prices come only from the license planPricing).
  *
  * App Store / Play products (Play may append `:base-plan-id`):
  *   zelf_premium_1y, zelf_unlimited_1y — auto-renewing subscription (+1 year per INITIAL_PURCHASE / RENEWAL)
@@ -22,34 +22,6 @@ const ZELF_ID_REVENUECAT_PRODUCT_MAP = Object.freeze({
     zelf_premium_lifetime: { plan: "premium", duration: "lifetime", subscription: false },
     zelf_unlimited_lifetime: { plan: "unlimited", duration: "lifetime", subscription: false },
 });
-
-const APP_PLAN_USD = Object.freeze({
-    premium: { 1: 29, 2: 43.49, 3: 56.99, lifetime: 144.99 },
-    unlimited: { 1: 99, 2: 148.99, 3: 192.99, lifetime: 494.99 },
-});
-
-const PLAN_PRICING_LENGTH_BUCKETS = ["1-5", "6-15", "16-27"];
-
-/**
- * Default `tags.payment.planPricing` cells for Zelf ID in-app subscriptions when the license omits them.
- * @returns {{ premium: Object, unlimited: Object }}
- */
-const defaultZelfIdPlanPricingTables = () => {
-    const premium = {};
-    const unlimited = {};
-
-    for (const bucket of PLAN_PRICING_LENGTH_BUCKETS) {
-        premium[bucket] = { ...APP_PLAN_USD.premium };
-        unlimited[bucket] = { ...APP_PLAN_USD.unlimited };
-    }
-
-    for (let length = 1; length <= 5; length += 1) {
-        premium[length] = { ...premium["1-5"] };
-        unlimited[length] = { ...unlimited["1-5"] };
-    }
-
-    return { premium, unlimited };
-};
 
 /**
  * @param {string} productId
@@ -82,7 +54,5 @@ const parseSubscriptionProductId = (productId) => {
 
 module.exports = {
     ZELF_ID_REVENUECAT_PRODUCT_MAP,
-    APP_PLAN_USD,
-    defaultZelfIdPlanPricingTables,
     parseSubscriptionProductId,
 };

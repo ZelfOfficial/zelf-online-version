@@ -12,7 +12,7 @@ const { normalizePaymentDuration } = require("./zelf-id-plan.module");
 const SOURCE = "zelf-id-lease";
 const TYPE = "zelf_id_lease";
 const ALLOWED_PLANS = new Set(["premium", "unlimited", "free"]);
-const ALLOWED_DURATIONS = new Set(["1", "2", "3", "4", "5", "lifetime"]);
+const isDurationStamp = (duration) => duration === "lifetime" || /^\d+$/.test(String(duration || ""));
 
 const getStripeClient = () => Stripe(config.stripe.secretKey);
 
@@ -44,7 +44,7 @@ const parseLeaseStripeMetadata = (metadata = {}) => {
         return null;
     }
 
-    if (!tagName || !domain || !ALLOWED_DURATIONS.has(duration) || !ALLOWED_PLANS.has(plan)) {
+    if (!tagName || !domain || !isDurationStamp(duration) || !ALLOWED_PLANS.has(plan)) {
         return null;
     }
 
@@ -138,6 +138,13 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
 
     if (!ALLOWED_PLANS.has(resolvedPlan)) {
         throw new Error("409:invalid_plan");
+    }
+
+    // The license decides which plan/durations exist for this name length.
+    {
+        const { assertLicenseOffersPlan, resolvePaidPlan } = require("./zelf-id-plan.module");
+        const checkedPlan = resolvedPlan === "free" ? resolvePaidPlan({ tagName: expectedFull }) : resolvedPlan;
+        assertLicenseOffersPlan({ domainConfig: getDomainConfig(domainName), tagName: expectedFull, plan: checkedPlan, duration: expectedDuration });
     }
 
     const amountUsd = resolveQuotedUsd(tokenDecoded);

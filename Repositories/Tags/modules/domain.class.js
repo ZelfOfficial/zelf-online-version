@@ -123,11 +123,7 @@ class Domain {
         if (plan !== "premium" && plan !== "unlimited") return fallback;
 
         const planTable = this.tags?.payment?.planPricing?.[plan];
-        if (planTable && typeof planTable === "object" && Object.keys(planTable).length > 0) {
-            return planTable;
-        }
-
-        return fallback;
+        return planTable && typeof planTable === "object" ? planTable : {};
     }
 
     /**
@@ -176,7 +172,31 @@ class Domain {
         if (duration != null) return this.licensePlanPrice(plan, length, duration) !== undefined;
         const table = this.tags?.payment?.planPricing?.[plan];
         if (!table || typeof table !== "object") return false;
-        return ["1", "2", "3", "4", "5", "lifetime"].some((d) => this.licensePlanPrice(plan, length, d) !== undefined);
+        return this.licensePlanDurations(plan, length).length > 0;
+    }
+
+    /**
+     * Durations the license prices for `plan` at this name length (e.g. ["1","2","3","lifetime"]).
+     * Read from the license cells; nothing is hardcoded.
+     * @param {string} plan
+     * @param {number} length
+     * @returns {string[]}
+     */
+    licensePlanDurations(plan, length) {
+        const table = this.tags?.payment?.planPricing?.[plan];
+        if (!table || typeof table !== "object") return [];
+
+        const durations = new Set();
+        for (const [key, cells] of Object.entries(table)) {
+            const range = /^(\d+)-(\d+)$/.exec(key);
+            const covers = range ? length >= Number(range[1]) && length <= Number(range[2]) : Number(key) === length;
+            if (!covers || !cells || typeof cells !== "object") continue;
+            for (const [duration, price] of Object.entries(cells)) {
+                if (typeof price === "number" && Number.isFinite(price)) durations.add(duration);
+            }
+        }
+
+        return [...durations];
     }
 
     /**
@@ -209,23 +229,22 @@ class Domain {
         const length = splitTagName[0].length;
         const plan = options && typeof options === "object" ? options.plan : undefined;
         const fallbackTable = this.tags?.payment?.pricingTable || {};
-        const table = this._pricingTableForPlan(plan);
+        const isPlan = plan === "premium" || plan === "unlimited";
+        let price;
 
-        if (!fallbackTable && !table) return 0;
-
-        if (!["1", "2", "3", "4", "5", "lifetime"].includes(`${duration}`))
-            throw new Error("Invalid duration. Use '1', '2', '3', '4', '5' or 'lifetime'.");
-
-        let price = this._lookupTablePrice(table, length, duration);
-        if (price == null && table !== fallbackTable) {
+        if (isPlan) {
+            // Zelf ID plans: ONLY the license planPricing. No Tags table, no hardcoded default.
+            price = this.licensePlanPrice(plan, length, `${duration}`);
+            if (price === undefined) {
+                throw new Error("409:plan_duration_not_offered_by_license");
+            }
+        } else {
             price = this._lookupTablePrice(fallbackTable, length, duration);
         }
 
+        // No hardcoded default: a name/duration the license does not price is not for sale.
         if (price == null) {
-            if (length < 1 || length > 27) {
-                throw new Error("Invalid name length. Length must be between 1 and 27.");
-            }
-            price = 24;
+            throw new Error("409:price_not_in_license");
         }
 
         // Adjust price for development environment

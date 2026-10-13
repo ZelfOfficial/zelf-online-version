@@ -108,13 +108,13 @@ const paymentSchemas = {
     paymentOptions: {
         tagName: string().required(),
         domain: string(),
-        duration: stringEnum(["1", "2", "3", "4", "5", "lifetime"]).required(),
+        duration: string().required(), // allowed values come from the license planPricing
         plan: stringEnum(["premium", "unlimited"]).optional(),
     },
     stripeCheckout: {
         tagName: string().required(),
         domain: string(),
-        duration: stringEnum(["1", "2", "3", "4", "5", "lifetime"]).required(),
+        duration: string().required(), // allowed values come from the license planPricing
         plan: stringEnum(["premium", "unlimited", "free"]).optional(),
         token: string().required(),
         locale: string(),
@@ -186,6 +186,25 @@ const revenueCatWebhookValidation = async (ctx, next) => {
     await next();
 };
 
+/**
+ * Duration/plan must be priced by the license for this name length (no hardcoded 1–5).
+ * @returns {string|null} validation error, or null
+ */
+const licensePlanDurationError = (tagName, domain, plan, duration) => {
+    const { getDomainConfig } = require("../../Tags/config/supported-domains");
+    const { assertLicenseOffersPlan, resolvePaidPlan } = require("../modules/zelf-id-plan.module");
+    const domainName = String(domain || String(tagName || "").split(".")[1] || "zelf").toLowerCase();
+    const paidPlan = resolvePaidPlan({ tagName, requestedPlan: plan === "free" ? undefined : plan });
+    // An explicit premium on a short name must be rejected, not silently stamped unlimited.
+    const checkedPlan = plan === "premium" || plan === "unlimited" ? plan : paidPlan;
+    try {
+        assertLicenseOffersPlan({ domainConfig: getDomainConfig(domainName), tagName, plan: checkedPlan, duration });
+        return null;
+    } catch (error) {
+        return String(error.message || error).replace(/^409:/, "");
+    }
+};
+
 const paymentOptionsValidation = async (ctx, next) => {
     const duration = `${ctx.request.query.duration ?? ""}`.trim();
     if (duration === "999") {
@@ -206,6 +225,13 @@ const paymentOptionsValidation = async (ctx, next) => {
     if (!domainValidation.valid) {
         ctx.status = 409;
         ctx.body = { validationError: domainValidation.error };
+        return;
+    }
+
+    const planError = licensePlanDurationError(tagName, domain, ctx.request.query.plan, ctx.request.query.duration);
+    if (planError) {
+        ctx.status = 409;
+        ctx.body = { validationError: planError };
         return;
     }
 
@@ -242,6 +268,13 @@ const stripeCheckoutValidation = async (ctx, next) => {
     if (!domainValidation.valid) {
         ctx.status = 409;
         ctx.body = { validationError: domainValidation.error };
+        return;
+    }
+
+    const planError = licensePlanDurationError(tagName, domain, ctx.request.body.plan, ctx.request.body.duration);
+    if (planError) {
+        ctx.status = 409;
+        ctx.body = { validationError: planError };
         return;
     }
 
