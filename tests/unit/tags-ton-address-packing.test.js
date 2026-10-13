@@ -38,7 +38,7 @@ jest.mock("../../Repositories/Tags/config/supported-domains", () => ({
 	getDomainConfig: () => ({
 		name: "zelf",
 		getTagKey: () => "tagName",
-		tags: { storage: { keyPrefix: "tagName" } },
+		tags: { storage: { keyPrefix: "tagName" }, ...require("../fixtures/zelf-plan-license.fixture").zelfPlanLicenseData().tags },
 	}),
 }));
 

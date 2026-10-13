@@ -11,7 +11,8 @@ const { normalizePaymentDuration } = require("./zelf-id-plan.module");
 
 const SOURCE = "zelf-id-lease";
 const TYPE = "zelf_id_lease";
-const ALLOWED_PLANS = new Set(["premium", "unlimited", "free"]);
+// Plan names are whatever the license planPricing defines (checked at checkout); metadata only needs a slug.
+const isPlanSlug = (plan) => /^[a-z0-9_-]+$/i.test(String(plan || ""));
 const isDurationStamp = (duration) => duration === "lifetime" || /^\d+$/.test(String(duration || ""));
 
 const getStripeClient = () => Stripe(config.stripe.secretKey);
@@ -44,7 +45,7 @@ const parseLeaseStripeMetadata = (metadata = {}) => {
         return null;
     }
 
-    if (!tagName || !domain || !isDurationStamp(duration) || !ALLOWED_PLANS.has(plan)) {
+    if (!tagName || !domain || !isDurationStamp(duration) || !isPlanSlug(plan)) {
         return null;
     }
 
@@ -130,22 +131,21 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
         throw new Error("409:duration_mismatch");
     }
 
-    const resolvedPlan = plan || tokenDecoded.plan || "premium";
+    const { assertLicenseOffersPlan, resolvePaidPlan } = require("./zelf-id-plan.module");
+    const licenseConfig = getDomainConfig(domainName);
+    const resolvedPlan = plan || tokenDecoded.plan || resolvePaidPlan({ tagName: expectedFull, domainConfig: licenseConfig });
 
     if (plan && tokenDecoded.plan && tokenDecoded.plan !== plan) {
         throw new Error("409:plan_mismatch");
     }
 
-    if (!ALLOWED_PLANS.has(resolvedPlan)) {
+    if (!resolvedPlan) {
         throw new Error("409:invalid_plan");
     }
 
     // The license decides which plan/durations exist for this name length.
-    {
-        const { assertLicenseOffersPlan, resolvePaidPlan } = require("./zelf-id-plan.module");
-        const checkedPlan = resolvedPlan === "free" ? resolvePaidPlan({ tagName: expectedFull }) : resolvedPlan;
-        assertLicenseOffersPlan({ domainConfig: getDomainConfig(domainName), tagName: expectedFull, plan: checkedPlan, duration: expectedDuration });
-    }
+    const checkedPlan = resolvedPlan === "free" ? resolvePaidPlan({ tagName: expectedFull, domainConfig: licenseConfig }) : resolvedPlan;
+    assertLicenseOffersPlan({ domainConfig: licenseConfig, tagName: expectedFull, plan: checkedPlan, duration: expectedDuration });
 
     const amountUsd = resolveQuotedUsd(tokenDecoded);
 

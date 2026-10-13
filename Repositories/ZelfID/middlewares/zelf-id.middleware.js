@@ -109,13 +109,13 @@ const paymentSchemas = {
         tagName: string().required(),
         domain: string(),
         duration: string().required(), // allowed values come from the license planPricing
-        plan: stringEnum(["premium", "unlimited"]).optional(),
+        plan: string().optional(), // offered plans come from the license planPricing
     },
     stripeCheckout: {
         tagName: string().required(),
         domain: string(),
         duration: string().required(), // allowed values come from the license planPricing
-        plan: stringEnum(["premium", "unlimited", "free"]).optional(),
+        plan: string().optional(), // "free" or a plan the license prices
         token: string().required(),
         locale: string(),
         email: string(),
@@ -194,11 +194,11 @@ const licensePlanDurationError = (tagName, domain, plan, duration) => {
     const { getDomainConfig } = require("../../Tags/config/supported-domains");
     const { assertLicenseOffersPlan, resolvePaidPlan } = require("../modules/zelf-id-plan.module");
     const domainName = String(domain || String(tagName || "").split(".")[1] || "zelf").toLowerCase();
-    const paidPlan = resolvePaidPlan({ tagName, requestedPlan: plan === "free" ? undefined : plan });
-    // An explicit premium on a short name must be rejected, not silently stamped unlimited.
-    const checkedPlan = plan === "premium" || plan === "unlimited" ? plan : paidPlan;
+    const domainConfig = getDomainConfig(domainName);
+    // An explicit paid plan is checked as-is (premium on a short name is rejected, not re-stamped).
+    const checkedPlan = plan && plan !== "free" ? plan : resolvePaidPlan({ tagName, domainConfig });
     try {
-        assertLicenseOffersPlan({ domainConfig: getDomainConfig(domainName), tagName, plan: checkedPlan, duration });
+        assertLicenseOffersPlan({ domainConfig, tagName, plan: checkedPlan, duration });
         return null;
     } catch (error) {
         return String(error.message || error).replace(/^409:/, "");

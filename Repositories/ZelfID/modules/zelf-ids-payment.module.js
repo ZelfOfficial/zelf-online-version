@@ -412,7 +412,7 @@ const buildMetadata = (params, tagObject, domainConfig) => {
         requestedPlan,
         publicData: tagObject.publicData,
     });
-    const plan = resolveUpgradePlan({ tagName: params.tagName || tagObject.fullTagName, requestedPlan }) || v4Stamp.plan;
+    const plan = resolveUpgradePlan({ tagName: params.tagName || tagObject.fullTagName, requestedPlan, domainConfig }) || v4Stamp.plan;
 
     const extraParams = {
         origin: tagObject.publicData.origin || "online",

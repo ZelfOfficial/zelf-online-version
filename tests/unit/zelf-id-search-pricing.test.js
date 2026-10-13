@@ -45,6 +45,8 @@ const buildDomainConfig = () => {
 
 	return {
 		name: "zelf",
+		// Which plans a length may take comes from the license; fixture license for tests.
+		tags: require("../fixtures/zelf-plan-license.fixture").zelfPlanLicenseData().tags,
 		getTagKey: () => "tagName",
 		getPrice: (tagName, duration, referralTagName, options = {}) => {
 			const length = String(tagName).split(".")[0].length;

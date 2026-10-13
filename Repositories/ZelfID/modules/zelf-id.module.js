@@ -247,7 +247,8 @@ const searchTag = async (params, authUser) => {
                     domainConfig: _domainConfig,
                     plan,
                 }
-            )
+            ),
+            _domainConfig
         );
 
         if (released.ipfs?.length) {
@@ -535,11 +536,11 @@ const persistZelfIdLease = async (tagObject, referralTagObject, domainConfig, se
     });
 };
 
-const applyExpiredPlanDowngrade = (result) => {
+const applyExpiredPlanDowngrade = (result, domainConfig) => {
     const publicData = result?.tagObject?.publicData;
     if (!publicData) return result;
 
-    const plan = effectivePlan(publicData);
+    const plan = effectivePlan(publicData, domainConfig);
     if (plan === publicData.plan) return result;
 
     result.tagObject.publicData = { ...publicData, plan };

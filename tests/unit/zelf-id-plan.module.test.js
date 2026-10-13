@@ -41,6 +41,7 @@ const licenseQuote = (price, extras = {}) => ({
 });
 
 const licenseDomain = (priceByName = {}) => ({
+	tags: require("../fixtures/zelf-plan-license.fixture").zelfPlanLicenseData().tags,
 	getPrice: (tagName, duration, referralTagName) => {
 		const bare = String(tagName || "").split(".")[0];
 		let price = priceByName[bare] ?? priceByName["*"] ?? 40;
@@ -50,6 +51,11 @@ const licenseDomain = (priceByName = {}) => ({
 		if (`${duration}` === "lifetime") price = price * 10;
 		return licenseQuote(price, { duration: `${duration}`, length: bare.length });
 	},
+});
+
+const { useZelfPlanLicense } = require("../fixtures/zelf-plan-license.fixture");
+beforeEach(() => {
+	useZelfPlanLicense();
 });
 
 describe("zelf-id-plan.module", () => {
@@ -196,6 +202,7 @@ describe("zelf-id-plan.module", () => {
 		expect(domain._lookupTablePrice(domain._pricingTableForPlan("unlimited"), 8, "3")).toBe(250);
 
 		const domainConfig = {
+			tags: require("../fixtures/zelf-plan-license.fixture").zelfPlanLicenseData().tags,
 			getPrice: (tagName, duration, referralTagName, options = {}) => {
 				const cell = domain._lookupTablePrice(domain._pricingTableForPlan(options.plan), String(tagName).split(".")[0].length, `${duration}`);
 				return licenseQuote(cell, { duration: `${duration}` });
@@ -247,6 +254,7 @@ describe("zelf-id-plan.module", () => {
 			unlimited: { "6-15": { 1: 99 }, 5: { 1: 150 } },
 		};
 		const domainConfig = {
+			tags: require("../fixtures/zelf-plan-license.fixture").zelfPlanLicenseData().tags,
 			getPrice: (tagName, duration, referralTagName, options = {}) => {
 				const length = String(tagName).split(".")[0].length;
 				const key = length >= 6 && length <= 15 ? "6-15" : length;
@@ -600,5 +608,31 @@ describe("zelf-id-plan.module", () => {
 				duration: "1",
 			})
 		).toBe("2");
+	});
+});
+
+describe("plan rules come from the license (no fixed length groups)", () => {
+	const { Domain } = require("../../Repositories/Tags/modules/domain.class");
+	const lic = (planPricing, extra = {}) => new Domain({ name: "zelf", tags: { minLength: 2, maxLength: 12, payment: { pricingTable: {}, planPricing }, ...extra } });
+
+	test("allowedPlans follows the license groups, not 1-5 / 6-27", () => {
+		const d = lic({ gold: { "2-3": { 1: 5 } }, silver: { "2-12": { 1: 1, lifetime: 9 } } });
+		expect(allowedPlansForName("ab.zelf", d)).toEqual(["free", "gold", "silver"]);
+		expect(allowedPlansForName("abcdefgh.zelf", d)).toEqual(["free", "silver"]);
+		expect(allowedPlansForName("a.zelf", d)).toEqual([]); // below license minLength
+		expect(allowedPlansForName("abcdefghijklm.zelf", d)).toEqual([]); // above license maxLength
+	});
+
+	test("default paid plan is the cheapest the license offers for the length", () => {
+		const d = lic({ gold: { "2-3": { 1: 5 } }, silver: { "2-12": { 1: 1 } } });
+		expect(resolvePaidPlan({ tagName: "ab.zelf", domainConfig: d })).toBe("silver");
+		expect(resolvePaidPlan({ tagName: "ab.zelf", domainConfig: d, requestedPlan: "gold" })).toBe("gold");
+		expect(resolvePaidPlan({ tagName: "abcdefgh.zelf", domainConfig: d, requestedPlan: "gold" })).toBe("silver");
+	});
+
+	test("isShortZelfIdName means the license has no premium for that length", () => {
+		const d = lic({ premium: { "4-12": { 1: 29 } }, unlimited: { "2-12": { 1: 99 } } });
+		expect(isShortZelfIdName("abc.zelf", d)).toBe(true);
+		expect(isShortZelfIdName("abcd.zelf", d)).toBe(false);
 	});
 });
