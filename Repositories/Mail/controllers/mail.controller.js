@@ -1,15 +1,6 @@
+// Legacy stub: no longer echoes the payload back.
 const webhookHandler = async (ctx) => {
-	try {
-		const data = {
-			payload: ctx.request.body,
-		};
-
-		ctx.body = { data };
-	} catch (error) {
-		ctx.status = error?.status || 500;
-
-		ctx.body = { error: error?.message || error };
-	}
+	ctx.body = { data: { received: true } };
 };
 
 module.exports = {

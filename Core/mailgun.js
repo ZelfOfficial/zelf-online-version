@@ -3,7 +3,7 @@ const axios = require("axios");
 const config = require("./config");
 const ejs = require("../Utilities/ejs.module");
 
-const domain = "mg.zelf.world";
+const domain = config.email_providers.mailgun.domain;
 
 const sendRequest = async (data) => {
 	try {
@@ -18,7 +18,7 @@ const sendRequest = async (data) => {
 			Authorization: `Basic ${Buffer.from(auth).toString("base64")}`,
 		};
 
-		const response = await axios.post(`https://api.mailgun.net/v3/${domain}/messages`, form, {
+		const response = await axios.post(`${config.email_providers.mailgun.apiBase}/v3/${domain}/messages`, form, {
 			headers,
 		});
 
