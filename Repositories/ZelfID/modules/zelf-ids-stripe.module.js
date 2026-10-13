@@ -12,7 +12,7 @@ const { normalizePaymentDuration } = require("./zelf-id-plan.module");
 const SOURCE = "zelf-id-lease";
 const TYPE = "zelf_id_lease";
 const ALLOWED_PLANS = new Set(["premium", "unlimited", "free"]);
-const ALLOWED_DURATIONS = new Set(["1", "2", "3", "4", "5", "lifetime"]);
+const ALLOWED_DURATIONS = new Set(["1", "2", "3", "lifetime"]); // no 4/5-year Zelf ID plans
 
 const getStripeClient = () => Stripe(config.stripe.secretKey);
 

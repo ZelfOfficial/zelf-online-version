@@ -28,27 +28,44 @@ const APP_PLAN_USD = Object.freeze({
     unlimited: { 1: 99, 2: 148.99, 3: 192.99, lifetime: 494.99 },
 });
 
-const PLAN_PRICING_LENGTH_BUCKETS = ["1-5", "6-15", "16-27"];
+/** Durations sold for Zelf ID plans. No 4- or 5-year options. */
+const ZELF_ID_PLAN_DURATIONS = Object.freeze(["1", "2", "3", "lifetime"]);
+
+const SHORT_NAME_MAX_LENGTH = 5;
+const MAX_NAME_LENGTH = 27;
 
 /**
- * Default `tags.payment.planPricing` cells for Zelf ID in-app subscriptions when the license omits them.
+ * Canonical `tags.payment.planPricing` for the `zelf` license.
+ * Premium exists only for 6+ character names; unlimited covers every length (1–27).
+ * Keys match the license table shape: single lengths plus the `6-15` bucket.
  * @returns {{ premium: Object, unlimited: Object }}
  */
 const defaultZelfIdPlanPricingTables = () => {
-    const premium = {};
-    const unlimited = {};
+    const premium = { "6-15": { ...APP_PLAN_USD.premium } };
+    const unlimited = { "6-15": { ...APP_PLAN_USD.unlimited } };
 
-    for (const bucket of PLAN_PRICING_LENGTH_BUCKETS) {
-        premium[bucket] = { ...APP_PLAN_USD.premium };
-        unlimited[bucket] = { ...APP_PLAN_USD.unlimited };
-    }
-
-    for (let length = 1; length <= 5; length += 1) {
-        premium[length] = { ...premium["1-5"] };
-        unlimited[length] = { ...unlimited["1-5"] };
+    for (let length = 1; length <= MAX_NAME_LENGTH; length += 1) {
+        if (length >= 6 && length <= 15) continue;
+        unlimited[length] = { ...APP_PLAN_USD.unlimited };
+        if (length > SHORT_NAME_MAX_LENGTH) premium[length] = { ...APP_PLAN_USD.premium };
     }
 
     return { premium, unlimited };
+};
+
+/**
+ * Overwrite `tags.payment.planPricing` on a `zelf` license JSON with the canonical tables,
+ * so a stale hosted license (IPFS) cannot advertise old prices. Other domains are untouched.
+ * @param {Object} licenseJson
+ * @returns {Object} same object
+ */
+const applyZelfIdPlanPricing = (licenseJson) => {
+    if (!licenseJson || typeof licenseJson !== "object") return licenseJson;
+    if (String(licenseJson.name || "").toLowerCase() !== "zelf") return licenseJson;
+    licenseJson.tags = licenseJson.tags || {};
+    licenseJson.tags.payment = licenseJson.tags.payment || {};
+    licenseJson.tags.payment.planPricing = defaultZelfIdPlanPricingTables();
+    return licenseJson;
 };
 
 /**
@@ -83,6 +100,8 @@ const parseSubscriptionProductId = (productId) => {
 module.exports = {
     ZELF_ID_REVENUECAT_PRODUCT_MAP,
     APP_PLAN_USD,
+    ZELF_ID_PLAN_DURATIONS,
     defaultZelfIdPlanPricingTables,
+    applyZelfIdPlanPricing,
     parseSubscriptionProductId,
 };

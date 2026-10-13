@@ -108,13 +108,13 @@ const paymentSchemas = {
     paymentOptions: {
         tagName: string().required(),
         domain: string(),
-        duration: stringEnum(["1", "2", "3", "4", "5", "lifetime"]).required(),
+        duration: stringEnum(["1", "2", "3", "lifetime"]).required(),
         plan: stringEnum(["premium", "unlimited"]).optional(),
     },
     stripeCheckout: {
         tagName: string().required(),
         domain: string(),
-        duration: stringEnum(["1", "2", "3", "4", "5", "lifetime"]).required(),
+        duration: stringEnum(["1", "2", "3", "lifetime"]).required(),
         plan: stringEnum(["premium", "unlimited", "free"]).optional(),
         token: string().required(),
         locale: string(),

@@ -171,7 +171,7 @@ describe("zelf-id-plan.module", () => {
 	test("getZelfIdPrice uses planPricing when the license has Premium/Unlimited tables", () => {
 		const { Domain } = require("../../Repositories/Tags/modules/domain.class");
 		const domain = new Domain({
-			name: "zelf",
+			name: "acme",
 			tags: {
 				payment: {
 					pricingTable: {
@@ -224,7 +224,7 @@ describe("zelf-id-plan.module", () => {
 		expect(unlimited.plan).toBe("unlimited");
 
 		const withoutPlanTables = new Domain({
-			name: "zelf",
+			name: "acme",
 			tags: {
 				payment: {
 					pricingTable: {

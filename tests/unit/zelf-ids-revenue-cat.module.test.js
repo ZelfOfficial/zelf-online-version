@@ -65,7 +65,8 @@ describe("parseSubscriptionProductId", () => {
     test("default plan pricing matches Andrés USD table", () => {
         const tables = defaultZelfIdPlanPricingTables();
         expect(tables.premium["6-15"]).toEqual({ 1: 29, 2: 43.49, 3: 56.99, lifetime: 144.99 });
-        expect(tables.unlimited["1-5"][1]).toBe(99);
+        expect(tables.unlimited[4][1]).toBe(99);
+        expect(tables.premium[4]).toBeUndefined();
         expect(tables.unlimited["6-15"].lifetime).toBe(494.99);
     });
 });

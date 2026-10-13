@@ -9,6 +9,7 @@ const DefaultLicenseValues = require("./default-license.values");
 const { Domain } = require("../../Tags/modules/domain.class");
 const { initCacheInstance } = require("../../../cache/manager");
 const IpfsLookupCache = require("../../../Core/ipfs-lookup-cache");
+const { applyZelfIdPlanPricing } = require("../../ZelfID/modules/zelf-ids-revenue-cat-products.module");
 const { upsertCachedDomain } = require("../../Tags/config/supported-domains");
 const {
     asLicenseJson,
@@ -199,7 +200,10 @@ const searchLicense = async (query, user) => {
 
     if (domain) {
         const seeded = IpfsLookupCache.peek(IpfsLookupCache.keys.licenseDomain(domain));
-        if (seeded) return seeded;
+        if (seeded) {
+            if (seeded.domainConfig) applyZelfIdPlanPricing(seeded.domainConfig);
+            return seeded;
+        }
 
         const existingLicense = await IPFS.get({ key: "licenseDomain", value: domain });
 
@@ -211,7 +215,7 @@ const searchLicense = async (query, user) => {
         if (withJSON) {
             try {
                 const jsonResponse = await axios.get(licenseRecord.url);
-                licenseRecord.domainConfig = jsonResponse.data;
+                licenseRecord.domainConfig = applyZelfIdPlanPricing(jsonResponse.data);
 
                 if (includeTheme && licenseRecord.domainConfig) {
                     await fetchAndMergeOfficialThemeSettings(licenseRecord.domainConfig);

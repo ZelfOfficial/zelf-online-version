@@ -134,8 +134,9 @@ const getZelfIdPrice = ({ tagName, duration = "1", referralTagName = "", domainC
         throw new Error("409:license_price_required");
     }
 
+    // Short names have no premium price: quote (and stamp) unlimited.
     const quotePlan =
-        isShortZelfIdName(tagName) && requestedPlan !== "premium" && requestedPlan !== "unlimited"
+        isShortZelfIdName(tagName)
             ? "unlimited"
             : requestedPlan === "premium" || requestedPlan === "unlimited"
               ? requestedPlan

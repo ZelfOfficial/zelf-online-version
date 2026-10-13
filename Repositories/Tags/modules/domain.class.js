@@ -122,17 +122,15 @@ class Domain {
         const fallback = this.tags?.payment?.pricingTable || {};
         if (plan !== "premium" && plan !== "unlimited") return fallback;
 
+        // Zelf ID plan prices are code-owned: the hosted license table can be stale.
+        if (String(this.name || "").toLowerCase() === "zelf") {
+            const { defaultZelfIdPlanPricingTables } = require("../../ZelfID/modules/zelf-ids-revenue-cat-products.module");
+            return defaultZelfIdPlanPricingTables()[plan];
+        }
+
         const planTable = this.tags?.payment?.planPricing?.[plan];
         if (planTable && typeof planTable === "object" && Object.keys(planTable).length > 0) {
             return planTable;
-        }
-
-        if (String(this.name || "").toLowerCase() === "zelf") {
-            const { defaultZelfIdPlanPricingTables } = require("../../ZelfID/modules/zelf-ids-revenue-cat-products.module");
-            const defaults = defaultZelfIdPlanPricingTables()[plan];
-            if (defaults && Object.keys(defaults).length > 0) {
-                return defaults;
-            }
         }
 
         return fallback;
@@ -186,8 +184,18 @@ class Domain {
         if (!["1", "2", "3", "4", "5", "lifetime"].includes(`${duration}`))
             throw new Error("Invalid duration. Use '1', '2', '3', '4', '5' or 'lifetime'.");
 
+        const zelfIdPlan = String(this.name || "").toLowerCase() === "zelf" && (plan === "premium" || plan === "unlimited");
+        if (zelfIdPlan) {
+            if (!["1", "2", "3", "lifetime"].includes(`${duration}`)) {
+                throw new Error("400:invalid_duration_use_1_2_3_or_lifetime");
+            }
+            if (plan === "premium" && length <= 5) {
+                throw new Error("409:premium_requires_6_plus_characters");
+            }
+        }
+
         let price = this._lookupTablePrice(table, length, duration);
-        if (price == null && table !== fallbackTable) {
+        if (price == null && table !== fallbackTable && !zelfIdPlan) {
             price = this._lookupTablePrice(fallbackTable, length, duration);
         }
 
