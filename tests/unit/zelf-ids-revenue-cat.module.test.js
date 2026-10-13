@@ -44,7 +44,6 @@ const { addDurationToTag, revertZelfIdToFreePlan, changeZelfIdPlan } = require("
 const Transactions = require("../../Repositories/ZelfID/modules/zelf-ids-revenue-cat-transactions.module");
 const {
     parseSubscriptionProductId,
-    defaultZelfIdPlanPricingTables,
 } = require("../../Repositories/ZelfID/modules/zelf-ids-revenue-cat-products.module");
 const {
     parseLegacyZelfIdProductId,
@@ -88,12 +87,6 @@ describe("parseSubscriptionProductId", () => {
         expect(parseSubscriptionProductId("zelf_premium_1y:zelf-premium-1y")).toEqual({ plan: "premium", duration: "1", subscription: true });
     });
 
-    test("default plan pricing matches Andrés USD table", () => {
-        const tables = defaultZelfIdPlanPricingTables();
-        expect(tables.premium["6-15"]).toEqual({ 1: 29, 2: 43.49, 3: 56.99, lifetime: 144.99 });
-        expect(tables.unlimited["1-5"][1]).toBe(99); // #145 code defaults (reported, not used for validation)
-        expect(tables.unlimited["6-15"].lifetime).toBe(494.99);
-    });
 });
 
 describe("parseLegacyZelfIdProductId", () => {

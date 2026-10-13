@@ -239,16 +239,12 @@ class Domain {
                 throw new Error("409:plan_duration_not_offered_by_license");
             }
         } else {
-            if (!["1", "2", "3", "4", "5", "lifetime"].includes(`${duration}`))
-                throw new Error("Invalid duration. Use '1', '2', '3', '4', '5' or 'lifetime'.");
             price = this._lookupTablePrice(fallbackTable, length, duration);
         }
 
+        // No hardcoded default: a name/duration the license does not price is not for sale.
         if (price == null) {
-            if (length < 1 || length > 27) {
-                throw new Error("Invalid name length. Length must be between 1 and 27.");
-            }
-            price = 24;
+            throw new Error("409:price_not_in_license");
         }
 
         // Adjust price for development environment
