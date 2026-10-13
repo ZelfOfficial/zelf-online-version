@@ -6,7 +6,7 @@
  */
 const moment = require("moment");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
-const { getBareName, getBareNameLength, resolvePaidPlan, isShortZelfIdName, allowedPlansForName } = require("./zelf-id-plan.module");
+const { getBareName, getBareNameLength, resolvePaidPlan } = require("./zelf-id-plan.module");
 const { parseSubscriptionProductId } = require("./zelf-ids-revenue-cat-products.module");
 
 const PURCHASE_EVENT_TYPES = new Set(["INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE"]);
@@ -149,8 +149,23 @@ const resolvePlanForPurchase = (product, tagName, attributes = {}) => {
 
     const attrPlan = String(attributes.plan || "").toLowerCase();
     if (attrPlan === "unlimited") return "unlimited";
-    if (attrPlan === "premium" && !isShortZelfIdName(tagName)) return "premium";
+    if (attrPlan === "premium") return "premium";
     return resolvePaidPlan({ tagName, requestedPlan: attrPlan });
+};
+
+/**
+ * Valid plan/duration for a name comes only from the license `planPricing`:
+ * e.g. premium on 1–5 chars is invalid because the license has no premium cell for that length.
+ * @param {string} domain
+ * @param {string} tagName
+ * @param {string} plan
+ * @param {string} [duration]
+ * @returns {boolean}
+ */
+const licenseAllowsPlan = (domain, tagName, plan, duration) => {
+    const domainConfig = getDomainConfig(domain);
+    if (typeof domainConfig?.licenseOffersPlan !== "function") return false;
+    return domainConfig.licenseOffersPlan(plan, getBareNameLength(tagName), duration);
 };
 
 const isSandbox = (event) => String(event.environment || "").toUpperCase() === "SANDBOX";
@@ -254,8 +269,7 @@ const validatePurchase = (inspected) => {
     }
 
     const plan = resolvePlanForPurchase(product, tagName, attributes);
-    const allowed = allowedPlansForName(`${tagName}.${domain}`);
-    if (!allowed.includes(plan)) {
+    if (!licenseAllowsPlan(domain, tagName, plan, inspected.duration)) {
         return { ok: false, reason: "plan_not_allowed_for_name", tagName, domain, plan };
     }
 
@@ -495,8 +509,7 @@ const applyRevenueCatProductChange = async (inspected) => {
         return { status: "skipped", reason: "deferred_downgrade", confirmed: false, tagName, domain };
     }
 
-    const allowed = allowedPlansForName(`${tagName}.${domain}`);
-    if (!allowed.includes(plan)) throw new Error("409:plan_not_allowed_for_name");
+    if (!licenseAllowsPlan(domain, tagName, plan)) throw new Error("409:plan_not_allowed_for_name");
 
     const { changeZelfIdPlan } = require("./my-zelf-id.module");
     const { domainConfig, tagObject } = await loadTag({ tagName, domain });
@@ -587,6 +600,7 @@ module.exports = {
     resolveNameFromAttributes,
     inspectRevenueCatEvent,
     validatePurchase,
+    licenseAllowsPlan,
     expirationSkipReason,
     alreadyAppliedToRecord,
     webhookHandler,

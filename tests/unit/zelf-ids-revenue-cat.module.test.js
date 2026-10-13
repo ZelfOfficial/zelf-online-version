@@ -1,6 +1,22 @@
-jest.mock("../../Repositories/Tags/config/supported-domains", () => ({
-    getDomainConfig: jest.fn(() => ({ getTagKey: () => "tagName" })),
-}));
+// License-shaped planPricing: premium only for 6+, no 4/5-year cells. Plans/durations come from here.
+jest.mock("../../Repositories/Tags/config/supported-domains", () => {
+    const { Domain } = jest.requireActual("../../Repositories/Tags/modules/domain.class");
+    const premium = { 1: 29, 2: 43.49, 3: 56.99, lifetime: 144.99 };
+    const unlimited = { 1: 99, 2: 148.99, 3: 192.99, lifetime: 494.99 };
+    const license = {
+        name: "zelf",
+        tags: {
+            payment: {
+                pricingTable: {},
+                planPricing: {
+                    premium: { "6-15": premium, "16-27": premium },
+                    unlimited: { 1: unlimited, 2: unlimited, 3: unlimited, 4: unlimited, 5: unlimited, "6-15": unlimited, "16-27": unlimited },
+                },
+            },
+        },
+    };
+    return { getDomainConfig: jest.fn(() => Object.assign(new Domain(license), { getTagKey: () => "tagName" })) };
+});
 
 jest.mock("../../Repositories/ZelfID/modules/zelf-id.module", () => ({
     searchTag: jest.fn(),
@@ -75,7 +91,7 @@ describe("parseSubscriptionProductId", () => {
     test("default plan pricing matches Andrés USD table", () => {
         const tables = defaultZelfIdPlanPricingTables();
         expect(tables.premium["6-15"]).toEqual({ 1: 29, 2: 43.49, 3: 56.99, lifetime: 144.99 });
-        expect(tables.unlimited["1-5"][1]).toBe(99);
+        expect(tables.unlimited["1-5"][1]).toBe(99); // #145 code defaults (reported, not used for validation)
         expect(tables.unlimited["6-15"].lifetime).toBe(494.99);
     });
 });
@@ -357,5 +373,13 @@ describe("webhookHandler", () => {
         expect(await webhookHandler(rcEvent({ environment: "SANDBOX" }), { allowSandbox: true })).toMatchObject({
             action: "zelf_id_lease_extended",
         });
+    });
+
+    test("plan validity comes from the license: premium 16-27 range ok, 4-year not sold", async () => {
+        const { licenseAllowsPlan } = require("../../Repositories/ZelfID/modules/zelf-ids-revenue-cat.module");
+        expect(licenseAllowsPlan("zelf", "abcdefghijklmnopqrst", "premium", "1")).toBe(true);
+        expect(licenseAllowsPlan("zelf", "abcde", "premium")).toBe(false);
+        expect(licenseAllowsPlan("zelf", "abcde", "unlimited", "lifetime")).toBe(true);
+        expect(licenseAllowsPlan("zelf", "abcdefgh", "premium", "4")).toBe(false);
     });
 });
