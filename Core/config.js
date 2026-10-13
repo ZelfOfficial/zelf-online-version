@@ -74,6 +74,7 @@ const configuration = {
     jimInbound: {
         recipients: process.env.JIM_INBOUND_RECIPIENTS || "jim@mg.zelf.world",
         allowedSenders: process.env.JIM_INBOUND_ALLOWED_SENDERS || "",
+        inboxApiKey: process.env.JIM_INBOX_API_KEY,
         forwardUrl: process.env.JIM_INBOUND_FORWARD_URL,
         forwardSecret: process.env.JIM_INBOUND_FORWARD_SECRET,
         discordWebhookUrl: process.env.JIM_INBOUND_DISCORD_WEBHOOK_URL,

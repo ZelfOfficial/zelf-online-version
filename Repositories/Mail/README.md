@@ -4,9 +4,9 @@
 | Method | Path | Auth |
 |---|---|---|
 | POST | `/api/mail/inbound/jim` | Mailgun signature (HMAC-SHA256 of `timestamp+token`, ±`JIM_INBOUND_MAX_SKEW_SEC`, token single-use) |
-| GET | `/api/mail/inbound?status=&since=&classification=&limit=` | `x-api-key: $SUPER_ADMINS_JWT_SECRET` or `Bearer <JWT signed with it>` |
-| GET | `/api/mail/inbound/:id` | same: full body, headers, attachment metadata and inline bytes |
-| PATCH | `/api/mail/inbound/:id` `{status?, action?, note?}` | same: appends to `actionLog` |
+| GET | `/api/mail/inbound?status=&since=&classification=&limit=` | `x-jim-inbox-key: $JIM_INBOX_API_KEY` or `Authorization: Bearer $JIM_INBOX_API_KEY` (constant-time compare, 503 if unset, 401 if wrong) |
+| GET | `/api/mail/inbound/:id` | same (JIM_INBOX_API_KEY): full body, headers, attachment metadata and inline bytes |
+| PATCH | `/api/mail/inbound/:id` `{status?, action?, note?}` | same (JIM_INBOX_API_KEY): appends to `actionLog` |
 | POST | `/api/mail/webhook` | Mailgun signature. Acknowledges `{ received: true, stored: false }` and does not persist. Inbound mail uses `/api/mail/inbound/jim`. |
 
 Every signed message to `JIM_INBOUND_RECIPIENTS` is stored (`InboundEmail` collection). The
@@ -37,3 +37,5 @@ Actions:    forward("https://<dev-host>/api/mail/inbound/jim")
             stop()
 ```
 The signing key is in Sending → Webhooks → HTTP webhook signing key → `MAILGUN_WEBHOOK_SIGNING_KEY`.
+
+The mailbox endpoints do **not** accept the super-admin key or JWT. `JIM_INBOX_API_KEY` is scoped to them only.

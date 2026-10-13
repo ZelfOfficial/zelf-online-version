@@ -5,7 +5,7 @@ const InboundController = require("../controllers/inbound.controller");
 
 const Middleware = require("../middlewares/mail.middleware");
 const { mailgunSignatureValidator } = require("../middlewares/mailgun-signature.middleware");
-const { superAdminKeyValidator } = require("../middlewares/super-admin-key.middleware");
+const { jimInboxKeyValidator } = require("../middlewares/jim-inbox-key.middleware");
 const InboundMiddleware = require("../middlewares/inbound.middleware");
 
 const base = "/mail";
@@ -19,8 +19,8 @@ module.exports = (server) => {
     // Mailgun route target for jim@mg.zelf.world (public, Mailgun-signed).
     server.post(`${PATH}/inbound/jim`, mailgunSignatureValidator, InboundController.receive);
 
-    // Jim's mailbox API (super-admin key / JWT).
-    server.get(`${PATH}/inbound`, superAdminKeyValidator, InboundController.list);
-    server.get(`${PATH}/inbound/:id`, superAdminKeyValidator, InboundController.get);
-    server.patch(`${PATH}/inbound/:id`, superAdminKeyValidator, InboundMiddleware.updateValidation, InboundController.update);
+    // Jim's mailbox API (dedicated JIM_INBOX_API_KEY).
+    server.get(`${PATH}/inbound`, jimInboxKeyValidator, InboundController.list);
+    server.get(`${PATH}/inbound/:id`, jimInboxKeyValidator, InboundController.get);
+    server.patch(`${PATH}/inbound/:id`, jimInboxKeyValidator, InboundMiddleware.updateValidation, InboundController.update);
 };
