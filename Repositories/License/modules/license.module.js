@@ -577,7 +577,26 @@ const createOrUpdateLicense = async (body, jwt) => {
         // validate if the domain being passed is registered or not because we need to compare the domain with the previous domain
         await _checkIfDomainIsRegistered(body.domain, zelfAccount.publicData.accountEmail);
 
-        if (myLicense) await TagsIPFSModule.unPinFiles([myLicense.id]);
+        const isStaff = jwt?.accountType === "staff" || jwt?.accountType === "staff_account";
+
+        // Existing license JSON (owner, zelfProof, protected fields). getMyLicense was called without JSON.
+        if (myLicense && !myLicense.domainConfig && myLicense.url) {
+            myLicense.domainConfig = (await axios.get(myLicense.url)).data;
+        }
+
+        const existingJson = myLicense?.domainConfig || null;
+
+        if (isStaff && !myLicense) throw new Error("403:staff_cannot_create_license");
+
+        // Staff edit the org owner's license: never stamp the staff email or the staff proof.
+        const licenseOwnerEmail = isStaff
+            ? myLicense?.publicData?.licenseOwner || existingJson?.owner || jwt.ownerEmail
+            : jwt.email;
+        const licenseZelfProof = isStaff ? existingJson?.zelfProof : accountZelfProof;
+
+        if (isStaff && (!licenseOwnerEmail || !licenseZelfProof)) {
+            throw new Error("409:license_owner_or_proof_missing");
+        }
 
         // Filter domain config to only include user-modifiable fields
         const filteredDomainConfig = filterUserModifiableFields(domainConfig, myLicense);
@@ -590,8 +609,8 @@ const createOrUpdateLicense = async (body, jwt) => {
             type: "license",
             previousDomain: myLicense?.publicData.domain || "",
             domain: body.domain,
-            owner: jwt.email,
-            zelfProof: accountZelfProof,
+            owner: licenseOwnerEmail,
+            zelfProof: licenseZelfProof,
             updatedAt: new Date().toISOString(),
         };
 
@@ -607,7 +626,7 @@ const createOrUpdateLicense = async (body, jwt) => {
                     licenseType: filteredDomainConfig.type,
                     licenseSubscriptionId: filteredDomainConfig.subscriptionId || "free",
                     licenseDomain: body.domain,
-                    licenseOwner: jwt.email,
+                    licenseOwner: licenseOwnerEmail,
                 },
                 name: `${body.domain}.license`,
                 pinIt: true,
@@ -616,6 +635,15 @@ const createOrUpdateLicense = async (body, jwt) => {
         );
 
         licenseMetadata.ipfsCid = licenseCid(license);
+
+        // Unpin the previous license only after the new one is pinned, so a failed upload keeps it.
+        if (myLicense?.id && licenseCid(license) && myLicense.id !== license.id) {
+            try {
+                await TagsIPFSModule.unPinFiles([myLicense.id]);
+            } catch (unpinError) {
+                console.error("Previous license unpin failed:", unpinError?.message || unpinError);
+            }
+        }
 
         IpfsLookupCache.invalidateLicense({
             emails: [jwt.email, jwt.ownerEmail, zelfAccount?.publicData?.accountEmail],
@@ -629,12 +657,12 @@ const createOrUpdateLicense = async (body, jwt) => {
                 ...(license.publicData || {}),
                 type: "license",
                 licenseDomain: body.domain,
-                licenseOwner: jwt.email,
+                licenseOwner: licenseOwnerEmail,
             },
         };
 
         _seedLicenseReadCaches({
-            emails: [jwt.email, jwt.ownerEmail, zelfAccount?.publicData?.accountEmail],
+            emails: [jwt.email, jwt.ownerEmail, licenseOwnerEmail, zelfAccount?.publicData?.accountEmail],
             domain: body.domain,
             previousDomains: [myLicense?.publicData?.domain, myLicense?.domainConfig?.name],
             freshRecord,
