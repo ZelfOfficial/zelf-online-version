@@ -9,7 +9,15 @@ const { asLicenseJson, mergeLicenseMap, preferLicense } = require("../../License
 // Initialize cache for dynamic domains with 2 hour TTL (see cache/manager.js stdTTL)
 const domainsCache = initCacheInstance();
 
-const CACHE_KEY = "official-licenses";
+// Own key: License module stores raw license JSON under "official-licenses" in the same NodeCache.
+const CACHE_KEY = "official-license-domains";
+
+/**
+ * Licenses are per-process memory; a save only refreshes the process that handled it.
+ * A short TTL makes every other worker re-read Pinata soon (stale-while-revalidate keeps
+ * serving the last licenses during the reload). Override with LICENSE_CACHE_TTL_SECONDS.
+ */
+const LICENSE_CACHE_TTL_SECONDS = Math.max(5, Number(process.env.LICENSE_CACHE_TTL_SECONDS) || 60);
 
 /** After a reload fails or comes back empty, background lookups wait this long before retrying. */
 const RELOAD_RETRY_MS = 30 * 1000;
@@ -282,7 +290,7 @@ const upsertCachedDomain = (licenseData) => {
         const cached = loadCache() || { ...(lastKnownDomains || {}) };
         const chosen = asLicenseJson(preferLicense(cached[key], licenseData));
         cached[key] = new Domain(chosen);
-        domainsCache.set(CACHE_KEY, cached);
+        domainsCache.set(CACHE_KEY, cached, LICENSE_CACHE_TTL_SECONDS);
         _rememberDomains(cached);
     } catch (error) {
         console.error("Error upserting cached domain:", error);
@@ -300,7 +308,7 @@ const saveCache = (domains) => {
     try {
         // Always set, even when the data is identical: set() is what restarts the TTL. Skipping
         // identical saves made the licenses expire two hours after their last change.
-        domainsCache.set(CACHE_KEY, domains);
+        domainsCache.set(CACHE_KEY, domains, LICENSE_CACHE_TTL_SECONDS);
         _rememberDomains(domains);
     } catch (error) {
         console.error("Error saving to cache:", error);
@@ -497,6 +505,7 @@ const isArweaveStorageSupported = (domain, app) => {
 };
 
 module.exports = {
+    LICENSE_CACHE_TTL_SECONDS,
     getSupportedDomains,
     getDomainConfig,
     isSupported,

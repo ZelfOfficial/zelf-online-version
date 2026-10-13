@@ -9,7 +9,7 @@ const DefaultLicenseValues = require("./default-license.values");
 const { Domain } = require("../../Tags/modules/domain.class");
 const { initCacheInstance } = require("../../../cache/manager");
 const IpfsLookupCache = require("../../../Core/ipfs-lookup-cache");
-const { upsertCachedDomain } = require("../../Tags/config/supported-domains");
+const { upsertCachedDomain, LICENSE_CACHE_TTL_SECONDS } = require("../../Tags/config/supported-domains");
 const {
     asLicenseJson,
     licenseCid,
@@ -111,7 +111,7 @@ const saveCache = (licenses) => {
         const incoming = Array.isArray(licenses) ? licenses : licenses && typeof licenses === "object" ? Object.values(licenses) : [];
         const merged = reapplySeededLicenses(mergeLicenseMap(loadCache() || {}, incoming));
 
-        licenseCache.set("official-licenses", merged);
+        licenseCache.set("official-licenses", merged, LICENSE_CACHE_TTL_SECONDS);
 
         for (const license of Object.values(merged)) {
             upsertCachedDomain(license);
@@ -146,7 +146,7 @@ const upsertOfficialLicenseCache = (licenseData) => {
 
     const cached = loadCache() || {};
     cached[key] = next;
-    licenseCache.set("official-licenses", cached);
+    licenseCache.set("official-licenses", cached, LICENSE_CACHE_TTL_SECONDS);
     upsertCachedDomain(next);
 };
 

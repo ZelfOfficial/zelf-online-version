@@ -157,6 +157,24 @@ const getZelfIdPrice = ({ tagName, duration = "1", referralTagName = "", domainC
 };
 
 /**
+ * Reject a plan/duration the license does not price for this name (e.g. 4y, premium on 1–5 chars).
+ * @param {Object} params
+ * @param {Object} params.domainConfig
+ * @param {string} params.tagName
+ * @param {"premium"|"unlimited"} params.plan
+ * @param {string|number} params.duration
+ */
+const assertLicenseOffersPlan = ({ domainConfig, tagName, plan, duration }) => {
+    if (typeof domainConfig?.licensePlanDurations !== "function") throw new Error("409:license_price_required");
+    const offered = domainConfig.licensePlanDurations(plan, getBareNameLength(tagName));
+    const raw = `${duration ?? ""}`.trim().toLowerCase();
+    const wanted = raw === "999" ? "lifetime" : raw;
+    if (!offered.includes(wanted)) {
+        throw new Error(offered.length ? "409:plan_duration_not_offered_by_license" : "409:plan_not_offered_for_name");
+    }
+};
+
+/**
  * Checkout quote: priced with the same paid plan the payment will stamp.
  * Without an explicit plan a long name pays (and is stamped) premium, never
  * the Tags default table; short names always pay unlimited.
@@ -442,6 +460,7 @@ module.exports = {
     resolvePaidPlan,
     getZelfIdPrice,
     getZelfIdCheckoutPrice,
+    assertLicenseOffersPlan,
     resolveZelfIdPlan,
     resolveComplimentaryPlan,
     resolveUpgradePlan,

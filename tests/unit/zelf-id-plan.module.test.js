@@ -235,8 +235,9 @@ describe("zelf-id-plan.module", () => {
 				},
 			},
 		});
-		expect(withoutPlanTables._lookupTablePrice(withoutPlanTables._pricingTableForPlan("premium"), 8, "1")).toBe(24);
-		expect(withoutPlanTables._lookupTablePrice(withoutPlanTables._pricingTableForPlan("unlimited"), 8, "1")).toBe(24);
+		// No fallback to the Tags table: plan prices come only from license planPricing.
+		expect(withoutPlanTables._lookupTablePrice(withoutPlanTables._pricingTableForPlan("premium"), 8, "1")).toBeUndefined();
+		expect(withoutPlanTables._lookupTablePrice(withoutPlanTables._pricingTableForPlan("unlimited"), 8, "1")).toBeUndefined();
 	});
 
 	test("getZelfIdCheckoutPrice charges the plan the payment stamps", () => {
