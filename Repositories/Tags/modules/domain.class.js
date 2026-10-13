@@ -127,14 +127,6 @@ class Domain {
             return planTable;
         }
 
-        if (String(this.name || "").toLowerCase() === "zelf") {
-            const { defaultZelfIdPlanPricingTables } = require("../../ZelfID/modules/zelf-ids-revenue-cat-products.module");
-            const defaults = defaultZelfIdPlanPricingTables()[plan];
-            if (defaults && Object.keys(defaults).length > 0) {
-                return defaults;
-            }
-        }
-
         return fallback;
     }
 
@@ -145,8 +137,46 @@ class Domain {
      * @returns {number|undefined}
      */
     _lookupTablePrice(table, length, duration) {
-        if (length >= 6 && length <= 15) return table?.["6-15"]?.[duration];
-        return table?.[length]?.[duration];
+        if (!table || typeof table !== "object") return undefined;
+        if (table[length]?.[duration] != null) return table[length][duration];
+
+        // Range keys from the license, e.g. "6-15", "16-27".
+        for (const [key, cells] of Object.entries(table)) {
+            const match = /^(\d+)-(\d+)$/.exec(key);
+            if (match && length >= Number(match[1]) && length <= Number(match[2]) && cells?.[duration] != null) {
+                return cells[duration];
+            }
+        }
+
+        return undefined;
+    }
+
+    /**
+     * Price for a Zelf ID plan read ONLY from the license `tags.payment.planPricing`
+     * (no Tags table, no code defaults). Undefined means the license does not sell it.
+     * @param {"premium"|"unlimited"|string} plan
+     * @param {number} length
+     * @param {string} [duration]
+     * @returns {number|undefined}
+     */
+    licensePlanPrice(plan, length, duration = "1") {
+        const table = this.tags?.payment?.planPricing?.[plan];
+        const price = this._lookupTablePrice(table, length, `${duration}`);
+        return typeof price === "number" && Number.isFinite(price) ? price : undefined;
+    }
+
+    /**
+     * Whether the license offers `plan` (for `duration`, when given) to a name of `length`.
+     * @param {string} plan
+     * @param {number} length
+     * @param {string} [duration]
+     * @returns {boolean}
+     */
+    licenseOffersPlan(plan, length, duration) {
+        if (duration != null) return this.licensePlanPrice(plan, length, duration) !== undefined;
+        const table = this.tags?.payment?.planPricing?.[plan];
+        if (!table || typeof table !== "object") return false;
+        return ["1", "2", "3", "4", "5", "lifetime"].some((d) => this.licensePlanPrice(plan, length, d) !== undefined);
     }
 
     /**

@@ -232,8 +232,10 @@ const configuration = {
     },
     revenueCat: {
         allowedEmail: process.env.REVENUECAT_ALLOWED_EMAIL,
-        /** Optional static bearer for RevenueCat dashboard Authorization (requires unprotected route or JWT bypass). */
+        /** Exact Authorization header value configured in the RevenueCat dashboard webhook. Required. */
         webhookAuthorization: process.env.REVENUECAT_WEBHOOK_AUTHORIZATION,
+        /** Credit SANDBOX (TestFlight / internal testing) purchases even when NODE_ENV is production. */
+        allowSandbox: process.env.REVENUECAT_ALLOW_SANDBOX === "true",
     },
     solana: {
         rpcUrl:

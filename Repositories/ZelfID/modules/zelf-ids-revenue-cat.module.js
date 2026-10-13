@@ -6,17 +6,16 @@
  */
 const moment = require("moment");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
-const {
-    getBareName,
-    getBareNameLength,
-    resolvePaidPlan,
-    isShortZelfIdName,
-    allowedPlansForName,
-} = require("./zelf-id-plan.module");
+const { getBareName, getBareNameLength, resolvePaidPlan } = require("./zelf-id-plan.module");
 const { parseSubscriptionProductId } = require("./zelf-ids-revenue-cat-products.module");
 
 const PURCHASE_EVENT_TYPES = new Set(["INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE"]);
 const EXPIRATION_EVENT_TYPES = new Set(["EXPIRATION"]);
+const PRODUCT_CHANGE_EVENT_TYPES = new Set(["PRODUCT_CHANGE"]);
+/** Events that continue an existing transaction: the name comes from original_transaction_id first. */
+const LOOKUP_BY_TRANSACTION_EVENT_TYPES = new Set(["RENEWAL", "EXPIRATION", "PRODUCT_CHANGE"]);
+/** EXPIRATION is ignored when the name is paid this much past the subscription period end. */
+const EXPIRATION_EXTENSION_TOLERANCE_MS = 7 * 24 * 60 * 60 * 1000;
 const HANDLED_EVENT_TYPE = "NON_RENEWING_PURCHASE";
 
 const LEGACY_PRODUCT_ID_PATTERNS = [
@@ -31,6 +30,11 @@ const SKIP_REASONS = new Set([
     "not_zelf_id_product",
     "sandbox_event",
     "not_subscription_product",
+    "superseded_by_later_purchase",
+    "extended_beyond_subscription",
+    "already_free",
+    "deferred_downgrade",
+    "plan_unchanged",
 ]);
 
 /**
@@ -132,44 +136,43 @@ const resolveNameFromAttributes = (attributes = {}) => {
 };
 
 /**
+ * Plan for a purchase. v4 products carry the plan and it is never rewritten:
+ * premium on a 1–5 character name is rejected later (`plan_not_allowed_for_name`).
+ * Legacy char-bucket products have no plan: use the attribute when the name allows it.
  * @param {Object} product
  * @param {string} tagName
  * @param {Object<string, string>} attributes
  * @returns {"premium"|"unlimited"}
  */
 const resolvePlanForPurchase = (product, tagName, attributes = {}) => {
+    if (product.plan) return product.plan;
+
     const attrPlan = String(attributes.plan || "").toLowerCase();
-    let plan = product.plan;
-
-    if (!plan) {
-        plan = resolvePaidPlan({ tagName, requestedPlan: attrPlan });
-        if (attrPlan === "premium" || attrPlan === "unlimited") {
-            plan = attrPlan;
-        }
-    }
-
-    if (isShortZelfIdName(tagName) && plan === "premium") {
-        return "unlimited";
-    }
-
-    return plan;
+    if (attrPlan === "unlimited") return "unlimited";
+    if (attrPlan === "premium") return "premium";
+    return resolvePaidPlan({ tagName, requestedPlan: attrPlan });
 };
 
 /**
- * @param {Object} product
- * @param {Object<string, string>} attributes
- * @returns {string}
+ * Valid plan/duration for a name comes only from the license `planPricing`:
+ * e.g. premium on 1–5 chars is invalid because the license has no premium cell for that length.
+ * @param {string} domain
+ * @param {string} tagName
+ * @param {string} plan
+ * @param {string} [duration]
+ * @returns {boolean}
  */
-const resolveDurationForPurchase = (product, attributes = {}) => {
-    const fromProduct = product.duration;
-    const attrDuration = String(attributes.duration || "").trim().toLowerCase();
-    if (!attrDuration) return fromProduct;
-    if (attrDuration === "lifetime" || attrDuration === "999") return fromProduct;
-    if (productDuration(attrDuration) === fromProduct) return fromProduct;
-    return fromProduct;
+const licenseAllowsPlan = (domain, tagName, plan, duration) => {
+    const domainConfig = getDomainConfig(domain);
+    if (typeof domainConfig?.licenseOffersPlan !== "function") return false;
+    return domainConfig.licenseOffersPlan(plan, getBareNameLength(tagName), duration);
 };
 
+const isSandbox = (event) => String(event.environment || "").toUpperCase() === "SANDBOX";
+
 /**
+ * Pure parse of a RevenueCat event. The name may still be unresolved for
+ * RENEWAL / EXPIRATION / PRODUCT_CHANGE: `webhookHandler` resolves it by original_transaction_id.
  * @param {Object} event
  * @param {Object} [options]
  * @param {boolean} [options.allowSandbox]
@@ -182,82 +185,141 @@ const inspectRevenueCatEvent = (event = {}, { allowSandbox = false } = {}) => {
         return { ok: false, reason: "ignored_cancellation" };
     }
 
-    if (EXPIRATION_EVENT_TYPES.has(eventType)) {
-        const product = parseRevenueCatProduct(event.product_id);
-        if (!product) return { ok: false, reason: "not_zelf_id_product" };
-        if (!product.subscription) return { ok: false, reason: "not_subscription_product" };
+    const isExpiration = EXPIRATION_EVENT_TYPES.has(eventType);
+    const isProductChange = PRODUCT_CHANGE_EVENT_TYPES.has(eventType);
 
-        if (String(event.environment || "").toUpperCase() === "SANDBOX" && !allowSandbox) {
-            return { ok: false, reason: "sandbox_event" };
-        }
-
-        const attributes = readSubscriberAttributes(event);
-        const { tagName, domain } = resolveNameFromAttributes(attributes);
-
-        return {
-            ok: true,
-            action: "expire",
-            tagName,
-            domain,
-            plan: product.plan,
-            eventId: String(event.id || ""),
-            originalTransactionId: String(event.original_transaction_id || ""),
-            productId: String(event.product_id),
-        };
-    }
-
-    if (!PURCHASE_EVENT_TYPES.has(eventType)) {
+    if (!isExpiration && !isProductChange && !PURCHASE_EVENT_TYPES.has(eventType)) {
         return { ok: false, reason: "ignored_event_type" };
     }
 
-    const product = parseRevenueCatProduct(event.product_id);
+    const productId = isProductChange ? event.new_product_id || event.product_id : event.product_id;
+    const product = parseRevenueCatProduct(productId);
     if (!product) return { ok: false, reason: "not_zelf_id_product" };
+    if (isExpiration && !product.subscription) return { ok: false, reason: "not_subscription_product" };
 
-    if (String(event.environment || "").toUpperCase() === "SANDBOX" && !allowSandbox) {
+    if (isSandbox(event) && !allowSandbox) {
         return { ok: false, reason: "sandbox_event" };
     }
 
     const attributes = readSubscriberAttributes(event);
     const { tagName, domain } = resolveNameFromAttributes(attributes);
+    const originalTransactionId = String(event.original_transaction_id || event.transaction_id || "");
+    const base = {
+        ok: true,
+        eventType,
+        tagName,
+        domain,
+        attributes,
+        product,
+        eventId: String(event.id || ""),
+        transactionId: String(event.transaction_id || ""),
+        originalTransactionId,
+        productId: String(productId),
+        appUserId: String(event.app_user_id || event.original_app_user_id || ""),
+        environment: String(event.environment || ""),
+        lookupByTransaction: LOOKUP_BY_TRANSACTION_EVENT_TYPES.has(eventType),
+    };
+
+    if (isExpiration) {
+        return {
+            ...base,
+            action: "expire",
+            plan: product.plan,
+            expirationAtMs: Number(event.expiration_at_ms) || null,
+        };
+    }
+
+    if (isProductChange) {
+        const previous = parseRevenueCatProduct(event.product_id);
+        return {
+            ...base,
+            action: "change_plan",
+            plan: product.plan,
+            previousPlan: previous?.plan || null,
+        };
+    }
+
+    const price = Number(event.price);
+
+    return {
+        ...base,
+        action: "purchase",
+        plan: product.plan || resolvePlanForPurchase(product, tagName, attributes),
+        ethAddress: String(attributes.ethAddress || "").trim(),
+        duration: product.duration,
+        subscription: Boolean(product.subscription),
+        price: Number.isFinite(price) && price > 0 ? price : 0,
+        purchasedAtMs: Number(event.purchased_at_ms || event.event_timestamp_ms) || null,
+    };
+};
+
+/**
+ * Validate a purchase once its name is known.
+ * @param {Object} inspected
+ * @returns {{ ok: boolean, reason?: string, [key: string]: any }}
+ */
+const validatePurchase = (inspected) => {
+    const { tagName, domain, product, attributes, ethAddress } = inspected;
 
     if (!tagName) return { ok: false, reason: "zelf_name_missing" };
 
     const nameLength = getBareNameLength(tagName);
-
     if (product.legacy && !productCoversNameLength(product, nameLength)) {
         return { ok: false, reason: "product_does_not_cover_name", tagName, domain, product };
     }
 
     const plan = resolvePlanForPurchase(product, tagName, attributes);
-    const allowed = allowedPlansForName(`${tagName}.${domain}`);
-    if (!allowed.includes(plan)) {
+    if (!licenseAllowsPlan(domain, tagName, plan, inspected.duration)) {
         return { ok: false, reason: "plan_not_allowed_for_name", tagName, domain, plan };
     }
 
-    const ethAddress = String(attributes.ethAddress || "").trim();
     if (!ethAddress) return { ok: false, reason: "eth_address_missing", tagName, domain };
 
-    const duration = resolveDurationForPurchase(product, attributes);
-    const price = Number(event.price);
-    const originalTransactionId = String(event.original_transaction_id || event.transaction_id || "");
+    return { ...inspected, ok: true, plan };
+};
+
+/**
+ * RENEWAL / EXPIRATION / PRODUCT_CHANGE: the name stored for original_transaction_id wins over attributes.
+ * @param {Object} inspected
+ * @returns {Promise<Object>}
+ */
+const resolveNameByTransaction = async (inspected) => {
+    if (!inspected.lookupByTransaction || !inspected.originalTransactionId) return inspected;
+
+    const { findByOriginalTransactionId } = require("./zelf-ids-revenue-cat-transactions.module");
+    const mapped = await findByOriginalTransactionId(inspected.originalTransactionId);
+    if (!mapped?.tagName) return inspected;
 
     return {
-        ok: true,
-        action: "purchase",
-        tagName,
-        domain,
-        ethAddress,
-        duration,
-        plan,
-        subscription: Boolean(product.subscription),
-        eventId: String(event.id || ""),
-        transactionId: String(event.transaction_id || ""),
-        originalTransactionId,
-        price: Number.isFinite(price) && price > 0 ? price : 0,
-        purchasedAtMs: Number(event.purchased_at_ms || event.event_timestamp_ms) || null,
-        productId: String(event.product_id),
-        eventType,
+        ...inspected,
+        tagName: getBareName(mapped.tagName),
+        domain: mapped.domain || inspected.domain || "zelf",
+        ethAddress: mapped.ethAddress || inspected.ethAddress,
+        resolvedBy: "original_transaction_id",
     };
+};
+
+const rememberTransaction = async (inspected, extra = {}) => {
+    const { recordTransaction } = require("./zelf-ids-revenue-cat-transactions.module");
+    try {
+        await recordTransaction({
+            originalTransactionId: inspected.originalTransactionId,
+            tagName: inspected.tagName,
+            domain: inspected.domain,
+            ethAddress: inspected.ethAddress,
+            appUserId: inspected.appUserId,
+            productId: inspected.productId,
+            plan: inspected.plan,
+            subscription: inspected.product?.subscription,
+            environment: inspected.environment,
+            lastEventId: inspected.eventId,
+            lastEventType: inspected.eventType,
+            ...extra,
+        });
+    } catch (error) {
+        // The name itself is already updated; a lost mapping only affects later lookups.
+        console.error("RevenueCat transaction mapping save failed:", error?.message || error);
+    }
 };
 
 /**
@@ -275,41 +337,40 @@ const alreadyAppliedToRecord = (publicData = {}, { eventId, purchasedAtMs }) => 
     return after(publicData.renewedAt) || after(publicData.registeredAt);
 };
 
-const assertOriginalTransactionMatches = (publicData, originalTransactionId) => {
-    const stored = String(publicData.revenueCatOriginalTransactionId || "").trim();
-    const incoming = String(originalTransactionId || "").trim();
-    if (!stored || !incoming) return;
-    if (stored !== incoming) {
-        throw new Error("409:original_transaction_mismatch");
-    }
-};
-
-/**
- * @param {Object} inspected
- * @returns {Promise<Object>}
- */
-const applyRevenueCatPurchase = async (inspected, { allowSandbox = false } = {}) => {
-    const { tagName, domain, ethAddress, duration, plan, eventId, price, originalTransactionId } = inspected;
+const loadTag = async ({ tagName, domain }) => {
     const domainConfig = getDomainConfig(domain);
     const { throwPaymentConfirmationTagNotFound } = require("../../Tags/modules/tag-smart-contract-payment.module");
     const ZelfIdModule = require("./zelf-id.module");
-    const { addDurationToTag } = require("./my-zelf-id.module");
     const tagData = await ZelfIdModule.searchTag({ tagName, domain, domainConfig, environment: "all" }, {});
 
     if (tagData.available || !tagData.tagObject?.publicData) {
         throwPaymentConfirmationTagNotFound(tagName, domain);
     }
 
-    const tagObject = tagData.tagObject;
+    return { domainConfig, tagObject: tagData.tagObject };
+};
+
+const storedBareName = (tagObject, domainConfig, tagName) => String(tagObject.publicData[domainConfig.getTagKey()] || tagName).split(".")[0];
+
+/**
+ * Purchases (INITIAL_PURCHASE / RENEWAL / NON_RENEWING_PURCHASE) add time.
+ * A purchase with a different original_transaction_id (annual → 2y / lifetime upgrade)
+ * is applied and becomes the name's current transaction.
+ * @param {Object} inspected
+ * @returns {Promise<Object>}
+ */
+const applyRevenueCatPurchase = async (inspected) => {
+    const { tagName, domain, ethAddress, duration, plan, eventId, price, originalTransactionId } = inspected;
+    const { addDurationToTag } = require("./my-zelf-id.module");
+    const { domainConfig, tagObject } = await loadTag({ tagName, domain });
     const owner = String(tagObject.publicData.ethAddress || "").toLowerCase();
 
     if (!owner || owner !== ethAddress.toLowerCase()) {
         throw new Error("409:zelfProof_does_not_match");
     }
 
-    assertOriginalTransactionMatches(tagObject.publicData, originalTransactionId);
-
     if (alreadyAppliedToRecord(tagObject.publicData, inspected)) {
+        await rememberTransaction(inspected);
         return {
             status: "success",
             action: "already_extended",
@@ -323,10 +384,9 @@ const applyRevenueCatPurchase = async (inspected, { allowSandbox = false } = {})
         };
     }
 
-    const storedName = String(tagObject.publicData[domainConfig.getTagKey()] || tagName);
     const result = await addDurationToTag(
         {
-            tagName: storedName.split(".")[0],
+            tagName: storedBareName(tagObject, domainConfig, tagName),
             price,
             domain,
             duration: duration === "lifetime" ? "lifetime" : parseInt(duration, 10),
@@ -338,6 +398,8 @@ const applyRevenueCatPurchase = async (inspected, { allowSandbox = false } = {})
         },
         tagObject
     );
+
+    await rememberTransaction(inspected);
 
     return {
         status: "success",
@@ -352,6 +414,31 @@ const applyRevenueCatPurchase = async (inspected, { allowSandbox = false } = {})
 };
 
 /**
+ * Why an EXPIRATION must not revert this name, or null when it should.
+ * @param {Object} publicData
+ * @param {Object} inspected
+ * @returns {string|null}
+ */
+const expirationSkipReason = (publicData = {}, { originalTransactionId, expirationAtMs }) => {
+    if (publicData.plan === "free") return "already_free";
+
+    const current = String(publicData.revenueCatOriginalTransactionId || "").trim();
+    if (current && originalTransactionId && current !== String(originalTransactionId).trim()) {
+        return "superseded_by_later_purchase";
+    }
+
+    if (String(publicData.duration || "").toLowerCase() === "lifetime") return "extended_beyond_subscription";
+
+    const expiresAt = publicData.expiresAt ? moment(publicData.expiresAt) : null;
+    const periodEnd = expirationAtMs ? moment(expirationAtMs) : moment();
+    if (expiresAt?.isValid() && expiresAt.valueOf() > periodEnd.valueOf() + EXPIRATION_EXTENSION_TOLERANCE_MS) {
+        return "extended_beyond_subscription";
+    }
+
+    return null;
+};
+
+/**
  * @param {Object} inspected
  * @returns {Promise<Object>}
  */
@@ -362,17 +449,8 @@ const applyRevenueCatExpiration = async (inspected) => {
         throw new Error("409:zelf_name_missing");
     }
 
-    const domainConfig = getDomainConfig(domain);
-    const { throwPaymentConfirmationTagNotFound } = require("../../Tags/modules/tag-smart-contract-payment.module");
-    const ZelfIdModule = require("./zelf-id.module");
     const { revertZelfIdToFreePlan } = require("./my-zelf-id.module");
-    const tagData = await ZelfIdModule.searchTag({ tagName, domain, domainConfig, environment: "all" }, {});
-
-    if (tagData.available || !tagData.tagObject?.publicData) {
-        throwPaymentConfirmationTagNotFound(tagName, domain);
-    }
-
-    const tagObject = tagData.tagObject;
+    const { domainConfig, tagObject } = await loadTag({ tagName, domain });
 
     if (tagObject.publicData.eventID === eventId) {
         return {
@@ -387,12 +465,15 @@ const applyRevenueCatExpiration = async (inspected) => {
         };
     }
 
-    assertOriginalTransactionMatches(tagObject.publicData, originalTransactionId);
+    const skip = expirationSkipReason(tagObject.publicData, inspected);
+    if (skip) {
+        await rememberTransaction(inspected, { status: "expired" });
+        return { status: "skipped", reason: skip, confirmed: false, tagName, domain, expiresAt: tagObject.publicData.expiresAt || null };
+    }
 
-    const storedName = String(tagObject.publicData[domainConfig.getTagKey()] || tagName);
     const result = await revertZelfIdToFreePlan(
         {
-            tagName: storedName.split(".")[0],
+            tagName: storedBareName(tagObject, domainConfig, tagName),
             domain,
             domainConfig,
             eventID: eventId,
@@ -400,6 +481,8 @@ const applyRevenueCatExpiration = async (inspected) => {
         },
         tagObject
     );
+
+    await rememberTransaction(inspected, { status: "expired", plan: "free" });
 
     return {
         status: "success",
@@ -413,13 +496,76 @@ const applyRevenueCatExpiration = async (inspected) => {
 };
 
 /**
+ * PRODUCT_CHANGE premium → unlimited: switch the plan now, keep the paid-through date.
+ * Downgrades are deferred by the stores and arrive as a RENEWAL of the new product.
+ * @param {Object} inspected
+ * @returns {Promise<Object>}
+ */
+const applyRevenueCatProductChange = async (inspected) => {
+    const { tagName, domain, eventId, plan, originalTransactionId } = inspected;
+
+    if (!tagName) throw new Error("409:zelf_name_missing");
+    if (plan !== "unlimited") {
+        return { status: "skipped", reason: "deferred_downgrade", confirmed: false, tagName, domain };
+    }
+
+    if (!licenseAllowsPlan(domain, tagName, plan)) throw new Error("409:plan_not_allowed_for_name");
+
+    const { changeZelfIdPlan } = require("./my-zelf-id.module");
+    const { domainConfig, tagObject } = await loadTag({ tagName, domain });
+    const publicData = tagObject.publicData;
+
+    if (inspected.ethAddress && String(publicData.ethAddress || "").toLowerCase() !== inspected.ethAddress.toLowerCase()) {
+        throw new Error("409:zelfProof_does_not_match");
+    }
+
+    const current = String(publicData.revenueCatOriginalTransactionId || "").trim();
+    if (current && originalTransactionId && current !== originalTransactionId) {
+        return { status: "skipped", reason: "superseded_by_later_purchase", confirmed: false, tagName, domain };
+    }
+
+    if (publicData.eventID === eventId || publicData.plan === "unlimited") {
+        return { status: "skipped", reason: "plan_unchanged", confirmed: false, tagName, domain, plan: publicData.plan };
+    }
+
+    if (publicData.plan !== "premium") {
+        // A free (expired) name has nothing to upgrade; the purchase event will credit it.
+        return { status: "skipped", reason: "plan_unchanged", confirmed: false, tagName, domain, plan: publicData.plan };
+    }
+
+    const result = await changeZelfIdPlan(
+        {
+            tagName: storedBareName(tagObject, domainConfig, tagName),
+            domain,
+            domainConfig,
+            plan,
+            eventID: eventId,
+            revenueCatOriginalTransactionId: originalTransactionId || current,
+        },
+        tagObject
+    );
+
+    await rememberTransaction(inspected);
+
+    return {
+        status: "success",
+        action: "zelf_id_plan_changed",
+        confirmed: true,
+        tagName,
+        domain,
+        plan,
+        expiresAt: result.expiresAt,
+    };
+};
+
+/**
  * @param {Object} event - `body.event` of the RevenueCat webhook
  * @param {Object} [options]
  * @param {boolean} [options.allowSandbox]
  * @returns {Promise<Object>}
  */
 const webhookHandler = async (event, { allowSandbox = false } = {}) => {
-    const inspected = inspectRevenueCatEvent(event, { allowSandbox });
+    let inspected = inspectRevenueCatEvent(event, { allowSandbox });
 
     if (!inspected.ok) {
         if (SKIP_REASONS.has(inspected.reason)) {
@@ -429,11 +575,15 @@ const webhookHandler = async (event, { allowSandbox = false } = {}) => {
         throw new Error(`409:${inspected.reason}`);
     }
 
-    if (inspected.action === "expire") {
-        return applyRevenueCatExpiration(inspected);
-    }
+    inspected = await resolveNameByTransaction(inspected);
 
-    return applyRevenueCatPurchase(inspected, { allowSandbox });
+    if (inspected.action === "expire") return applyRevenueCatExpiration(inspected);
+    if (inspected.action === "change_plan") return applyRevenueCatProductChange(inspected);
+
+    const validated = validatePurchase(inspected);
+    if (!validated.ok) throw new Error(`409:${validated.reason}`);
+
+    return applyRevenueCatPurchase(validated);
 };
 
 /** @deprecated Prefer `webhookHandler` */
@@ -449,6 +599,9 @@ module.exports = {
     readSubscriberAttributes,
     resolveNameFromAttributes,
     inspectRevenueCatEvent,
+    validatePurchase,
+    licenseAllowsPlan,
+    expirationSkipReason,
     alreadyAppliedToRecord,
     webhookHandler,
     confirmRevenueCatPurchase,

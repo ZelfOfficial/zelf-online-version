@@ -127,24 +127,43 @@ const paymentSchemas = {
         type: string().required(),
         id: string().required(),
         product_id: string().required(),
-        transaction_id: string().required(),
+        transaction_id: string().allow("", null),
         environment: string().required(),
         price: number().allow(null),
     },
 };
 
-/**
- * RevenueCat calls this with the Authorization header set in its dashboard.
- * In production only the RevenueCat client JWT (REVENUECAT_ALLOWED_EMAIL) may
- * call it: session tokens are free to mint, and the event extends a Zelf ID.
- */
-const revenueCatWebhookValidation = async (ctx, next) => {
-    const { clientId, email } = ctx.state.user || {};
-    const allowedEmail = config.revenueCat?.allowedEmail;
+const crypto = require("crypto");
 
-    if (config.env === "production" && (!clientId || !allowedEmail || email !== allowedEmail)) {
-        ctx.status = 403;
-        ctx.body = { validationError: "Access forbidden" };
+const safeEqual = (a, b) => {
+    const left = Buffer.from(String(a));
+    const right = Buffer.from(String(b));
+    return left.length === right.length && crypto.timingSafeEqual(left, right);
+};
+
+/**
+ * RevenueCat sends the static Authorization header set in its dashboard (no JWT).
+ * It must equal REVENUECAT_WEBHOOK_AUTHORIZATION. "Bearer <secret>" and "<secret>" are
+ * treated the same so either dashboard style works. Unset secret fails closed (503).
+ */
+const isRevenueCatAuthorized = (header, expected) => {
+    if (!expected || !header) return false;
+    const strip = (value) => String(value).trim().replace(/^Bearer\s+/i, "");
+    return safeEqual(String(header).trim(), String(expected).trim()) || safeEqual(strip(header), strip(expected));
+};
+
+const revenueCatWebhookValidation = async (ctx, next) => {
+    const expected = config.revenueCat?.webhookAuthorization;
+
+    if (!expected) {
+        ctx.status = 503;
+        ctx.body = { validationError: "RevenueCat webhook is not configured" };
+        return;
+    }
+
+    if (!isRevenueCatAuthorized(ctx.headers?.authorization, expected)) {
+        ctx.status = 401;
+        ctx.body = { validationError: "Invalid authorization" };
         return;
     }
 

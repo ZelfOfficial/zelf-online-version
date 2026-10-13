@@ -161,6 +161,14 @@ const revertZelfIdToFreePlan = async (params, tagObject) => {
     return persistZelfIdMetadata(params, tagObject, domainConfig, metadata);
 };
 
+const changeZelfIdPlan = async (params, tagObject) => {
+    const { domain } = params;
+    const domainConfig = params.domainConfig || getDomainConfig(domain || "zelf");
+    const { metadata } = ZelfIdsPaymentModule.buildPlanChangeMetadata(params, tagObject, domainConfig);
+
+    return persistZelfIdMetadata(params, tagObject, domainConfig, metadata);
+};
+
 const getPaymentOptions = (tagName, domain, duration, authUser, requestOptions = {}) =>
     ZelfIdsPaymentModule.getPaymentOptions(tagName, domain, duration, authUser, requestOptions);
 
@@ -172,5 +180,6 @@ module.exports = {
     verifySmartContractPayment,
     addDurationToTag,
     revertZelfIdToFreePlan,
+    changeZelfIdPlan,
     getPaymentOptions,
 };

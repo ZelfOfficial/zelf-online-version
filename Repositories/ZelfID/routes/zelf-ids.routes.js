@@ -53,7 +53,8 @@ module.exports = (server) => {
 
     server.post(`${PATH}/decrypt`, Middleware.decryptValidation, Controller.decryptTag);
 
-    server.post(`${PATH}/revenue-cat`, Middleware.revenueCatWebhookValidation, Controller.revenueCatWebhook);
+    // POST revenue-cat is registered on the unprotected router (static Authorization, no JWT):
+    // see zelf-ids-revenue-cat.routes.js
 
     server.post(`${PATH}/purchase-rewards`, Middleware.referralRewardsValidation, Controller.purchaseRewards);
 

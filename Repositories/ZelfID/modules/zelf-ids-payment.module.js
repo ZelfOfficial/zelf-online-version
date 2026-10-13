@@ -488,6 +488,46 @@ const buildFreePlanRevertMetadata = (params, tagObject, domainConfig) => {
     return { metadata, fullTagName: tagObject.fullTagName };
 };
 
+/**
+ * Plan switch with no time added (RevenueCat PRODUCT_CHANGE premium → unlimited).
+ * Keeps price, duration, and expiresAt; stamps the new plan.
+ * @param {Object} params
+ * @param {Object} tagObject
+ * @param {Object} domainConfig
+ * @returns {{ metadata: Object, fullTagName: string }}
+ */
+const buildPlanChangeMetadata = (params, tagObject, domainConfig) => {
+    const domain = params.domain || domainConfig.name;
+    tagObject.fullTagName = getCanonicalMainnetName(params.tagName || tagObject.publicData.tagName || tagObject.publicData.zelfName, domain);
+
+    const storageKey = domainConfig.getTagKey();
+    const encryptVersion = resolveEncryptVersion(tagObject.publicData);
+
+    const extraParams = {
+        origin: tagObject.publicData.origin || "online",
+        price: tagObject.publicData.price,
+        duration: tagObject.publicData.duration,
+        registeredAt: tagObject.publicData.registeredAt || moment().format("YYYY-MM-DD HH:mm:ss"),
+        renewedAt: moment().format("YYYY-MM-DD HH:mm:ss"),
+        expiresAt: tagObject.publicData.expiresAt,
+        type: "mainnet",
+        hasPassword: tagObject.publicData.hasPassword,
+        eventID: params.eventID || undefined,
+        revenueCatOriginalTransactionId: params.revenueCatOriginalTransactionId || tagObject.publicData.revenueCatOriginalTransactionId || undefined,
+        plan: params.plan,
+    };
+
+    const metadata = {
+        [storageKey]: tagObject.fullTagName,
+        domain,
+        extraParams: stampExtraParamsVersion(extraParams, encryptVersion),
+    };
+
+    metadata.extraParams = JSON.stringify(cleanExtraParamsForPinata(metadata.extraParams));
+
+    return { metadata, fullTagName: tagObject.fullTagName };
+};
+
 const getPaymentOptions = async (tagName, domain, duration, authUser, requestOptions = {}) => {
     const ZelfIdModule = require("./zelf-id.module");
     const domainConfig = getDomainConfig(domain);
@@ -899,6 +939,7 @@ const storeInArweave = async (tagObject, domainConfig, metadata) => {
 module.exports = {
     buildMetadata,
     buildFreePlanRevertMetadata,
+    buildPlanChangeMetadata,
     getPaymentOptions,
     isTagPayReducedFeeClientHeaderHonored,
     ensureZelfProofQRCode,
