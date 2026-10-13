@@ -285,7 +285,7 @@ const revenueCatWebhook = async (ctx) => {
         // The Tags revenue-cat module has no `revenueCatWebhook` export, so this
         // route always failed. Zelf IDs use their own v4 handler.
         const data = await ZelfIdsRevenueCatModule.webhookHandler(ctx.request.body.event, {
-            allowSandbox: configuration.env !== "production",
+            allowSandbox: configuration.env !== "production" || Boolean(configuration.revenueCat?.allowSandbox),
         });
 
         ctx.body = { data };
