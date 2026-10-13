@@ -11,7 +11,7 @@ jest.mock("../../Repositories/Mail/models/inbound-email.model", () => ({}));
 
 const config = require("../../Core/config");
 const { verifySignature, extractSignatureFields, mailgunSignatureValidator } = require("../../Repositories/Mail/middlewares/mailgun-signature.middleware");
-const { superAdminKeyValidator } = require("../../Repositories/Mail/middlewares/super-admin-key.middleware");
+const { jimInboxKeyValidator } = require("../../Repositories/Mail/middlewares/jim-inbox-key.middleware");
 const { extractInvite } = require("../../Repositories/Mail/modules/invite-extractor.module");
 const Forwarder = require("../../Repositories/Mail/modules/jim-forwarder.module");
 const Inbound = require("../../Repositories/Mail/modules/inbound-mail.module");
@@ -89,18 +89,64 @@ describe("Mailgun signature", () => {
 	});
 });
 
-describe("super-admin guard", () => {
-	const old = config.SUPERADMIN_JWT_SECRET;
-	beforeAll(() => (config.SUPERADMIN_JWT_SECRET = "sa-secret"));
-	afterAll(() => (config.SUPERADMIN_JWT_SECRET = old));
-	test("x-api-key, bearer JWT, and rejection", async () => {
+describe("jim inbox key guard", () => {
+	const old = config.jimInbound.inboxApiKey;
+	const oldSa = config.SUPERADMIN_JWT_SECRET;
+	const ctx = (headers) => ({ headers, state: {} });
+	beforeEach(() => {
+		config.jimInbound.inboxApiKey = "inbox-key-123";
+		config.SUPERADMIN_JWT_SECRET = "sa-secret";
+	});
+	afterAll(() => {
+		config.jimInbound.inboxApiKey = old;
+		config.SUPERADMIN_JWT_SECRET = oldSa;
+	});
+	test("x-jim-inbox-key header passes", async () => {
 		const next = jest.fn();
-		await superAdminKeyValidator({ headers: { "x-api-key": "sa-secret" }, state: {} }, next);
-		await superAdminKeyValidator({ headers: { authorization: `Bearer ${jwt.sign({ email: "jim" }, "sa-secret")}` }, state: {} }, next);
-		expect(next).toHaveBeenCalledTimes(2);
-		const bad = { headers: { "x-api-key": "wrong" }, state: {} };
-		await superAdminKeyValidator(bad, next);
-		expect(bad.status).toBe(403);
+		const c = ctx({ "x-jim-inbox-key": "inbox-key-123" });
+		await jimInboxKeyValidator(c, next);
+		expect(next).toHaveBeenCalled();
+		expect(c.state.inboundActor).toBe("jim-inbox-key");
+	});
+	test("Authorization: Bearer <key> passes", async () => {
+		const next = jest.fn();
+		await jimInboxKeyValidator(ctx({ authorization: "Bearer inbox-key-123" }), next);
+		expect(next).toHaveBeenCalled();
+	});
+	test("wrong, missing, or different-length key → 401", async () => {
+		for (const h of [{ "x-jim-inbox-key": "nope" }, {}, { "x-jim-inbox-key": "inbox-key-1234" }, { authorization: "Basic inbox-key-123" }]) {
+			const next = jest.fn();
+			const c = ctx(h);
+			await jimInboxKeyValidator(c, next);
+			expect(c.status).toBe(401);
+			expect(next).not.toHaveBeenCalled();
+		}
+	});
+	test("super-admin key and JWT are no longer accepted", async () => {
+		for (const h of [{ "x-api-key": "sa-secret" }, { authorization: `Bearer ${jwt.sign({ email: "jim" }, "sa-secret")}` }]) {
+			const next = jest.fn();
+			const c = ctx(h);
+			await jimInboxKeyValidator(c, next);
+			expect(c.status).toBe(401);
+			expect(next).not.toHaveBeenCalled();
+		}
+	});
+	test("unset env → 503", async () => {
+		config.jimInbound.inboxApiKey = undefined;
+		const next = jest.fn();
+		const c = ctx({ "x-jim-inbox-key": "anything" });
+		await jimInboxKeyValidator(c, next);
+		expect(c.status).toBe(503);
+		expect(next).not.toHaveBeenCalled();
+	});
+	test("routes wire the inbox key only on mailbox endpoints", () => {
+		const calls = [];
+		const server = { get: (...a) => calls.push(["get", ...a]), post: (...a) => calls.push(["post", ...a]), patch: (...a) => calls.push(["patch", ...a]) };
+		require("../../Repositories/Mail/routes/mail.route")(server);
+		const mailbox = calls.filter(([, p]) => /\/mail\/inbound(\/:id)?$/.test(p) && !p.endsWith("/jim"));
+		expect(mailbox.map(([m]) => m).sort()).toEqual(["get", "get", "patch"]);
+		mailbox.forEach((c) => expect(c[2]).toBe(jimInboxKeyValidator));
+		calls.filter(([m]) => m === "post").forEach((c) => expect(c).not.toContain(jimInboxKeyValidator));
 	});
 });
 
