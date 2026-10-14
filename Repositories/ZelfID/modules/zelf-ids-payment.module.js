@@ -416,7 +416,8 @@ const buildMetadata = (params, tagObject, domainConfig) => {
 
     const extraParams = {
         origin: tagObject.publicData.origin || "online",
-        price,
+        price: params.paymentMethod === "gift" ? 0 : price,
+        paymentMethod: params.paymentMethod || undefined,
         duration: resolvePaidDurationStamp({ publicData: tagObject.publicData, duration }),
         registeredAt: moment().format("YYYY-MM-DD HH:mm:ss"),
         renewedAt: tagObject.publicData.type === "mainnet" ? moment().format("YYYY-MM-DD HH:mm:ss") : undefined,

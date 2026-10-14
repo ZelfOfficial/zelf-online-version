@@ -85,6 +85,7 @@ const EXTRA_PARAMS_ALLOWED_KEYS = [
     "st",
     "eventID",
     "eventPrice",
+    "paymentMethod",
 ];
 
 const EXTRA_PARAMS_SECURITY_TYPES = new Set(["pin", "password", "securePassword"]);
