@@ -2,6 +2,7 @@ const Module = require("../modules/zns.module");
 const Modulev2 = require("../modules/zns.v2.module");
 const ZNSTokenModule = require("../modules/zns-token.module");
 const RevenueCatModule = require("../modules/revenue-cat.module");
+const ZelfIdRevenueCatV4 = require("../../ZelfIDRevenueCatV4/zelf-id-revenue-cat-v4.module");
 const { updateOldZelfNameObject } = require("../modules/my-zns.module");
 const ZNSRecoveryModule = require("../modules/zns-recovery.module");
 
@@ -251,7 +252,10 @@ const leaseOfflineZelfName_v2 = async (ctx) => {
 
 const revenueCatWebhook = async (ctx) => {
 	try {
-		const data = await RevenueCatModule.webhookHandler(ctx.request.body);
+		// Zelf ID products (Android/iOS) are credited by the v4 handler; everything else stays on v3.
+		const data = ZelfIdRevenueCatV4.isZelfIdProductEvent(ctx.request.body?.event)
+			? await ZelfIdRevenueCatV4.forwardToV4(ctx.request.body)
+			: await RevenueCatModule.webhookHandler(ctx.request.body);
 
 		ctx.body = { data };
 	} catch (error) {
