@@ -10,6 +10,7 @@ const { addBasicPlugins } = require("../../../Core/mongoose-utils");
 const revenueCatProcessedEventSchema = new mongoose.Schema({
     eventId: { type: String, required: true },
     eventType: { type: String, default: "" },
+    transactionId: { type: String, default: "" },
     originalTransactionId: { type: String, default: "" },
     productId: { type: String, default: "" },
     status: { type: String, enum: ["processing", "processed"], default: "processing" },
@@ -19,6 +20,8 @@ const revenueCatProcessedEventSchema = new mongoose.Schema({
 });
 
 revenueCatProcessedEventSchema.index({ eventId: 1 }, { unique: true });
+// Store-transaction dedupe: a purchase re-sent under a new event.id (v3 + v4, replays) is credited once.
+revenueCatProcessedEventSchema.index({ transactionId: 1 });
 
 addBasicPlugins(revenueCatProcessedEventSchema);
 

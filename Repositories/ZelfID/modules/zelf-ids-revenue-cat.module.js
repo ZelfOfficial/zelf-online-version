@@ -581,11 +581,20 @@ const webhookHandler = async (event, { allowSandbox = false } = {}) => {
         if (!early.ok) throw new Error(`409:${early.reason}`);
     }
 
-    const { claimEvent, releaseEvent, markEventProcessed } = require("./zelf-ids-revenue-cat-events.module");
+    const { claimEvent, releaseEvent, markEventProcessed, findCreditedTransaction } = require("./zelf-ids-revenue-cat-events.module");
     const eventId = inspected.eventId;
 
     if (eventId && !(await claimEvent(inspected))) {
         return { status: "skipped", ignored: "duplicate_event", reason: "duplicate_event", confirmed: false };
+    }
+
+    // Same store purchase under a different event.id (v3 and v4 webhooks, legacy zns_* replays): credit once.
+    if (eventId && inspected.action === "purchase" && inspected.transactionId && typeof findCreditedTransaction === "function") {
+        const prior = await findCreditedTransaction({ transactionId: inspected.transactionId, eventId });
+        if (prior) {
+            await markEventProcessed(eventId, { status: "skipped", action: "duplicate_transaction" }).catch(() => undefined);
+            return { status: "skipped", ignored: "duplicate_transaction", reason: "duplicate_transaction", confirmed: false };
+        }
     }
 
     let result;

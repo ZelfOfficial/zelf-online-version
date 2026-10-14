@@ -20,6 +20,16 @@ jest.mock("../../Repositories/ZelfID/models/revenue-cat-processed-event.model", 
         if (d && d.status === filter.status) docs.delete(filter.eventId);
     }),
     updateOne: jest.fn(async (filter, update) => Object.assign(docs.get(filter.eventId) || {}, update.$set)),
+    findOne: jest.fn((filter) => ({
+        lean: async () =>
+            [...docs.values()].find(
+                (d) =>
+                    d.transactionId === filter.transactionId &&
+                    d.eventId !== filter.eventId.$ne &&
+                    d.status === filter.status &&
+                    filter["result.action"].$in.includes(d.result?.action)
+            ) || null,
+    })),
     createIndexes: jest.fn(async () => undefined),
 }));
 
@@ -133,6 +143,20 @@ describe("RevenueCat event-id dedupe", () => {
         Model.create.mockRejectedValueOnce(new Error("connection lost"));
         await expect(webhookHandler(ev("evt_db"))).rejects.toThrow("connection lost");
         expect(addDurationToTag).not.toHaveBeenCalled();
+    });
+
+    test("same store transaction under a new event.id (v3 + v4, zns_* replay) is credited once", async () => {
+        await webhookHandler(ev("evt_v4", { transaction_id: "store_tx_1", original_transaction_id: "store_tx_1" }));
+        const dup = await webhookHandler(ev("evt_v3", { transaction_id: "store_tx_1", original_transaction_id: "store_tx_1" }));
+        expect(dup).toMatchObject({ status: "skipped", ignored: "duplicate_transaction", confirmed: false });
+        expect(addDurationToTag).toHaveBeenCalledTimes(1);
+        expect(docs.get("evt_v3")).toMatchObject({ status: "processed", result: { action: "duplicate_transaction" } });
+    });
+
+    test("a renewal (new transaction_id, same original) still credits", async () => {
+        await webhookHandler(ev("evt_r1", { transaction_id: "t1", original_transaction_id: "t0" }));
+        const r2 = await webhookHandler(ev("evt_r2", { type: "RENEWAL", transaction_id: "t2", original_transaction_id: "t0", product_id: "zelf_premium_3y" }));
+        expect(r2.ignored).toBeUndefined();
     });
 
     test("ensureIndexes builds the unique index explicitly", async () => {
