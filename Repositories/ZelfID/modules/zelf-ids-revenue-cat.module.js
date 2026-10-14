@@ -575,7 +575,42 @@ const webhookHandler = async (event, { allowSandbox = false } = {}) => {
         throw new Error(`409:${inspected.reason}`);
     }
 
-    inspected = await resolveNameByTransaction(inspected);
+    // Validate purchases before claiming, so a permanent 409 never holds a claim.
+    if (inspected.action === "purchase" && !inspected.lookupByTransaction) {
+        const early = validatePurchase(inspected);
+        if (!early.ok) throw new Error(`409:${early.reason}`);
+    }
+
+    const { claimEvent, releaseEvent, markEventProcessed } = require("./zelf-ids-revenue-cat-events.module");
+    const eventId = inspected.eventId;
+
+    if (eventId && !(await claimEvent(inspected))) {
+        return { status: "skipped", ignored: "duplicate_event", reason: "duplicate_event", confirmed: false };
+    }
+
+    let result;
+    try {
+        result = await applyInspectedEvent(inspected);
+    } catch (error) {
+        if (eventId) {
+            await releaseEvent(eventId).catch((releaseError) =>
+                console.error("RevenueCat event claim release failed:", releaseError?.message || releaseError)
+            );
+        }
+        throw error;
+    }
+
+    if (eventId) {
+        await markEventProcessed(eventId, { status: result?.status, action: result?.action || result?.reason || null }).catch((markError) =>
+            console.error("RevenueCat event mark processed failed:", markError?.message || markError)
+        );
+    }
+
+    return result;
+};
+
+const applyInspectedEvent = async (claimed) => {
+    const inspected = await resolveNameByTransaction(claimed);
 
     if (inspected.action === "expire") return applyRevenueCatExpiration(inspected);
     if (inspected.action === "change_plan") return applyRevenueCatProductChange(inspected);

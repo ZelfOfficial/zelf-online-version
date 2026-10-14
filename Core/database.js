@@ -22,6 +22,13 @@ const initMongoDB = () => {
 
     MongoConnection = mongoose.connection;
 
+    // Unique indexes that guard money paths are built explicitly (autoIndex may be off in production).
+    MongoConnection.once("open", () => {
+        require("../Repositories/ZelfID/modules/zelf-ids-revenue-cat-events.module")
+            .ensureIndexes()
+            .catch((error) => console.error("RevenueCatProcessedEvent index creation failed:", error?.message || error));
+    });
+
     return MongoConnection;
 };
 
