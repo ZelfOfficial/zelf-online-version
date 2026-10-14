@@ -78,6 +78,18 @@ const giftZelfId = async (params = {}, jwt, deps = {}) => {
     }
 
     const tagObject = search.tagObject;
+    if (!provenance && params.preserveProvenance) {
+        // Existing record: relabel version/type from the proof's own cleartext, not from the stored stamp.
+        let proof = params.zelfProof || tagObject.zelfProof || tagObject.publicData?.zelfProof;
+        if (!proof && params.zelfProofQRCode) {
+            const { extractZelfProofFromQR } = deps.QR || require("../../Tags/modules/qr-zelfproof-extractor.module");
+            proof = await extractZelfProofFromQR(params.zelfProofQRCode);
+        }
+        if (!proof) throw httpError("409:zelf_proof_required_to_preserve_provenance");
+        const { publicData: proofPublic } = await Offline.previewHumanAuthn({ zelfProof: proof });
+        provenance = Offline.detectProofProvenance(proofPublic);
+        tagObject.publicData = { ...(tagObject.publicData || {}), v: provenance.version, origin: provenance.type };
+    }
     if (!provenance) provenance = Offline.detectProofProvenance(tagObject.publicData || {});
 
     const result = await addDurationToTag(
