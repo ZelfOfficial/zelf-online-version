@@ -673,12 +673,16 @@ const _handleZelfKeysSubscriptionCancellationWebhook = async (event) => {
 const _handleWebhook = async (event) => {
 	const attributes = {};
 
-	const attributeKeys = Object.keys(event.subscriber_attributes);
+	const attributeKeys = Object.keys(event.subscriber_attributes || {});
 
 	for (let index = 0; index < attributeKeys.length; index++) {
 		const attributeKey = attributeKeys[index];
 
-		attributes[attributeKey] = event.subscriber_attributes[attributeKey].value;
+		attributes[attributeKey] = event.subscriber_attributes[attributeKey]?.value;
+	}
+
+	if (typeof attributes.zelfName !== "string" || !attributes.zelfName.trim()) {
+		return _ignoreEvent(event, "zelf_name_missing");
 	}
 
 	const extractedTagName = attributes.zelfName.split(".")[0];

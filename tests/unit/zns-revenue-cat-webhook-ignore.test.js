@@ -92,3 +92,14 @@ describe("ZNS RevenueCat webhook: events it does not act on", () => {
         expect(TagsModule.previewTag).toHaveBeenCalledWith(expect.objectContaining({ tagName: "alice", domain: "zelf" }), {});
     });
 });
+
+describe("ZNS RevenueCat: NON_RENEWING_PURCHASE without zelfName", () => {
+    test("is ignored instead of crashing on zelfName.split", async () => {
+        jest.clearAllMocks();
+        jest.spyOn(console, "info").mockImplementation(() => {});
+        const result = await webhookHandler({ event: rcEvent("NON_RENEWING_PURCHASE", { subscriber_attributes: undefined }) });
+        expect(result).toMatchObject({ ignored: true, reason: "zelf_name_missing" });
+        expect(TagsModule.previewTag).not.toHaveBeenCalled();
+        console.info.mockRestore();
+    });
+});

@@ -585,11 +585,15 @@ const revenueCatWebhookValidation = async (ctx, next) => {
         return;
     }
 
-    const valid = validate(schemas.revenueCatWebhook, ctx.request.body?.event);
+    // TEST (dashboard) events carry no product fields; the handler acknowledges them.
+    if (event.type !== "TEST") {
+        const valid = validate(schemas.revenueCatWebhook, ctx.request.body?.event);
 
-    if (valid.error) {
-        ctx.status = 409;
-        ctx.body = { validationError: valid.error.message };
+        if (valid.error) {
+            ctx.status = 409;
+            ctx.body = { validationError: valid.error.message };
+            return;
+        }
     }
 
     await next();
