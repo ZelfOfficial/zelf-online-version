@@ -36,4 +36,6 @@ module.exports = (server) => {
     // admin endpoints
     server.get(`${PATH}/dashboard/list`, Middleware.listDashboardValidation, Controller.listDataDashboard);
     server.get(`${PATH}/dashboard/list-all`, Middleware.listAllDashboardValidation, Controller.listAllDataDashboard);
+    // Domain-wide admin list (license owner / staff of the domain). Metadata only, paginated.
+    server.get(`${PATH}/dashboard/domain`, Middleware.domainListValidation, Controller.listDomainKeys);
 };

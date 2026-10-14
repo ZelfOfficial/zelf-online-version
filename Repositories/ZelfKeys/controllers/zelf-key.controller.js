@@ -4,6 +4,7 @@
  */
 
 const Module = require("../modules/zelf-key.module.js");
+const ZelfKeyDomainModule = require("../modules/zelf-key-domain.module");
 const { errorHandler } = require("../../../Core/http-handler");
 
 /**
@@ -245,6 +246,24 @@ const listAllDataDashboard = async (ctx) => {
 };
 
 /**
+ * Domain-wide ZelfKeys list for license owner / staff (metadata only)
+ * @param {Object} ctx - Koa context
+ */
+const listDomainKeys = async (ctx) => {
+	try {
+		const data = await ZelfKeyDomainModule.listDomainKeys(ctx.request.query, ctx.state.user);
+
+		ctx.body = { data };
+	} catch (error) {
+		const _exception = errorHandler(error, ctx);
+
+		ctx.status = _exception.status;
+
+		ctx.body = { message: _exception.message, code: _exception.code };
+	}
+};
+
+/**
  * Count-only IPFS summary across ZelfKeys categories
  * @param {Object} ctx - Koa context
  */
@@ -319,6 +338,7 @@ module.exports = {
 	listAllData,
 	listDataDashboard,
 	listAllDataDashboard,
+	listDomainKeys,
 	summarizeData,
 	changeMasterPassword,
 	deleteZelfKey,
