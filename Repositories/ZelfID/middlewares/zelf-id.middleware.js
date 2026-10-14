@@ -175,6 +175,13 @@ const revenueCatWebhookValidation = async (ctx, next) => {
         return;
     }
 
+    // RevenueCat dashboard "Send test event": acknowledge with 200 and do nothing else (no DB writes).
+    if (event.type === "TEST") {
+        ctx.status = 200;
+        ctx.body = { received: true, ignored: "test_event" };
+        return;
+    }
+
     const valid = validate(paymentSchemas.revenueCatEvent, event);
 
     if (valid.error) {

@@ -82,6 +82,21 @@ describe("zelf-ids revenueCatWebhookValidation (static Authorization)", () => {
         expect(next).not.toHaveBeenCalled();
     });
 
+    test("a TEST event returns 200 and never calls next", async () => {
+        const ctx = createCtx({ api_version: "1.0", event: { type: "TEST", id: "t1" } }, `Bearer ${SECRET}`);
+        const next = jest.fn();
+        await revenueCatWebhookValidation(ctx, next);
+        expect(ctx.status).toBe(200);
+        expect(ctx.body).toEqual({ received: true, ignored: "test_event" });
+        expect(next).not.toHaveBeenCalled();
+    });
+
+    test("a TEST event with a wrong key still gets 401", async () => {
+        const ctx = createCtx({ event: { type: "TEST" } }, "nope");
+        await revenueCatWebhookValidation(ctx, jest.fn());
+        expect(ctx.status).toBe(401);
+    });
+
     describe("config fallback to JIM_INBOX_API_KEY", () => {
         const savedEnv = { ...process.env };
         afterEach(() => {
