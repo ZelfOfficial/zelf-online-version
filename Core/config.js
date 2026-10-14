@@ -233,8 +233,11 @@ const configuration = {
     },
     revenueCat: {
         allowedEmail: process.env.REVENUECAT_ALLOWED_EMAIL,
-        /** Exact Authorization header value configured in the RevenueCat dashboard webhook. Required. */
-        webhookAuthorization: process.env.REVENUECAT_WEBHOOK_AUTHORIZATION,
+        /**
+         * Exact Authorization header value configured in the RevenueCat dashboard webhook.
+         * Falls back to JIM_INBOX_API_KEY so one shared secret can serve both. Both unset = 503.
+         */
+        webhookAuthorization: process.env.REVENUECAT_WEBHOOK_AUTHORIZATION || process.env.JIM_INBOX_API_KEY,
         /** Credit SANDBOX (TestFlight / internal testing) purchases even when NODE_ENV is production. */
         allowSandbox: process.env.REVENUECAT_ALLOW_SANDBOX === "true",
     },

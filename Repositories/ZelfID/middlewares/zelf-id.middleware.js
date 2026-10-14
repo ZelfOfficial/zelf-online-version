@@ -143,7 +143,7 @@ const safeEqual = (a, b) => {
 
 /**
  * RevenueCat sends the static Authorization header set in its dashboard (no JWT).
- * It must equal REVENUECAT_WEBHOOK_AUTHORIZATION. "Bearer <secret>" and "<secret>" are
+ * It must equal REVENUECAT_WEBHOOK_AUTHORIZATION (falls back to JIM_INBOX_API_KEY). "Bearer <secret>" and "<secret>" are
  * treated the same so either dashboard style works. Unset secret fails closed (503).
  */
 const isRevenueCatAuthorized = (header, expected) => {
