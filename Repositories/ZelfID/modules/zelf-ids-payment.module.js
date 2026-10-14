@@ -528,6 +528,32 @@ const buildPlanChangeMetadata = (params, tagObject, domainConfig) => {
     return { metadata, fullTagName: tagObject.fullTagName };
 };
 
+/**
+ * Referral for a checkout. The record's stored referral always wins (it was set at lease).
+ * Otherwise an optional checkout `referralTagName` must be an existing, different Zelf ID
+ * of the same domain. Its discount comes only from the license (`payment.whitelist`).
+ * @returns {Promise<{ referralTagName: string, referralSolanaAddress: string }>}
+ */
+const resolveCheckoutReferral = async ({ tagName, domain, domainConfig, publicData = {}, referralTagName, authUser }) => {
+    if (publicData.referralTagName) {
+        return { referralTagName: publicData.referralTagName, referralSolanaAddress: publicData.referralSolanaAddress || "" };
+    }
+
+    if (!referralTagName) return { referralTagName: "", referralSolanaAddress: "" };
+
+    const bare = `${referralTagName}`.trim().toLowerCase().split(".")[0];
+    const fullName = `${bare}.${domain}`;
+
+    if (!bare || bare === `${tagName}`.toLowerCase().split(".")[0]) throw new Error("409:invalid_referral");
+
+    const ZelfIdModule = require("./zelf-id.module");
+    const referrer = await ZelfIdModule._validateReferral(fullName, authUser, domainConfig);
+
+    if (!referrer) throw new Error("404:referral_not_found");
+
+    return { referralTagName: fullName, referralSolanaAddress: referrer.publicData?.solanaAddress || "" };
+};
+
 const getPaymentOptions = async (tagName, domain, duration, authUser, requestOptions = {}) => {
     const ZelfIdModule = require("./zelf-id.module");
     const domainConfig = getDomainConfig(domain);
@@ -547,10 +573,20 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
     // Price with the plan this payment stamps (premium by default for long names).
     // `getZelfIdPrice` without a plan read the Tags default table, so a long name
     // paid the default price and was still stamped premium.
+    // Referral / coupon: the record's own referral wins; otherwise a checkout referral
+    // (a license `payment.whitelist` entry is the coupon) is validated and priced from the license.
+    const referral = await resolveCheckoutReferral({
+        tagName,
+        domain,
+        domainConfig,
+        publicData: tagObject.publicData,
+        referralTagName: requestOptions.referralTagName,
+        authUser,
+    });
     const priceDetails = getZelfIdCheckoutPrice({
         tagName,
         duration: normalizedDuration,
-        referralTagName: tagObject.publicData.referralTagName,
+        referralTagName: referral.referralTagName,
         domainConfig,
         requestedPlan,
     });
@@ -687,9 +723,16 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         payment: {
             registeredAt: renewTagPayObject.publicData?.registeredAt,
             expiresAt: renewTagPayObject.publicData?.expiresAt,
-            referralTagName: tagObject.publicData?.referralTagName,
-            referralSolanaAddress: tagObject.publicData?.referralSolanaAddress,
+            referralTagName: referral.referralTagName || undefined,
+            referralSolanaAddress: referral.referralSolanaAddress || undefined,
         },
+        referralTagName: referral.referralTagName || undefined,
+        listPriceUsd,
+        billableUsdPrice,
+        discount: priceDetails.discount,
+        discountType: priceDetails.discountType,
+        // $0 after a license coupon: confirm with network FREE, no Stripe or on-chain payment.
+        freeCheckout: Number(billableUsdPrice) === 0,
     };
 
     if (devAmountFraction != null) {
@@ -945,6 +988,7 @@ const storeInArweave = async (tagObject, domainConfig, metadata) => {
 };
 
 module.exports = {
+    resolveCheckoutReferral,
     buildMetadata,
     buildFreePlanRevertMetadata,
     buildPlanChangeMetadata,

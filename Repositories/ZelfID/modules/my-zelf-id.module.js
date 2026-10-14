@@ -22,6 +22,8 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token) => {
 
     if (tokenDecoded.tagName !== `${tagName}.${domain}`) throw new Error("403:tag_not_owned");
 
+    if (network === "FREE") return confirmFreeCheckout(tagName, domain, tokenDecoded, domainConfig);
+
     if (network === "AVAX") {
         throw new Error("409:avax_use_smart_contract_confirmation");
     }
@@ -94,6 +96,66 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token) => {
         expiresAt: extension.expiresAt || tagObject.publicData?.expiresAt || null,
         confirmed: true,
         amountReceived: paymentConfirmation.amountReceived,
+    };
+};
+
+/**
+ * Confirm a checkout whose license quote is $0 (100% license coupon / whitelist referral).
+ * Re-quotes on the server from the license with the signed plan, duration and referral;
+ * refuses unless the total is exactly $0. No Stripe or on-chain payment is involved.
+ */
+const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig) => {
+    const { getZelfIdCheckoutPrice, normalizePaymentDuration } = require("./zelf-id-plan.module");
+    const tagData = await ZelfIdModule.searchTag({ tagName, domain, domainConfig, environment: "all" }, {});
+
+    if (tagData.available) throwPaymentConfirmationTagNotFound(tagName, domain);
+
+    const tagObject = tagData.tagObject;
+    const initiatedAt = tokenDecoded.initiatedAt ? moment.unix(tokenDecoded.initiatedAt) : null;
+    const renewedAt = tagObject.publicData.renewedAt || tagObject.publicData.registeredAt;
+
+    // Same signed checkout already applied: return the record, never stamp twice.
+    if (initiatedAt && renewedAt && moment(renewedAt).isAfter(initiatedAt)) {
+        return { cache: true, confirmed: true, amountReceived: 0, tagObject, expiresAt: tagObject.publicData?.expiresAt || null };
+    }
+
+    const referralTagName = tagObject.publicData.referralTagName || tokenDecoded.referralTagName || "";
+    const duration = normalizePaymentDuration(tokenDecoded.duration || "1");
+    const quote = getZelfIdCheckoutPrice({
+        tagName: tokenDecoded.tagName,
+        duration,
+        referralTagName,
+        domainConfig,
+        requestedPlan: tokenDecoded.plan,
+    });
+
+    if (Number(quote.price) !== 0) throw new Error("409:checkout_total_not_zero");
+
+    if (referralTagName && !tagObject.publicData.referralTagName) {
+        tagObject.publicData.referralTagName = referralTagName;
+        tagObject.publicData.referralSolanaAddress = tokenDecoded.payment?.referralSolanaAddress || "";
+    }
+
+    const extension = await addDurationToTag(
+        {
+            tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
+            price: 0,
+            domain,
+            duration: tokenDecoded.duration || 1,
+            plan: tokenDecoded.plan,
+            domainConfig,
+        },
+        tagObject
+    );
+
+    return {
+        tagObject: extension.tagObject || tagObject,
+        expiresAt: extension.expiresAt || tagObject.publicData?.expiresAt || null,
+        confirmed: true,
+        amountReceived: 0,
+        referralTagName: referralTagName || null,
+        ipfsId: extension.ipfsId,
+        arweaveId: extension.arweaveId,
     };
 };
 
