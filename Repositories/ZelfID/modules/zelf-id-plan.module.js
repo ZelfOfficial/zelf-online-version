@@ -465,12 +465,20 @@ const resolvePaidExpiresAt = ({ publicData = {}, duration, durationYears } = {})
             .add(isLifetimeDuration(duration) ? LIFETIME_EXPIRATION_YEARS : years || 1, "year")
             .format("YYYY-MM-DD HH:mm:ss");
 
-    if (isLifetimeDuration(duration)) return fromNow();
     if (!hasActivePaidLease(publicData) || !publicData.expiresAt) return fromNow();
 
     const parsed = moment(publicData.expiresAt, "YYYY-MM-DD HH:mm:ss", true).isValid()
         ? moment(publicData.expiresAt, "YYYY-MM-DD HH:mm:ss")
         : moment(publicData.expiresAt);
+
+    // An active paid lease is never shortened: lifetime keeps its horizon, and a
+    // lifetime purchase on top of a longer stored expiry keeps the longer one.
+    if (isLifetimeDuration(duration)) {
+        const lifetime = fromNow();
+        return moment(lifetime, "YYYY-MM-DD HH:mm:ss").isAfter(parsed) ? lifetime : parsed.format("YYYY-MM-DD HH:mm:ss");
+    }
+    if (publicData.duration === "lifetime") return parsed.format("YYYY-MM-DD HH:mm:ss");
+
     return parsed.add(years || 1, "year").format("YYYY-MM-DD HH:mm:ss");
 };
 
@@ -486,6 +494,7 @@ const resolvePaidDurationStamp = ({ publicData = {}, duration } = {}) => {
     const normalized = normalizePaymentDuration(duration);
     if (normalized === "lifetime") return "lifetime";
     if (!hasActivePaidLease(publicData)) return normalized;
+    if (publicData.duration === "lifetime") return "lifetime";
 
     const previous = Number(publicData.duration);
     if (Number.isFinite(previous) && previous > 0 && previous < PAID_HORIZON_YEARS) {
@@ -516,7 +525,32 @@ const resolveV4PaymentStamp = ({ tagName, encryptVersion, durationYears, duratio
     };
 };
 
+/**
+ * Refuse purchases that would take paid value away from an active lease.
+ * Tier order is the license's own (plans sorted by cheapest license price), nothing hardcoded.
+ * - Downgrade (e.g. unlimited -> premium) on an active paid lease: 409 plan_downgrade_not_allowed.
+ * - Same or lower plan on an active lifetime lease: 409 lifetime_already_owned.
+ * @param {Object} params
+ * @param {Object} [params.publicData] current Zelf ID public data
+ * @param {string} [params.requestedPlan]
+ * @param {string} [params.tagName]
+ * @param {Object} [params.domainConfig]
+ */
+const assertPurchaseKeepsPaidValue = ({ publicData = {}, requestedPlan, tagName, domainConfig } = {}) => {
+    if (!hasActivePaidLease(publicData)) return;
+    const name = tagName || publicData.tagName || publicData.zelfName;
+    const offered = licensePaidPlansForName(name, domainConfig);
+    const current = effectivePlan(publicData, domainConfig);
+    const target = resolvePaidPlan({ tagName: name, requestedPlan, domainConfig });
+    const currentRank = offered.indexOf(current);
+    const targetRank = offered.indexOf(target);
+    if (currentRank < 0 || targetRank < 0) return;
+    if (targetRank < currentRank) throw new Error("409:plan_downgrade_not_allowed");
+    if (publicData.duration === "lifetime" && targetRank <= currentRank) throw new Error("409:lifetime_already_owned");
+};
+
 module.exports = {
+    assertPurchaseKeepsPaidValue,
     ZELF_ID_RESERVATION_DURATION,
     ZELF_ID_RESERVATION_HOURS,
     getReservationExpiresAt,
