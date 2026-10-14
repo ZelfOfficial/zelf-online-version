@@ -333,7 +333,10 @@ const paymentConfirmationValidation = async (ctx, next) => {
         return;
     }
 
-    if (!tokenDecoded.prices[network]) {
+    // FREE has no price entry: allowed only for a signed $0 checkout (re-quoted from the license on confirm).
+    const freeOk = network === "FREE" && tokenDecoded.freeCheckout === true;
+
+    if (!freeOk && !tokenDecoded.prices?.[network]) {
         ctx.status = 409;
         ctx.body = { validationError: "invalid_network" };
         return;
