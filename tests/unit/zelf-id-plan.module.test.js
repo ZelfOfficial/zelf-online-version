@@ -636,3 +636,58 @@ describe("plan rules come from the license (no fixed length groups)", () => {
 		expect(isShortZelfIdName("abcd.zelf", d)).toBe(false);
 	});
 });
+
+describe("active paid lease keeps its value", () => {
+    const P = require("../../Repositories/ZelfID/modules/zelf-id-plan.module");
+    const moment = require("moment");
+    const fmt = (m) => m.format("YYYY-MM-DD HH:mm:ss");
+    const domainConfig = {
+        tags: {
+            payment: {
+                planPricing: {
+                    premium: { "6-15": { 1: 29, 2: 43, lifetime: 144 } },
+                    unlimited: { "6-15": { 1: 99, 2: 148, lifetime: 494 } },
+                },
+            },
+            minLength: 1,
+            maxLength: 27,
+        },
+    };
+    const base = { tagName: "jimqatest.zelf", type: "mainnet" };
+
+    test("downgrade unlimited -> premium is refused on an active lease", () => {
+        const publicData = { ...base, plan: "unlimited", duration: "1", expiresAt: fmt(moment().add(1, "year")) };
+        expect(() => P.assertPurchaseKeepsPaidValue({ publicData, requestedPlan: "premium", domainConfig })).toThrow(
+            "409:plan_downgrade_not_allowed"
+        );
+        expect(() => P.assertPurchaseKeepsPaidValue({ publicData, requestedPlan: "unlimited", domainConfig })).not.toThrow();
+    });
+
+    test("lifetime: same plan refused, upgrade allowed", () => {
+        const publicData = { ...base, plan: "premium", duration: "lifetime", expiresAt: fmt(moment().add(100, "year")) };
+        expect(() => P.assertPurchaseKeepsPaidValue({ publicData, requestedPlan: "premium", domainConfig })).toThrow(
+            "409:lifetime_already_owned"
+        );
+        expect(() => P.assertPurchaseKeepsPaidValue({ publicData, requestedPlan: "unlimited", domainConfig })).not.toThrow();
+    });
+
+    test("free and expired leases can buy anything", () => {
+        const free = { ...base, plan: "free", duration: 100, expiresAt: fmt(moment().add(100, "year")) };
+        expect(() => P.assertPurchaseKeepsPaidValue({ publicData: free, requestedPlan: "premium", domainConfig })).not.toThrow();
+        const expired = { ...base, plan: "unlimited", duration: "1", expiresAt: fmt(moment().subtract(1, "day")) };
+        expect(() => P.assertPurchaseKeepsPaidValue({ publicData: expired, requestedPlan: "premium", domainConfig })).not.toThrow();
+    });
+
+    test("a yearly purchase never shortens an active lifetime lease", () => {
+        const exp = fmt(moment().add(100, "year"));
+        const publicData = { ...base, plan: "premium", duration: "lifetime", expiresAt: exp };
+        expect(P.resolvePaidExpiresAt({ publicData, duration: "1" })).toBe(exp);
+        expect(P.resolvePaidDurationStamp({ publicData, duration: "1" })).toBe("lifetime");
+    });
+
+    test("yearly extension still adds onto an active paid lease", () => {
+        const exp = moment().add(1, "year");
+        const publicData = { ...base, plan: "premium", duration: "1", expiresAt: fmt(exp) };
+        expect(P.resolvePaidExpiresAt({ publicData, duration: "2" })).toBe(fmt(exp.clone().add(2, "year")));
+    });
+});

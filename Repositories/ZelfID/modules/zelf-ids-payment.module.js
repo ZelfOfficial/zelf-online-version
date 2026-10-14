@@ -538,6 +538,12 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
     const tagObject = tagData.tagObject;
     const requestedPlan = requestOptions.requestedPlan || requestOptions.plan;
     const normalizedDuration = normalizePaymentDuration(duration);
+    require("./zelf-id-plan.module").assertPurchaseKeepsPaidValue({
+        publicData: tagObject.publicData,
+        requestedPlan,
+        tagName,
+        domainConfig,
+    });
     // Price with the plan this payment stamps (premium by default for long names).
     // `getZelfIdPrice` without a plan read the Tags default table, so a long name
     // paid the default price and was still stamped premium.
@@ -660,6 +666,8 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         tagName: `${tagData.tagName}.${domain}`,
         tagPayName: `${tagData.tagName}.${domain}pay`,
         expiresAt: tagObject.publicData.expiresAt,
+        // Expiration this purchase would stamp (current `expiresAt` is unchanged above).
+        newExpiresAt: resolvePaidExpiresAt({ publicData: tagObject.publicData, duration: normalizedDuration }),
         initiatedAt: moment().unix(),
         ttl: moment().add("2", "hours").unix(),
         duration: normalizedDuration === "lifetime" ? "lifetime" : parseInt(normalizedDuration || 1),
