@@ -13,7 +13,7 @@ const SNAPSHOT_CAP = 50000;
 const DAILY_WINDOW_DAYS = 60;
 const RECENT_N = 10;
 const ARWEAVE_TIMEOUT_MS = 15000;
-const cache = createSwrCache({ ttlMs: 5 * 60 * 1000, maxStaleMs: 60 * 60 * 1000 });
+const cache = createSwrCache({ ttlMs: 5 * 60 * 1000, maxStaleMs: 24 * 60 * 60 * 1000, warmIntervalMs: 4 * 60 * 1000 });
 
 const parseDate = (s) => {
     if (!s) return null;

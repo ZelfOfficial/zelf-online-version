@@ -11,7 +11,7 @@ const { createSwrCache } = require("../../../Core/utils/swr-snapshot-cache");
 
 const KEY_TYPES = ["password", "notes", "credit_card", "contact", "zotp"];
 const MAX_PER_TYPE = 20000;
-const cache = createSwrCache({ ttlMs: 2 * 60 * 1000, maxStaleMs: 30 * 60 * 1000 });
+const cache = createSwrCache({ ttlMs: 2 * 60 * 1000, maxStaleMs: 24 * 60 * 60 * 1000, warmIntervalMs: 3 * 60 * 1000 });
 
 const labelOf = (pd) => {
     if (pd.alias) return pd.alias;
