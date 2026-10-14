@@ -71,6 +71,7 @@ module.exports = (server) => {
     require("../Repositories/TxNotifications/routes/tx-notifications.routes")(server);
     require("../Repositories/Tags/routes/tags.routes")(server);
     require("../Repositories/Tags/routes/my-tags.routes")(server);
+    require("../Repositories/ZelfID/routes/zelf-ids-analytics.routes")(server);
     require("../Repositories/ZelfID/routes/zelf-ids.routes")(server);
     //U
     //V

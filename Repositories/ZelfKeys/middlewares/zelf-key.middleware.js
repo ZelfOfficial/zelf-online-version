@@ -125,6 +125,14 @@ const schemas = {
 	listAllDashboard: {
 		identifier: string().required().pattern(/^.+\..+$/),
 	},
+	domainList: {
+		domain: string().optional().allow(""),
+		page: string().optional().pattern(/^\d+$/),
+		pageSize: string().optional().pattern(/^\d+$/),
+		type: stringEnum(SUPPORTED_CATEGORIES).optional(),
+		owner: string().optional().allow("").max(200),
+		search: string().optional().allow("").max(200),
+	},
 	delete: {
 		id: string().required(),
 		faceBase64: string().required(),
@@ -340,6 +348,18 @@ const listAllDashboardValidation = async (ctx, next) => {
 /**
  * Preview data validation middleware
  */
+const domainListValidation = async (ctx, next) => {
+	const valid = validate(schemas.domainList, ctx.request.query);
+
+	if (valid.error) {
+		ctx.status = 409;
+		ctx.body = { validationError: valid.error.message };
+		return;
+	}
+
+	await next();
+};
+
 const previewValidation = async (ctx, next) => {
 	const valid = validate(schemas.preview, ctx.request.body);
 
@@ -403,6 +423,7 @@ module.exports = {
 	listAllValidation,
 	listDashboardValidation,
 	listAllDashboardValidation,
+	domainListValidation,
 	summaryValidation,
 	changeMasterPasswordValidation,
 	deleteZelfKeyValidation,
