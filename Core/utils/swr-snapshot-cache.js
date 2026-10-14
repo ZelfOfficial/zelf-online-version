@@ -4,8 +4,30 @@
  * - stale (older than ttl, younger than maxStaleMs): served immediately, refreshed in the background
  * - missing/expired: loaded once (concurrent callers share the same in-flight promise)
  */
-const createSwrCache = ({ ttlMs = 5 * 60 * 1000, maxStaleMs = 60 * 60 * 1000, now = () => Date.now() } = {}) => {
+const createSwrCache = ({
+    ttlMs = 5 * 60 * 1000,
+    maxStaleMs = 60 * 60 * 1000,
+    now = () => Date.now(),
+    warmIntervalMs = 0, // >0: refresh recently used keys in the background so readers never wait for a cold load
+    warmIdleMs = 24 * 60 * 60 * 1000, // stop warming keys nobody asked for in this long
+} = {}) => {
     const entries = new Map();
+    const loaders = new Map(); // key -> { loader, lastAccess }
+    let timer = null;
+
+    const _startWarmer = () => {
+        if (!warmIntervalMs || timer) return;
+        timer = setInterval(() => {
+            for (const [key, info] of loaders) {
+                if (now() - info.lastAccess > warmIdleMs) {
+                    loaders.delete(key);
+                    continue;
+                }
+                _refresh(key, info.loader).catch((e) => console.error("swr_warm_failed", key, e?.message));
+            }
+        }, warmIntervalMs);
+        if (typeof timer.unref === "function") timer.unref();
+    };
 
     const _refresh = (key, loader) => {
         const entry = entries.get(key) || {};
@@ -26,8 +48,12 @@ const createSwrCache = ({ ttlMs = 5 * 60 * 1000, maxStaleMs = 60 * 60 * 1000, no
     };
 
     const get = async (key, loader) => {
+        if (warmIntervalMs) {
+            loaders.set(key, { loader, lastAccess: now() });
+            _startWarmer();
+        }
         const entry = entries.get(key);
-        const age = entry && entry.at ? now() - entry.at : Infinity;
+        const age = entry && entry.at != null ? now() - entry.at : Infinity;
         if (entry && "value" in entry && age < ttlMs) return { value: entry.value, ageMs: age, stale: false };
         if (entry && "value" in entry && age < maxStaleMs) {
             _refresh(key, loader).catch((e) => console.error("swr_refresh_failed", key, e?.message));
