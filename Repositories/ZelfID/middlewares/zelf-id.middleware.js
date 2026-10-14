@@ -102,7 +102,7 @@ const paymentSchemas = {
     paymentConfirmation: {
         tagName: string().required(),
         domain: string(),
-        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE", "BDAG"]).required(),
+        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE", "BDAG", "FREE"]).required(),
         token: string().required(),
     },
     paymentOptions: {
@@ -110,6 +110,7 @@ const paymentSchemas = {
         domain: string(),
         duration: string().required(), // allowed values come from the license planPricing
         plan: string().optional(), // offered plans come from the license planPricing
+        referralTagName: string().optional(), // coupon = license payment.whitelist referrer
     },
     stripeCheckout: {
         tagName: string().required(),

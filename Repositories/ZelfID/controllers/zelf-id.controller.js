@@ -431,11 +431,12 @@ const getWalletBalances = async (ctx, next) => {
 
 const paymentOptions = async (ctx) => {
     try {
-        const { tagName, domain, duration, plan } = ctx.request.query;
+        const { tagName, domain, duration, plan, referralTagName } = ctx.request.query;
         const reducedFeeRequested = Boolean(ctx.state.reducedFeeRequested);
         const data = await MyZelfIdModule.getPaymentOptions(tagName, domain, duration, ctx.state.user, {
             reducedFeeRequested,
             requestedPlan: plan,
+            referralTagName,
         });
 
         ctx.body = { data };
