@@ -33,6 +33,13 @@ jest.mock("../../Repositories/ZelfID/modules/zelf-ids-revenue-cat-transactions.m
     recordTransaction: jest.fn(async () => undefined),
 }));
 
+// Event-id claims are covered in zelf-ids-revenue-cat-events.test.js.
+jest.mock("../../Repositories/ZelfID/modules/zelf-ids-revenue-cat-events.module", () => ({
+    claimEvent: jest.fn(async () => true),
+    releaseEvent: jest.fn(async () => undefined),
+    markEventProcessed: jest.fn(async () => undefined),
+}));
+
 jest.mock("../../Repositories/Tags/modules/tag-smart-contract-payment.module", () => ({
     throwPaymentConfirmationTagNotFound: jest.fn(() => {
         throw new Error("404:tag_not_found");
