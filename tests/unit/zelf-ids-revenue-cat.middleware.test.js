@@ -81,4 +81,36 @@ describe("zelf-ids revenueCatWebhookValidation (static Authorization)", () => {
         expect(ctx.status).toBe(409);
         expect(next).not.toHaveBeenCalled();
     });
+
+    describe("config fallback to JIM_INBOX_API_KEY", () => {
+        const savedEnv = { ...process.env };
+        afterEach(() => {
+            process.env = { ...savedEnv };
+        });
+        const loadConfig = () => {
+            let cfg;
+            jest.isolateModules(() => {
+                cfg = require("../../Core/config");
+            });
+            return cfg;
+        };
+
+        test("uses JIM_INBOX_API_KEY when REVENUECAT_WEBHOOK_AUTHORIZATION is unset", () => {
+            delete process.env.REVENUECAT_WEBHOOK_AUTHORIZATION;
+            process.env.JIM_INBOX_API_KEY = "jim_shared_key";
+            expect(loadConfig().revenueCat.webhookAuthorization).toBe("jim_shared_key");
+        });
+
+        test("REVENUECAT_WEBHOOK_AUTHORIZATION wins when both are set", () => {
+            process.env.REVENUECAT_WEBHOOK_AUTHORIZATION = "rc_own";
+            process.env.JIM_INBOX_API_KEY = "jim_shared_key";
+            expect(loadConfig().revenueCat.webhookAuthorization).toBe("rc_own");
+        });
+
+        test("both unset leaves it empty (middleware fails closed with 503)", () => {
+            delete process.env.REVENUECAT_WEBHOOK_AUTHORIZATION;
+            delete process.env.JIM_INBOX_API_KEY;
+            expect(loadConfig().revenueCat.webhookAuthorization).toBeFalsy();
+        });
+    });
 });

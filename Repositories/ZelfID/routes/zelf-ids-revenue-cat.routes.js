@@ -4,7 +4,7 @@ const Middleware = require("../middlewares/zelf-id.middleware");
 
 /**
  * RevenueCat webhook. Unprotected router: RevenueCat cannot send a JWT; the
- * middleware checks the static Authorization header against REVENUECAT_WEBHOOK_AUTHORIZATION.
+ * middleware checks the static Authorization header against REVENUECAT_WEBHOOK_AUTHORIZATION (or JIM_INBOX_API_KEY when unset).
  */
 module.exports = (server) => {
     const PATH = config.basePath("/zelf-ids");
