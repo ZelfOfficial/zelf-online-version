@@ -68,7 +68,7 @@ const parseLegacyZelfIdProductId = (productId) => {
         const maxLength = maxRaw ? Number(maxRaw) : minLength;
         const duration = productDuration(match[2]);
 
-        if (!duration || !(minLength >= 1) || !(maxLength >= minLength) || maxLength > 27) return null;
+        if (!duration || !(minLength >= 1) || !(maxLength >= minLength)) return null;
 
         return { minLength, maxLength, duration, legacy: true };
     }
@@ -84,7 +84,8 @@ const parseZelfIdProductId = parseLegacyZelfIdProductId;
  * @param {number} nameLength
  * @returns {boolean}
  */
-const productCoversNameLength = (product, nameLength) => Boolean(product) && nameLength >= product.minLength && nameLength <= 27;
+// Upper name length is enforced by the license (`tags.maxLength`) when the name is validated.
+const productCoversNameLength = (product, nameLength) => Boolean(product) && nameLength >= product.minLength;
 
 /**
  * @param {string} productId
@@ -148,9 +149,9 @@ const resolvePlanForPurchase = (product, tagName, attributes = {}) => {
     if (product.plan) return product.plan;
 
     const attrPlan = String(attributes.plan || "").toLowerCase();
-    if (attrPlan === "unlimited") return "unlimited";
-    if (attrPlan === "premium") return "premium";
-    return resolvePaidPlan({ tagName, requestedPlan: attrPlan });
+    // An explicit attribute plan is kept (an unoffered one is rejected later by licenseAllowsPlan).
+    if (attrPlan && attrPlan !== "free") return attrPlan;
+    return resolvePaidPlan({ tagName });
 };
 
 /**

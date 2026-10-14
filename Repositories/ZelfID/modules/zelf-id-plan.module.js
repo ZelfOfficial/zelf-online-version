@@ -31,8 +31,6 @@ const getReservationExpiresAt = () =>
     moment()
         .add(ZELF_ID_RESERVATION_DURATION.amount, ZELF_ID_RESERVATION_DURATION.unit)
         .format("YYYY-MM-DD HH:mm:ss");
-const SHORT_NAME_MAX = 5;
-const LONG_NAME_MAX = 27;
 const FREE_EXPIRATION_YEARS = 100;
 const LIFETIME_EXPIRATION_YEARS = 100;
 const PAID_HORIZON_YEARS = 50;
@@ -74,48 +72,134 @@ const getReservationPinName = (tagName, domain = "zelf", holdSuffix = ".hold") =
 const getBareNameLength = (tagName) => getBareName(tagName).length;
 
 /**
+ * The domain license for a name: the one passed in, else the cached license for the name's TLD.
  * @param {string} [tagName]
+ * @param {Object} [domainConfig]
+ * @returns {Object|undefined}
+ */
+const licenseForName = (tagName, domainConfig) => {
+    if (domainConfig) return domainConfig;
+    const tld = String(tagName || "").trim().replace(/\.hold$/i, "").split(".")[1];
+    try {
+        const { getDomainConfig } = require("../../Tags/config/supported-domains");
+        return getDomainConfig(String(tld || "zelf").toLowerCase()) || undefined;
+    } catch (_error) {
+        return undefined;
+    }
+};
+
+/** True when the cell key ("6-15", "16-27" or a single length "3") covers `length`. */
+const lengthKeyCovers = (key, length) => {
+    const range = /^(\d+)-(\d+)$/.exec(String(key));
+    return range ? length >= Number(range[1]) && length <= Number(range[2]) : Number(key) === length;
+};
+
+/**
+ * Name length the license accepts (`tags.minLength` / `tags.maxLength`); unset bounds are not enforced.
+ * @param {number} length
+ * @param {Object} [domainConfig]
  * @returns {boolean}
  */
-const isShortZelfIdName = (tagName) => {
+const isLengthWithinLicense = (length, domainConfig) => {
+    if (!(length > 0)) return false;
+    const min = Number(domainConfig?.tags?.minLength);
+    const max = Number(domainConfig?.tags?.maxLength);
+    if (Number.isFinite(min) && min > 0 && length < min) return false;
+    if (Number.isFinite(max) && max > 0 && length > max) return false;
+    return true;
+};
+
+/**
+ * Paid plans the license prices for this name's length, cheapest first (cheapest = default paid plan).
+ * Plans, length groups and durations all come from `tags.payment.planPricing`.
+ * @param {string} [tagName]
+ * @param {Object} [domainConfig]
+ * @returns {string[]}
+ */
+const licensePaidPlansForName = (tagName, domainConfig) => {
+    const license = licenseForName(tagName, domainConfig);
     const length = getBareNameLength(tagName);
-    return length > 0 && length <= SHORT_NAME_MAX;
+    const planPricing = license?.tags?.payment?.planPricing;
+    if (!planPricing || typeof planPricing !== "object" || !isLengthWithinLicense(length, license)) return [];
+
+    const offered = [];
+    for (const [plan, table] of Object.entries(planPricing)) {
+        if (!table || typeof table !== "object") continue;
+        let cheapest = Infinity;
+        for (const [key, cells] of Object.entries(table)) {
+            if (!lengthKeyCovers(key, length) || !cells || typeof cells !== "object") continue;
+            for (const price of Object.values(cells)) {
+                if (typeof price === "number" && Number.isFinite(price)) cheapest = Math.min(cheapest, price);
+            }
+        }
+        if (cheapest !== Infinity) offered.push({ plan, cheapest });
+    }
+
+    return offered.sort((a, b) => a.cheapest - b.cheapest).map((entry) => entry.plan);
+};
+
+/**
+ * True when the license prices `plan` for this name's length.
+ * @param {string} plan
+ * @param {string} [tagName]
+ * @param {Object} [domainConfig]
+ * @returns {boolean}
+ */
+const isPlanOfferedForName = (plan, tagName, domainConfig) => licensePaidPlansForName(tagName, domainConfig).includes(plan);
+
+/**
+ * Legacy name for "the license does not offer premium for this length" (today: 1–5 chars).
+ * Derived from the license, not a fixed length.
+ * @param {string} [tagName]
+ * @param {Object} [domainConfig]
+ * @returns {boolean}
+ */
+const isShortZelfIdName = (tagName, domainConfig) => {
+    const offered = licensePaidPlansForName(tagName, domainConfig);
+    return offered.length > 0 && !offered.includes("premium");
 };
 
 /**
  * @deprecated New leases no longer create `.hold` reservations. Always `false`.
- * Use `isShortZelfIdName` for 1–5 character plan and pricing rules.
  * @param {string} [_tagName]
  * @returns {boolean}
  */
 const requiresHoldReservation = (_tagName) => false;
 
 /**
- * Plans a name may use. Short names cannot be premium or lease-only free.
+ * Plans a name may use: `free` (every leasable name starts free; the license has no free cell)
+ * plus every paid plan the license prices for the name's length. Empty when the license has none.
  * @param {string} [tagName]
- * @returns {Array<"free"|"premium"|"unlimited">}
+ * @param {Object} [domainConfig]
+ * @returns {string[]}
  */
-const allowedPlansForName = (tagName) => {
-    const length = getBareNameLength(tagName);
-    if (length > 0 && length <= SHORT_NAME_MAX) return ["free", "unlimited"];
-    if (length >= 6 && length <= LONG_NAME_MAX) return ["free", "premium", "unlimited"];
-    return [];
+const allowedPlansForName = (tagName, domainConfig) => {
+    const paid = licensePaidPlansForName(tagName, domainConfig);
+    if (!paid.length) return [];
+    const license = licenseForName(tagName, domainConfig);
+    const pricedFree = Boolean(license?.tags?.payment?.planPricing?.free);
+    const ordered = Object.keys(license.tags.payment.planPricing).filter((plan) => paid.includes(plan));
+    return pricedFree ? ordered : ["free", ...ordered];
 };
 
 /**
- * Paid-plan stamp. Short names cannot be premium. Long names pick premium or unlimited.
+ * Paid-plan stamp: the requested plan when the license offers it for this name,
+ * else the cheapest plan the license offers for this length.
  * @param {Object|string} [tagNameOrParams]
  * @param {string} [tagNameOrParams.tagName]
  * @param {string} [tagNameOrParams.requestedPlan]
- * @returns {"premium"|"unlimited"}
+ * @param {Object} [tagNameOrParams.domainConfig]
+ * @param {string} [requestedPlan]
+ * @returns {string|undefined}
  */
 const resolvePaidPlan = (tagNameOrParams, requestedPlan) => {
     const tagName = typeof tagNameOrParams === "string" ? tagNameOrParams : tagNameOrParams?.tagName;
     const plan = typeof tagNameOrParams === "string" ? requestedPlan : tagNameOrParams?.requestedPlan;
+    const domainConfig = typeof tagNameOrParams === "object" ? tagNameOrParams?.domainConfig : undefined;
 
-    if (isShortZelfIdName(tagName)) return "unlimited";
-    if (plan === "unlimited") return "unlimited";
-    return "premium";
+    const offered = licensePaidPlansForName(tagName, domainConfig);
+    if (plan && offered.includes(plan)) return plan;
+    return offered[0];
 };
 
 /**
@@ -134,20 +218,11 @@ const getZelfIdPrice = ({ tagName, duration = "1", referralTagName = "", domainC
         throw new Error("409:license_price_required");
     }
 
-    const quotePlan =
-        isShortZelfIdName(tagName) && requestedPlan !== "premium" && requestedPlan !== "unlimited"
-            ? "unlimited"
-            : requestedPlan === "premium" || requestedPlan === "unlimited"
-              ? requestedPlan
-              : undefined;
+    // An explicit paid plan is quoted as-is: getPrice throws 409 when the license does not price it.
+    const quotePlan = requestedPlan && requestedPlan !== "free" ? requestedPlan : undefined;
     const quote = domainConfig.getPrice(tagName, normalizePaymentDuration(duration), referralTagName, quotePlan ? { plan: quotePlan } : {});
-    const allowedPlans = allowedPlansForName(tagName);
-    const plan =
-        requestedPlan === "premium" || requestedPlan === "unlimited"
-            ? isShortZelfIdName(tagName) && requestedPlan === "premium"
-              ? "unlimited"
-              : requestedPlan
-            : "free";
+    const allowedPlans = allowedPlansForName(tagName, domainConfig);
+    const plan = quotePlan || "free";
 
     return {
         ...quote,
@@ -187,7 +262,7 @@ const getZelfIdCheckoutPrice = ({ tagName, duration = "1", referralTagName = "",
         duration,
         referralTagName,
         domainConfig,
-        requestedPlan: resolvePaidPlan({ tagName, requestedPlan }),
+        requestedPlan: resolvePaidPlan({ tagName, requestedPlan, domainConfig }),
     });
 
 /**
@@ -269,7 +344,7 @@ const isHoldName = (tagName = "") => HOLD_NAME_RE.test(String(tagName || "").tri
  * @param {string} [params.requestedPlan]
  * @returns {"premium"|"unlimited"}
  */
-const resolveUpgradePlan = ({ tagName, requestedPlan } = {}) => resolvePaidPlan({ tagName, requestedPlan });
+const resolveUpgradePlan = ({ tagName, requestedPlan, domainConfig } = {}) => resolvePaidPlan({ tagName, requestedPlan, domainConfig });
 
 /**
  * @param {Object} [publicData]
@@ -299,21 +374,20 @@ const isExpiresAtPassed = (publicData = {}) => {
  * @param {Object} [publicData]
  * @returns {"free"|"premium"|"unlimited"|undefined}
  */
-const effectivePlan = (publicData = {}) => {
+const effectivePlan = (publicData = {}, domainConfig) => {
     if (isUnpaidReservation(publicData)) return publicData.plan;
 
     if ((publicData.type === "mainnet" || !publicData.type) && isExpiresAtPassed(publicData)) return "free";
 
     const tagName = publicData.tagName || publicData.zelfName;
-    if (isShortZelfIdName(tagName) && publicData.plan === "premium") return "unlimited";
+    const offered = licensePaidPlansForName(tagName, domainConfig);
+    if (publicData.plan === "free") return "free";
 
-    if (publicData.plan === "free" || publicData.plan === "premium" || publicData.plan === "unlimited") {
-        return publicData.plan;
-    }
+    // A stored paid plan the license no longer offers for this length reads as the license default.
+    if (publicData.plan) return offered.length && !offered.includes(publicData.plan) ? offered[0] : publicData.plan;
 
-    if (isShortZelfIdName(tagName)) return "unlimited";
-    if (getBareNameLength(tagName) >= 6) return "premium";
-    return publicData.plan;
+    // Planless legacy mainnet: the license default paid plan for this length.
+    return offered[0] ?? publicData.plan;
 };
 
 const isReservationExpired = (publicData = {}) => isExpiresAtPassed(publicData);
@@ -446,8 +520,9 @@ module.exports = {
     ZELF_ID_RESERVATION_DURATION,
     ZELF_ID_RESERVATION_HOURS,
     getReservationExpiresAt,
-    SHORT_NAME_MAX,
-    LONG_NAME_MAX,
+    licensePaidPlansForName,
+    isPlanOfferedForName,
+    isLengthWithinLicense,
     FREE_EXPIRATION_YEARS,
     LIFETIME_EXPIRATION_YEARS,
     PAID_HORIZON_YEARS,

@@ -3,6 +3,7 @@ const { buildMetadata } = require("../../Repositories/ZelfID/modules/zelf-ids-pa
 
 const domainConfig = {
 	getTagKey: () => "tagName",
+	tags: require("../fixtures/zelf-plan-license.fixture").zelfPlanLicenseData().tags,
 };
 
 describe("zelf-ids-payment.module", () => {

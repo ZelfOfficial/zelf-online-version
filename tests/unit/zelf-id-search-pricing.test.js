@@ -45,6 +45,8 @@ const buildDomainConfig = () => {
 
 	return {
 		name: "zelf",
+		// Which plans a length may take comes from the license; fixture license for tests.
+		tags: require("../fixtures/zelf-plan-license.fixture").zelfPlanLicenseData().tags,
 		getTagKey: () => "tagName",
 		getPrice: (tagName, duration, referralTagName, options = {}) => {
 			const length = String(tagName).split(".")[0].length;
@@ -192,5 +194,60 @@ describe("zelf-id search legacy records", () => {
 		expect(result.available).toBe(false);
 		expect(result.tagObject.publicData.plan).toBe("unlimited");
 		expect(result.tagObject.publicData.expiresAt).toBe(expiresAt);
+	});
+});
+
+describe("zelf-id search plan-aware pricing (license planPricing only)", () => {
+	// Fixture license; production reads these from the IPFS license JSON.
+	const licensed = new Domain({
+		name: "zelf",
+		tags: {
+			payment: {
+				pricingTable: {},
+				planPricing: {
+					premium: { "6-15": { 1: 11, 2: 22, lifetime: 33 } },
+					unlimited: { "1-5": { 1: 70, lifetime: 700 }, "6-15": { 1: 44, 3: 55, lifetime: 66 } },
+				},
+				whitelist: {},
+			},
+		},
+	});
+	licensed.getTagKey = () => "tagName";
+
+	beforeEach(() => {
+		jest.clearAllMocks();
+		TagsSearchModule.searchTag.mockResolvedValue({ available: true, tagName: "x" });
+	});
+
+	test("no plan: plans lists every offered plan for a long name; top-level price stays the default plan", async () => {
+		const result = await searchTag({ tagName: "miguelito", domain: "zelf", domainConfig: licensed }, {});
+		expect(result.plans).toEqual({ premium: { 1: 11, 2: 22, lifetime: 33 }, unlimited: { 1: 44, 3: 55, lifetime: 66 } });
+		expect(result.price.price).toBe(11);
+		expect(result.plan).toBe("free");
+	});
+
+	test("no plan: short name only lists the plans the license prices for it", async () => {
+		const result = await searchTag({ tagName: "abc", domain: "zelf", domainConfig: licensed }, {});
+		expect(result.plans).toEqual({ unlimited: { 1: 70, lifetime: 700 } });
+		expect(result.price.price).toBe(70);
+	});
+
+	test("plan=unlimited quotes unlimited on a long name", async () => {
+		const result = await searchTag({ tagName: "miguelito", domain: "zelf", domainConfig: licensed, plan: "unlimited", duration: "lifetime" }, {});
+		expect(result.price.price).toBe(66);
+		expect(result.price.quotedPlan).toBe("unlimited");
+		expect(result.plan).toBe("free");
+	});
+
+	test("plan=premium on a short name is rejected", async () => {
+		await expect(searchTag({ tagName: "abc", domain: "zelf", domainConfig: licensed, plan: "premium" }, {})).rejects.toThrow(
+			"409:plan_not_offered_for_name"
+		);
+	});
+
+	test("duration the license does not price for the plan is rejected", async () => {
+		await expect(
+			searchTag({ tagName: "miguelito", domain: "zelf", domainConfig: licensed, plan: "premium", duration: "3" }, {})
+		).rejects.toThrow("409:plan_duration_not_offered_by_license");
 	});
 });
