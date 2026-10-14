@@ -27,6 +27,20 @@ const nameFromPublicData = (publicData = {}, domainConfig) => {
 };
 
 /**
+ * Version and type the proof was originally created with, read from its own cleartext.
+ * v4 online creation stamps `origin: "online"` and `v: "4"` (see zelf-id.module stampV4PublicData);
+ * anything encrypted on a device (origin "android" / "ios" / "offline", ...) is an offline proof.
+ * A proof without `v` predates v4 and is reported as v3.
+ * @param {Object} publicData
+ * @returns {{ version: string, type: "online"|"offline", origin: string|null }}
+ */
+const detectProofProvenance = (publicData = {}) => {
+    const origin = publicData.origin ? String(publicData.origin).toLowerCase() : null;
+    const v = publicData.v != null && `${publicData.v}`.trim() !== "" ? `${publicData.v}`.trim() : "3";
+    return { version: v, type: origin === "online" ? "online" : "offline", origin };
+};
+
+/**
  * Preview a v4 proof through Human Authn (not Tags 3.1.6 `previewZelfProof`).
  * @param {Object} params
  * @param {string} params.zelfProof
@@ -184,6 +198,13 @@ const leaseOffline = async (params, authUser) => {
         v: "4",
     };
 
+    // Staff gift / re-creation: keep the version and type the proof was created with.
+    const provenance = detectProofProvenance(publicData);
+    if (params.preserveProvenance) {
+        zelfIDObject.origin = provenance.type;
+        zelfIDObject.v = provenance.version;
+    }
+
     await ZelfIdModule.persistZelfIdLease(zelfIDObject, referralTagObject, domainConfig, securityType, authUser);
 
     const persistedPublic = zelfIDObject.ipfs?.publicData || {};
@@ -212,15 +233,17 @@ const leaseOffline = async (params, authUser) => {
             publicData: {
                 ...persistedPublic,
                 ...publicData,
-                origin: "offline",
-                v: "4",
+                origin: zelfIDObject.origin,
+                v: zelfIDObject.v,
                 plan,
             },
         },
+        provenance,
     };
 };
 
 module.exports = {
+    detectProofProvenance,
     previewHumanAuthn,
     leaseOffline,
 };
