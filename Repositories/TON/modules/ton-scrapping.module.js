@@ -1,6 +1,6 @@
 const moment = require("moment");
 const { tonApiGet, toTonUpstreamError } = require("./ton-api.client");
-const { assertValidTonAddress } = require("./ton-address.util");
+const { assertValidTonAddress, sameTonAddress } = require("./ton-address.util");
 const { nanotonToTonString, jettonAmountToString } = require("./ton-jetton.util");
 const { getTonUsdPrice, getJettonUsdRates, sumTokenFiatBalances, normalizeTokenKey } = require("./ton-price.util");
 
@@ -51,7 +51,7 @@ const mapEventsToTransactions = (events = [], address) =>
 			const transfer = tonTransfer?.TonTransfer || jettonTransfer?.JettonTransfer;
 			if (!transfer) return null;
 
-			const from = transfer.sender?.address || transfer.recipient?.address || "";
+			const from = transfer.sender?.address || "";
 			const to = transfer.recipient?.address || "";
 			const amountRaw = transfer.amount ?? 0;
 			const amount =
@@ -76,7 +76,7 @@ const mapEventsToTransactions = (events = [], address) =>
 				method: tonTransfer ? "TonTransfer" : "JettonTransfer",
 				timestamp: ts,
 				to,
-				traffic: from === address ? "OUT" : "IN",
+				traffic: sameTonAddress(from, address) ? "OUT" : "IN",
 				txnFee: "0",
 				status: event.in_progress ? "pending" : "success",
 			};
@@ -212,6 +212,7 @@ const getTransaction = async (params) => {
 };
 
 module.exports = {
+	mapEventsToTransactions,
 	getAddress,
 	getTokens,
 	getTransactions,
