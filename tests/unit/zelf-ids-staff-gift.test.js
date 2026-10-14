@@ -52,6 +52,15 @@ describe("staff gift", () => {
         expect(d.Offline.leaseOffline).toHaveBeenCalledWith(expect.objectContaining({ preserveProvenance: true, tagName: "bas.bdag" }), staff);
         expect(out.action).toBe("rebuilt_and_gifted");
     });
+    test("existing name with preserveProvenance relabels from the proof", async () => {
+        const d = deps();
+        d.Offline.previewHumanAuthn = jest.fn().mockResolvedValue({ publicData: { origin: "android" } });
+        const tagObject = { publicData: { origin: "offline", v: "4" } };
+        d.ZelfIdModule.searchTag.mockResolvedValue({ available: false, tagObject });
+        const out = await giftZelfId({ ...body, preserveProvenance: true }, staff, d);
+        expect(out.provenance).toEqual({ version: "3", type: "offline", origin: "android" });
+        expect(d.MyZelfId.addDurationToTag.mock.calls[0][1].publicData).toMatchObject({ v: "3", origin: "offline" });
+    });
     test("detectProofProvenance", () => {
         expect(detectProofProvenance({ origin: "online", v: "4" })).toEqual({ version: "4", type: "online", origin: "online" });
         expect(detectProofProvenance({ origin: "android" })).toEqual({ version: "3", type: "offline", origin: "android" });
