@@ -60,6 +60,13 @@ const mapEventsToTransactions = (events = [], address) =>
 					: jettonAmountToString(amountRaw, jettonTransfer?.JettonTransfer?.jetton?.decimals ?? 9);
 			const asset = tonTransfer != null ? "TON" : jettonTransfer?.JettonTransfer?.jetton?.symbol || "JETTON";
 			const ts = event.timestamp ? event.timestamp * 1000 : Date.now();
+			const traffic = sameTonAddress(from, address) ? "OUT" : "IN";
+
+			// TonAPI flags spam broadcasts and address-poisoning dust (`is_scam`). Incoming ones are
+			// dropped, as the push watcher already does (TxNotifications/adapters/ton.adapter.js): a
+			// 0.00001 TON spam that landed seconds after a send read as "Received" next to it (#556).
+			// The account's own movements are never hidden.
+			if (event.is_scam === true && traffic === "IN") return null;
 
 			return {
 				_amount: amount,
@@ -76,7 +83,7 @@ const mapEventsToTransactions = (events = [], address) =>
 				method: tonTransfer ? "TonTransfer" : "JettonTransfer",
 				timestamp: ts,
 				to,
-				traffic: sameTonAddress(from, address) ? "OUT" : "IN",
+				traffic,
 				txnFee: "0",
 				status: event.in_progress ? "pending" : "success",
 			};
