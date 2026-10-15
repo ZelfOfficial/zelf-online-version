@@ -8,6 +8,8 @@ const { string, validate, boolean, stringEnum, object, array } = require("../../
 const SUPPORTED_CATEGORIES = ["password", "notes", "credit_card", "contact", "zotp"];
 
 /** Key protection modes exposed as `publicData.protection`. */
+const CARD_HOLDER_NAME_PATTERN = /^(?=.*\p{L})[\p{L}\p{M}\u200C\u200D '\u2019.\u00B7\u30FB-]+$/u;
+
 const PROTECTION_MODES = ["face", "face_password"];
 const PROTECTION_FACE = "face";
 const PROTECTION_FACE_PASSWORD = "face_password";
@@ -72,8 +74,9 @@ const schemas = {
 	},
 	creditCard: {
 		alias: string().optional().allow("").max(50),
-		// Same rule as the apps (#574): letters, spaces and ' - . only.
-		cardName: string().trim().pattern(/^[\p{L}\p{M} '.-]+$/u).required(),
+		// Same rule as the iOS/Android apps (CardHolderName, #574): letters of any script with
+		// their combining marks (and ZWNJ/ZWJ), spaces, and ' ’ - . · ・ — at least one letter.
+		cardName: string().trim().pattern(CARD_HOLDER_NAME_PATTERN).required(),
 		cardNumber: string().required(),
 		expiryMonth: stringEnum(["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"]).required(),
 		expiryYear: string().length(4).required(),
@@ -417,6 +420,7 @@ module.exports = {
 	storeZOTPValidation,
 	storeNotesValidation,
 	storeCreditCardValidation,
+	CARD_HOLDER_NAME_PATTERN,
 	retrieveValidation,
 	previewValidation,
 	proofValidation,
