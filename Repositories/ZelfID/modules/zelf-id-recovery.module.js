@@ -154,7 +154,10 @@ const _assertSourceNameNotActive = async (sourceName, domain, domainConfig, ethA
 
     if (Number.isFinite(expiresAt) && expiresAt < Date.now()) return;
 
-    throw new Error("409:zelf_id_still_active");
+    const error = new Error("409:zelf_id_still_active");
+    // Keep a stable code for clients (errorHandler otherwise returns only "Conflict").
+    error.clientCode = "ERR_ZELF_ID_STILL_ACTIVE";
+    throw error;
 };
 
 module.exports = {
