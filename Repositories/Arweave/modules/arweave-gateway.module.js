@@ -29,10 +29,16 @@ const getGraphqlGateways = () => _parseGatewayList(config.arwave.graphqlGateways
 const getPublicGatewayUrl = () =>
 	_normalizeGatewayBase(config.arwave.publicGatewayUrl || "https://arweave.net");
 
-const getArnsGatewayHost = () => {
-	const host = String(config.arwave.arnsGatewayHost || "arweave.net").trim();
-	return host.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+const _normalizeHost = (host) => String(host || "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+
+/** Ordered Zelf Link gateway hosts (ar.io first by default), de-duplicated. */
+const getArnsGatewayHosts = () => {
+	const list = Array.isArray(config.arwave.arnsGatewayHosts) ? config.arwave.arnsGatewayHosts : String(config.arwave.arnsGatewayHosts || "").split(",");
+	const hosts = [...list, config.arwave.arnsGatewayHost].map(_normalizeHost).filter(Boolean);
+	return [...new Set(hosts.length ? hosts : ["ar.io"])];
 };
+
+const getArnsGatewayHost = () => getArnsGatewayHosts()[0];
 
 const getExplorerUrl = () => EXPLORER_URL;
 
@@ -46,11 +52,57 @@ const buildExplorerUrl = (txId) => `${EXPLORER_URL}/${txId}`;
  * @param {string} domain
  * @returns {string}
  */
-const buildArnsUndernameUrl = (tagName, domain) => {
-	const host = getArnsGatewayHost();
-	const recordKey = domain === "zelf" ? `${tagName}_zelf` : `${tagName}_${domain}_zelf`;
-	return `https://${recordKey}.${host}`;
+const _arnsLabel = (tagName, domain) => (domain === "zelf" || !domain ? `${tagName}_zelf` : `${tagName}_${domain}_zelf`);
+
+const buildArnsUndernameUrl = (tagName, domain, host = getArnsGatewayHost()) => `https://${_arnsLabel(tagName, domain)}.${host}`;
+
+/** Zelf Link on every configured gateway, in preference order. */
+const buildArnsUndernameUrls = (tagName, domain) => getArnsGatewayHosts().map((host) => buildArnsUndernameUrl(tagName, domain, host));
+
+const ZELF_LINK_PROBE_TIMEOUT_MS = 2500;
+const ZELF_LINK_CACHE_MS = 5 * 60 * 1000;
+const _zelfLinkCache = new Map();
+
+const _probe = async (url) => {
+	try {
+		const response = await axios.get(url, {
+			timeout: ZELF_LINK_PROBE_TIMEOUT_MS,
+			maxRedirects: 3,
+			responseType: "stream",
+			validateStatus: () => true,
+		});
+		response.data?.destroy?.();
+		return response.status >= 200 && response.status < 300;
+	} catch (_error) {
+		return false;
+	}
 };
+
+/**
+ * First gateway that serves the Zelf Link (probed in order, cached per name for a few minutes).
+ * @returns {Promise<{ url: string, urls: string[], resolved: boolean, cached: boolean }>}
+ */
+const resolveZelfLink = async (tagName, domain = "zelf", { probe = _probe, now = Date.now } = {}) => {
+	const urls = buildArnsUndernameUrls(tagName, domain);
+	const key = `${tagName}.${domain}`.toLowerCase();
+	const hit = _zelfLinkCache.get(key);
+	if (hit && hit.expiresAt > now()) return { ...hit.value, cached: true };
+
+	let url = null;
+	for (const candidate of urls) {
+		if (await probe(candidate)) {
+			url = candidate;
+			break;
+		}
+	}
+
+	const value = { url: url || urls[0], urls, resolved: Boolean(url) };
+	// Cache misses for less time so a freshly published link shows up quickly.
+	_zelfLinkCache.set(key, { value, expiresAt: now() + (url ? ZELF_LINK_CACHE_MS : 60 * 1000) });
+	return { ...value, cached: false };
+};
+
+const _clearZelfLinkCache = () => _zelfLinkCache.clear();
 
 const isSingleTagLookupKey = (key) => SINGLE_TAG_LOOKUP_KEYS.has(key);
 
@@ -163,6 +215,10 @@ module.exports = {
 	buildTxUrl,
 	buildExplorerUrl,
 	buildArnsUndernameUrl,
+	buildArnsUndernameUrls,
+	getArnsGatewayHosts,
+	resolveZelfLink,
+	_clearZelfLinkCache,
 	isSingleTagLookupKey,
 	postGraphqlToGateway,
 	postGraphql,

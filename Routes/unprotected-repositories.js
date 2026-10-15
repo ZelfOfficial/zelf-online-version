@@ -1,6 +1,7 @@
 module.exports = (server) => {
     //A
     require("../Repositories/ServerVersion/routes/server-version.routes")(server);
+    require("../Repositories/ZelfLink/routes/zelf-link.routes")(server);
     require("../Repositories/AppVersion/routes/app-version.routes")(server);
     //B
     //C

@@ -93,29 +93,26 @@
 				headers.append("Authorization", `Bearer ${localStorage.getItem("sessionToken")}`);
 				headers.append("Content-Type", "application/json");
 
-				// Build URL with query parameters
-				const url = new URL(apiBaseUrl);
-				url.searchParams.append("tagName", tagName);
-				url.searchParams.append("domain", domain);
-				url.searchParams.append("environment", "arweave");
-				url.searchParams.append("type", "mainnet");
-
-				// Set up GET options
-				const options = {
-					method: "GET",
-					headers: headers,
-				};
-
-				// Fetch the data from the API
-				const response = await fetch(url.toString(), options);
-
-				// Check if the response is OK
-				if (!response.ok) {
-					throw new Error(`Failed to fetch data: ${response.statusText}`);
+				// v4 Zelf IDs first (IPFS + Arweave), v3 tags as fallback.
+				let data = null;
+				for (const [path, environment] of [["/api/zelf-ids/search", "all"], ["/api/tags/search", "arweave"]]) {
+					try {
+						const url = new URL(`${apiUrl}${path}`);
+						url.searchParams.append("tagName", tagName);
+						url.searchParams.append("domain", domain);
+						url.searchParams.append("environment", environment);
+						url.searchParams.append("type", "mainnet");
+						const response = await fetch(url.toString(), { method: "GET", headers });
+						if (!response.ok) continue;
+						const responseData = await response.json();
+						if (responseData?.data?.tagObject) {
+							data = responseData.data;
+							break;
+						}
+					} catch (lookupError) {
+						console.warn("Zelf ID lookup failed", path, lookupError);
+					}
 				}
-
-				const responseData = await response.json();
-				const data = responseData.data;
 
 				if (!data || !data.tagObject) throw new Error("No tag object received from API");
 

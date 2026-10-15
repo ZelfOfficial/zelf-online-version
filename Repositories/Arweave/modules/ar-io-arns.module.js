@@ -5,7 +5,7 @@
 const axios = require("axios");
 const config = require("../../../Core/config");
 const TagsSearchModule = require("../../Tags/modules/tags-search.module");
-const { buildArnsUndernameUrl } = require("./arweave-gateway.module");
+const { buildArnsUndernameUrl, buildArnsUndernameUrls } = require("./arweave-gateway.module");
 const { initAnt, resolveExpectedTransactionId, setAntRecord, mappingOfSites } = require("./ar-io-arns-shared.module");
 
 const mappingOfSitesRef = mappingOfSites;
@@ -58,6 +58,7 @@ const get = async (params, authUser = {}) => {
 				tagName,
 				domain,
 				primaryUrl,
+				zelfLinkUrls: buildArnsUndernameUrls(tagName, domain),
 			};
 		}
 
@@ -69,6 +70,7 @@ const get = async (params, authUser = {}) => {
 			tagName,
 			domain,
 			primaryUrl,
+			zelfLinkUrls: buildArnsUndernameUrls(tagName, domain),
 		};
 	}
 
@@ -86,6 +88,7 @@ const get = async (params, authUser = {}) => {
 			tagName,
 			domain,
 			primaryUrl,
+			zelfLinkUrls: buildArnsUndernameUrls(tagName, domain),
 		};
 	}
 
@@ -98,6 +101,7 @@ const get = async (params, authUser = {}) => {
 		tagName,
 		domain,
 		primaryUrl,
+		zelfLinkUrls: buildArnsUndernameUrls(tagName, domain),
 	};
 };
 
@@ -134,6 +138,7 @@ const create = async (data, authUser = {}) => {
 				tagName,
 				domain,
 				primaryUrl,
+				zelfLinkUrls: buildArnsUndernameUrls(tagName, domain),
 			};
 		}
 	}
@@ -148,6 +153,7 @@ const create = async (data, authUser = {}) => {
 			tagName,
 			domain,
 			primaryUrl,
+			zelfLinkUrls: buildArnsUndernameUrls(tagName, domain),
 		};
 	}
 
@@ -162,6 +168,7 @@ const create = async (data, authUser = {}) => {
 	return {
 		...record,
 		primaryUrl,
+		zelfLinkUrls: buildArnsUndernameUrls(tagName, domain),
 	};
 };
 

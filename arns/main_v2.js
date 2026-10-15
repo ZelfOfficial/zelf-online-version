@@ -3,18 +3,23 @@
 	function init() {
 		// Extract the subdomain and format it as `username.zelf`
 		const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-		const previewHost = new URLSearchParams(window.location.search).get("preview") || "migueltrevino_zelf.arweave.net";
+		const previewHost = new URLSearchParams(window.location.search).get("preview") || "";
 		const url = isLocalhost ? previewHost : window.location.hostname;
 
-		const undername = url.split("_")[0]; // Get the first part of the subdomain
-
-		// Get the domain part (second segment after underscore, before any dots)
-		const domain = url.split("_")[1]?.split(".")[0] || url.split("_")[1];
-
+		// Hostname is "<name>_<domain>[_zelf].<gateway>" on any gateway (ar.io, arweave.net, ar-io.dev, ...).
+		const label = (url || "").split(".")[0] || "";
+		const parts = label.split("_");
+		const undername = parts[0] || "";
+		const domain = parts[1] || "zelf";
+		const hostZelfName = undername ? `${undername}.${domain}` : "";
 		const apiUrl = "https://v4.zelf.world";
 
 		let zelfNameObject = {};
-		const apiBaseUrl = `${apiUrl}/api/tags/search`;
+		// v4 Zelf IDs first (IPFS + Arweave), v3 tags as fallback.
+		const searchEndpoints = [
+			{ path: "/api/zelf-ids/search", environment: "all" },
+			{ path: "/api/tags/search", environment: "arweave" },
+		];
 
 		// Constants
 		const COPY_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -64,6 +69,23 @@
 			}
 		}
 
+		function setNameLabels(text) {
+			const nameElement = document.getElementById("zelfName");
+			const copyElement = document.getElementById("zelf-name-copy");
+			if (nameElement) nameElement.textContent = text;
+			if (copyElement) copyElement.textContent = text;
+		}
+
+		function showNotFound(name) {
+			setNameLabels(name);
+			const lede = document.querySelector(".lede");
+			if (lede) lede.textContent = "This Zelf ID was not found yet. If it was just created, try again in a few minutes.";
+			document.body.classList.add("zelf-not-found");
+		}
+
+		// Show the name from the hostname right away; never fall back to another person's name.
+		setNameLabels(hostZelfName);
+
 		// Make an API call to fetch the image URL
 		async function fetchZelfData(tagName, domain) {
 			try {
@@ -77,31 +99,31 @@
 				headers.append("Authorization", `Bearer ${localStorage.getItem("sessionToken")}`);
 				headers.append("Content-Type", "application/json");
 
-				// Build URL with query parameters
-				const url = new URL(apiBaseUrl);
-				url.searchParams.append("tagName", tagName);
-				url.searchParams.append("domain", domain);
-				url.searchParams.append("environment", "arweave");
-				url.searchParams.append("type", "mainnet");
-
-				// Set up GET options
-				const options = {
-					method: "GET",
-					headers: headers,
-				};
-
-				// Fetch the data from the API
-				const response = await fetch(url.toString(), options);
-
-				// Check if the response is OK
-				if (!response.ok) {
-					throw new Error(`Failed to fetch data: ${response.statusText}`);
+				let data = null;
+				for (const endpoint of searchEndpoints) {
+					try {
+						const url = new URL(`${apiUrl}${endpoint.path}`);
+						url.searchParams.append("tagName", tagName);
+						url.searchParams.append("domain", domain);
+						url.searchParams.append("environment", endpoint.environment);
+						url.searchParams.append("type", "mainnet");
+						const response = await fetch(url.toString(), { method: "GET", headers });
+						if (!response.ok) continue;
+						const responseData = await response.json();
+						if (responseData?.data?.tagObject) {
+							data = responseData.data;
+							break;
+						}
+					} catch (lookupError) {
+						console.warn("Zelf ID lookup failed", endpoint.path, lookupError);
+					}
 				}
 
-				const responseData = await response.json();
-				const data = responseData.data;
+				if (!data) {
+					showNotFound(`${tagName}.${domain || "zelf"}`);
+					return;
+				}
 
-				if (!data || !data.tagObject) throw new Error("No tag object received from API");
 
 				zelfNameObject = data.tagObject;
 
@@ -231,7 +253,8 @@
 		}
 
 		// Call the function with the extracted zelfName
-		fetchZelfData(undername, domain || "zelf");
+		if (undername) fetchZelfData(undername, domain || "zelf");
+		else showNotFound("");
 
 		// Copy referral code handler
 		const copyReferralCodeBtn = document.getElementById("copyReferralCode");

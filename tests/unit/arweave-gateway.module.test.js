@@ -26,7 +26,7 @@ describe("arweave-gateway.module", () => {
 	});
 
 	it("returns default arns gateway host", () => {
-		expect(getArnsGatewayHost()).toBe(config.arwave.arnsGatewayHost);
+		expect(getArnsGatewayHost()).toBe("ar.io");
 	});
 
 	it("builds tx and explorer urls", () => {
@@ -35,8 +35,8 @@ describe("arweave-gateway.module", () => {
 	});
 
 	it("builds arns undername urls", () => {
-		expect(buildArnsUndernameUrl("migueltrevino", "zelf")).toBe("https://migueltrevino_zelf.arweave.net");
-		expect(buildArnsUndernameUrl("migueltrevino", "bdag")).toBe("https://migueltrevino_bdag_zelf.arweave.net");
+		expect(buildArnsUndernameUrl("migueltrevino", "zelf")).toBe("https://migueltrevino_zelf.ar.io");
+		expect(buildArnsUndernameUrl("migueltrevino", "bdag")).toBe("https://migueltrevino_bdag_zelf.ar.io");
 	});
 
 	it("detects single-tag lookup keys", () => {
