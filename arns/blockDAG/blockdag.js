@@ -27,14 +27,14 @@
 
 		// Currency icon mapping
 		const currencyIcons = {
-			blockDAG: "https://bn2q32x744st6np7o5q3bdbzorr7jert2n6uxornedveocmw2dsa.arweave.net/C3UN6v_nJT81_3dhsIw5dGP0kjPTfUu6LSDqRwmW0OQ", // BlockDAG icon
-			ethereum: "https://dp44frbowjposjoknmyo4bon7om2gk4sdxbag3jnmooxqkz4uzfa.arweave.net/G_nCxC6yXuklymsw7gXN-5mjK5IdwgNtLWOdeCs8pko", // Ethereum icon
-			solana: "https://vw3ypbantpnrcc662suuvlnpcl4eewxt2janvyt2jppaabwelaaq.arweave.net/rbeHhA2b2xEL3tSpSq2vEvhCWvPSQNriekveAAbEWAE", // Solana icon
-			bitcoin: "https://ai4zitgjrujeosrovx6fkcqj4cfqt3iw7qhi677wj52iih34zkwa.arweave.net/AjmUTMmNEkdKLq38VQoJ4IsJ7Rb8Do9_9k90hB98yqw", // Bitcoin icon
-			avalanche: "https://rjzku6wtmhlkitxpklwzsgtjmpfd6tclwkwgrwlywfbnzhkerylq.arweave.net/inKqetNh1qRO71LtmRppY8o_TEuyrGjZeLFC3J1Ejhc", // AVAX icon
-			Polygon: "https://ow622ynu5zaenumha7edaxqxaib4k5p6rgdcccgdojpzatqcidma.arweave.net/db2tYbTuQEbRhwfIMF4XAgPFdf6JhiEIw3JfkE4CQNg", // Polygon icon
-			bnb: "https://kwrwz2x744st6np7o5q3bdbzorr7jert2n6uxornedveocmw2dsa.arweave.net/VaNs6vF5YUDvYQCC5hHXBnvWaI5E7mfgHvab_FaQdMM", // BNB icon
-			Sui: "https://ypl6m7xa4pfbuou25qjcfkbbsk26a4qehcxbhmbqn53a6ik6bg7q.arweave.net/w9fmfuDjyho6muwSIqghkrXgcgQ4rhOwMG92DyFeCb8", // SUI icon
+			blockDAG: "https://arweave.net/C3UN6v_nJT81_3dhsIw5dGP0kjPTfUu6LSDqRwmW0OQ",
+			ethereum: "https://arweave.net/G_nCxC6yXuklymsw7gXN-5mjK5IdwgNtLWOdeCs8pko",
+			solana: "https://arweave.net/rbeHhA2b2xEL3tSpSq2vEvhCWvPSQNriekveAAbEWAE",
+			bitcoin: "https://arweave.net/AjmUTMmNEkdKLq38VQoJ4IsJ7Rb8Do9_9k90hB98yqw",
+			avalanche: "https://arweave.net/inKqetNh1qRO71LtmRppY8o_TEuyrGjZeLFC3J1Ejhc",
+			Polygon: "https://arweave.net/db2tYbTuQEbRhwfIMF4XAgPFdf6JhiEIw3JfkE4CQNg",
+			bnb: "https://arweave.net/VaNs6vF5YUDvYQCC5hHXBnvWaI5E7mfgHvab_FaQdMM",
+			Sui: "https://arweave.net/w9fmfuDjyho6muwSIqghkrXgcgQ4rhOwMG92DyFeCb8",
 		};
 
 		function _generateUniqueIdentifier() {

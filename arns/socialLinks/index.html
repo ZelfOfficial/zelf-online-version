@@ -1,57 +1,20 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>Social Links</title>
-		<link rel="stylesheet" href="https://arweave.net/yeRbIBQ8niJFovI32-HPcswlq0VaQYuGvYzBlqsEFYE" />
-		<link rel="preconnect" href="https://fonts.googleapis.com" />
-		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-		<link
-			href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Anek+Devanagari:wght@400;600;700&display=swap"
-			rel="stylesheet"
-		/>
-
-		<!-- icon for the tab -->
-		<link
-			rel="icon"
-			type="image/x-icon"
-			href="https://dthn3plzgi5c3d3hfrpkahrp7ljvept54k2v5hzavyuvvaum4fhq.arweave.net/HM7dvXkyOi2PZyxeoB4v-tNSPn3itV6fIK4pWoKM4U8"
-		/>
-		<link
-			rel="icon"
-			type="image/png"
-			sizes="256x256"
-			href="https://5nus3zwkvzbe7iyc3skx5a223hc3lghsqkfkb3fj767tsqmvqlla.arweave.net/62kt5squQk-jAtyVfoNa2cW1mPKCiqDsqf-_OUGVgtY"
-		/>
-		<link
-			rel="icon"
-			type="image/png"
-			sizes="164x164"
-			href="https://4zhi5jxgc7f5n35rmg3mih2nzykfz6eizrjsfai5cpxfjso3ahga.arweave.net/5k6OpuYXy9bvsWG2xB9NzhRc-IjMUyKBHRPuVMnbAcw"
-		/>
-		<link
-			rel="icon"
-			type="image/png"
-			sizes="128x128"
-			href="https://lezfgy6lkhop5q74x3ukqbpzex7bgo3zag4ihnyg432dlmmkvb2q.arweave.net/WTJTY8tR3P7D_L7oqAX5Jf4TO3kBuIO3Bub0NbGKqHU"
-		/>
-		<link
-			rel="icon"
-			type="image/png"
-			sizes="16x16"
-			href="https://jxbc5qod5fbuhrn2wze7suelhbborkogf42uzbsamqzku7adkdda.arweave.net/TcIuwcPpQ0PFurZJ-VCLOELoqcYvNUyGQGQyqnwDUMY"
-		/>
-		<link
-			rel="icon"
-			type="image/png"
-			sizes="48x48"
-			href="https://5uisd2vw2vzdzblm6pzchnnjmbfdmsg2udmiwui6cdzfmqlq3ega.arweave.net/7REh6rbVcjyFbPPyI7WpYEo2SNqg2ItRHhDyVkFw2Qw"
-		/>
+		<link rel="stylesheet" href="./social-links.css" data-arns-css="https://arweave.net/0d2S8DQd42C1HGHgcNZmfn59CN70jcHApbcU9MpCV8s" />
+		<link rel="icon" type="image/x-icon" href="https://arweave.net/HM7dvXkyOi2PZyxeoB4v-tNSPn3itV6fIK4pWoKM4U8" />
+		<link rel="icon" type="image/png" sizes="256x256" href="https://arweave.net/62kt5squQk-jAtyVfoNa2cW1mPKCiqDsqf-_OUGVgtY" />
+		<link rel="icon" type="image/png" sizes="164x164" href="https://arweave.net/5k6OpuYXy9bvsWG2xB9NzhRc-IjMUyKBHRPuVMnbAcw" />
+		<link rel="icon" type="image/png" sizes="128x128" href="https://arweave.net/WTJTY8tR3P7D_L7oqAX5Jf4TO3kBuIO3Bub0NbGKqHU" />
+		<link rel="icon" type="image/png" sizes="16x16" href="https://arweave.net/TcIuwcPpQ0PFurZJ-VCLOELoqcYvNUyGQGQyqnwDUMY" />
+		<link rel="icon" type="image/png" sizes="48x48" href="https://arweave.net/7REh6rbVcjyFbPPyI7WpYEo2SNqg2ItRHhDyVkFw2Qw" />
 	</head>
 	<body>
-		<div class="social-container">
-			<div class="top-section">
+		<main class="social-container">
+			<section class="top-section">
 				<div class="profile-section">
 					<div class="avatar-container">
 						<img id="profileImage" class="avatar" src="https://placehold.co/132x132" alt="Profile" />
@@ -67,21 +30,21 @@
 						<p id="profileDescription" class="profile-description">Loading...</p>
 					</div>
 				</div>
-				<div class="social-links-section" id="socialLinksSection">
-					<!-- Social links will be dynamically generated -->
-				</div>
-			</div>
-			<div class="bottom-section">
-				<div class="promo-items" id="promoItems">
-					<!-- Promo items will be dynamically generated -->
-				</div>
-			</div>
-		</div>
-
+				<div class="social-links-section" id="socialLinksSection"></div>
+			</section>
+			<section class="bottom-section">
+				<div class="promo-items" id="promoItems"></div>
+			</section>
+		</main>
 		<script>
 			const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+			const styleLink = document.querySelector("[data-arns-css]");
+			if (!isLocalhost && styleLink) {
+				const nextCss = styleLink.getAttribute("data-arns-css");
+				if (nextCss && nextCss.startsWith("https://")) styleLink.href = nextCss;
+			}
 			const script = document.createElement("script");
-			script.src = isLocalhost ? "./social-links.js" : "https://arweave.net/AEZZDAIdUD3lo--d-KBTSv-8wSBoO9_be-o1Etybqko";
+			script.src = isLocalhost ? "./social-links.js" : "https://arweave.net/SGcHx3j6wgZfEKfUTrd2POsBGVUvDLsihHJ0bUbt4_M";
 			document.body.appendChild(script);
 		</script>
 	</body>

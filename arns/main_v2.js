@@ -2,29 +2,23 @@
 	// Function to run when DOM is ready
 	function init() {
 		// Extract the subdomain and format it as `username.zelf`
-		const isLocalhost = window.location.hostname === "localhost";
-
-		const randomlocalhosts = [
-			"john4_bdag_zelf.arweave.net",
-			"jumitrmo_zelf.arweave.net",
-			"jumitrmo22_avax_zelf.arweave.net",
-		];
-
-		const url = isLocalhost ? randomlocalhosts[Math.floor(Math.random() * randomlocalhosts.length)] : window.location.hostname;
+		const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+		const previewHost = new URLSearchParams(window.location.search).get("preview") || "migueltrevino_zelf.arweave.net";
+		const url = isLocalhost ? previewHost : window.location.hostname;
 
 		const undername = url.split("_")[0]; // Get the first part of the subdomain
 
 		// Get the domain part (second segment after underscore, before any dots)
 		const domain = url.split("_")[1]?.split(".")[0] || url.split("_")[1];
 
-		const apiUrl = isLocalhost ? "http://localhost:3050" : `https://v4.zelf.world`;
+		const apiUrl = "https://v4.zelf.world";
 
 		let zelfNameObject = {};
 		const apiBaseUrl = `${apiUrl}/api/tags/search`;
 
 		// Constants
 		const COPY_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none">
-			<path d="M11.0013 0.666992H3.0013C2.26797 0.666992 1.66797 1.26699 1.66797 2.00033V11.3337H3.0013V2.00033H11.0013V0.666992ZM13.0013 3.33366H5.66797C4.93464 3.33366 4.33464 3.93366 4.33464 4.66699V14.0003C4.33464 14.7337 4.93464 15.3337 5.66797 15.3337H13.0013C13.7346 15.3337 14.3346 14.7337 14.3346 14.0003V4.66699C14.3346 3.93366 13.7346 3.33366 13.0013 3.33366ZM13.0013 14.0003H5.66797V4.66699H13.0013V14.0003Z" fill="white"/>
+			<path d="M11.0013 0.666992H3.0013C2.26797 0.666992 1.66797 1.26699 1.66797 2.00033V11.3337H3.0013V2.00033H11.0013V0.666992ZM13.0013 3.33366H5.66797C4.93464 3.33366 4.33464 3.93366 4.33464 4.66699V14.0003C4.33464 14.7337 4.93464 15.3337 5.66797 15.3337H13.0013C13.7346 15.3337 14.3346 14.7337 14.3346 14.0003V4.66699C14.3346 3.93366 13.7346 3.33366 13.0013 3.33366ZM13.0013 14.0003H5.66797V4.66699H13.0013V14.0003Z" fill="currentColor"/>
 		</svg>`;
 
 		function _generateUniqueIdentifier() {
@@ -141,21 +135,25 @@
 		}
 
 		// Helper function to create an address card
-		function createAddressCard(grid, chainKey, displayName, address) {
+		function createAddressCard(grid, chainKey, displayName, address, sharedNames) {
 			const cardDiv = document.createElement("div");
 			cardDiv.className = "card-div";
 
 			const shortenedAddress = `${address.slice(0, 8)}...${address.slice(-8)}`;
 			const copyButtonId = `copy${displayName.replace(/\s+/g, "")}Address`;
+			const sharedNote = sharedNames?.length ? `<span class="shared-note">Same address on ${sharedNames.join(", ")}</span>` : "";
 
 			cardDiv.innerHTML = `
 				<div class="card-address-container name">
 					<div class="card-address">
 						<span class="chain-pill">${displayName}</span>
-						<span id="${chainKey}">${shortenedAddress}</span>
+						<span class="address-line">
+							<span id="${chainKey}">${shortenedAddress}</span>
+							${sharedNote}
+						</span>
 					</div>
 					<div class="card-copy-action" id="${copyButtonId}">
-						<span>COPY</span>
+						<span>Copy</span>
 						<div style="width: 24px; height: 24px; position: relative">
 							${COPY_ICON_SVG}
 						</div>
@@ -206,18 +204,18 @@
 			];
 
 			// Generate cards for each required chain
+			const sharedByFallback = {};
 			requiredChains.forEach((chain) => {
-				let address = zelfNameObject.publicData[chain.key];
+				const address = zelfNameObject.publicData[chain.key];
+				if (address || !chain.fallback) return;
+				if (!sharedByFallback[chain.fallback]) sharedByFallback[chain.fallback] = [];
+				sharedByFallback[chain.fallback].push(chain.displayName);
+			});
 
-				// If the address doesn't exist but we have a fallback, use the fallback address
-				if (!address && chain.fallback && zelfNameObject.publicData[chain.fallback]) {
-					address = zelfNameObject.publicData[chain.fallback];
-				}
-
-				// Only create card if we have an address (either direct or fallback)
-				if (address) {
-					createAddressCard(grid, chain.key, chain.displayName, address);
-				}
+			requiredChains.forEach((chain) => {
+				const address = zelfNameObject.publicData[chain.key];
+				if (!address) return;
+				createAddressCard(grid, chain.key, chain.displayName, address, sharedByFallback[chain.key]);
 			});
 
 			// Also add any additional address properties that might exist but weren't in our required list

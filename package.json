@@ -64,6 +64,7 @@
     "dependencies": {
         "@aptos-labs/ts-sdk": "6.3.1",
         "@ar.io/sdk": "^3.9.1",
+        "@ar.io/sdk-solana": "npm:@ar.io/sdk@4.5.2",
         "@ardrive/turbo-sdk": "^1.10.1",
         "@canton-network/core-tx-visualizer": "1.7.0",
         "@canton-network/wallet-sdk": "1.4.0",

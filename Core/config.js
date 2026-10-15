@@ -212,8 +212,10 @@ const configuration = {
     },
     arns: {
         processId: process.env.ARNS_PROCESS_ID,
+        solanaMint: process.env.ARNS_SOLANA_MINT || "5mwShV7zD67vCRzSXeJg9Gmvni7akqHTst59iA9PwGwu",
         index_transaction_id: process.env.ARNS_INDEX_TRANSACTION_ID,
-        blockdag_transaction_id: process.env.ARNS_BLOCKDAG_TRANSACTION_ID || "9Kz-HCKRaWmM5fAc9A2q7sJbUIRAGQ5X9GDKdI7l76Q",
+        blockdag_transaction_id: process.env.ARNS_BLOCKDAG_TRANSACTION_ID || "Ogwi27vfS0RZGXG-rFrv9vh8xIbXkvw2s-sl-O4NZKk",
+        socials_transaction_id: process.env.ARNS_SOCIALS_TRANSACTION_ID || "08JtrJB_nf9giHatY2VRGdbu1z4FoSVybGJoOrBFBkY",
     },
     walrus: {
         network: process.env.WALRUS_NETWORK || "testnet",

@@ -3,117 +3,64 @@
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>Zelf Name Service</title>
-		<!-- add main.css  -->
-		<link
-			rel="stylesheet"
-			href="https://julbanlrcguieirrv5cj6olf5ocqpt737jcxgc2dskm2ivg5afpa.arweave.net/TRYQNXERqIIiMa9Enzll64UHz_v6RXMLQ5KZpFTdAV4"
-		/>
-
-		<!-- icon for the tab -->
-		<link
-			rel="icon"
-			type="image/x-icon"
-			href="https://dthn3plzgi5c3d3hfrpkahrp7ljvept54k2v5hzavyuvvaum4fhq.arweave.net/HM7dvXkyOi2PZyxeoB4v-tNSPn3itV6fIK4pWoKM4U8"
-		/>
-		<link
-			rel="icon"
-			type="image/png"
-			sizes="256x256"
-			href="https://5nus3zwkvzbe7iyc3skx5a223hc3lghsqkfkb3fj767tsqmvqlla.arweave.net/62kt5squQk-jAtyVfoNa2cW1mPKCiqDsqf-_OUGVgtY"
-		/>
-		<link
-			rel="icon"
-			type="image/png"
-			sizes="164x164"
-			href="https://4zhi5jxgc7f5n35rmg3mih2nzykfz6eizrjsfai5cpxfjso3ahga.arweave.net/5k6OpuYXy9bvsWG2xB9NzhRc-IjMUyKBHRPuVMnbAcw"
-		/>
-		<link
-			rel="icon"
-			type="image/png"
-			sizes="128x128"
-			href="https://lezfgy6lkhop5q74x3ukqbpzex7bgo3zag4ihnyg432dlmmkvb2q.arweave.net/WTJTY8tR3P7D_L7oqAX5Jf4TO3kBuIO3Bub0NbGKqHU"
-		/>
-		<link
-			rel="icon"
-			type="image/png"
-			sizes="16x16"
-			href="https://jxbc5qod5fbuhrn2wze7suelhbborkogf42uzbsamqzku7adkdda.arweave.net/TcIuwcPpQ0PFurZJ-VCLOELoqcYvNUyGQGQyqnwDUMY"
-		/>
-		<link
-			rel="icon"
-			type="image/png"
-			sizes="48x48"
-			href="https://5uisd2vw2vzdzblm6pzchnnjmbfdmsg2udmiwui6cdzfmqlq3ega.arweave.net/7REh6rbVcjyFbPPyI7WpYEo2SNqg2ItRHhDyVkFw2Qw"
-		/>
+		<title>Zelf ID</title>
+		<link rel="stylesheet" href="./main.css" data-arns-css="https://arweave.net/Q0Ng7ocoBJlk3Rh6UcEXKFY8mROE7opHgj5fa5_SOds" />
+		<link rel="icon" type="image/x-icon" href="https://arweave.net/HM7dvXkyOi2PZyxeoB4v-tNSPn3itV6fIK4pWoKM4U8" />
+		<link rel="icon" type="image/png" sizes="256x256" href="https://arweave.net/62kt5squQk-jAtyVfoNa2cW1mPKCiqDsqf-_OUGVgtY" />
+		<link rel="icon" type="image/png" sizes="164x164" href="https://arweave.net/5k6OpuYXy9bvsWG2xB9NzhRc-IjMUyKBHRPuVMnbAcw" />
+		<link rel="icon" type="image/png" sizes="128x128" href="https://arweave.net/WTJTY8tR3P7D_L7oqAX5Jf4TO3kBuIO3Bub0NbGKqHU" />
+		<link rel="icon" type="image/png" sizes="16x16" href="https://arweave.net/TcIuwcPpQ0PFurZJ-VCLOELoqcYvNUyGQGQyqnwDUMY" />
+		<link rel="icon" type="image/png" sizes="48x48" href="https://arweave.net/7REh6rbVcjyFbPPyI7WpYEo2SNqg2ItRHhDyVkFw2Qw" />
 	</head>
 	<body>
-		<div class="header">
-			<div class="logo">
-				<img
-					src="https://arweave.net/u2zb15EXJ5aueRIWSDGQ2leifcZzm7DtTq9osSertZM"
-					alt=""
-				/>
-			</div>
-		</div>
-		<div class="container">
-			<div class="content">
-				<div class="zelf-proof-div">
-					<!-- load this from zelf , we will do a search based on the domain -->
-					<img
-						id="zelfproof"
-						src="https://arweave.net/szXAC_kSbjeLsB7hrZj0dID73GZEkDYPVUlI5ROAW7c"
-					/>
-				</div>
-				<div class="cta">
-					<div class="text">Download Zelf Name Service</div>
-					<div class="button" id="downloadButton">
-						<div>Download App</div>
-					</div>
-				</div>
+		<header class="header">
+			<img class="logo" src="https://arweave.net/u2zb15EXJ5aueRIWSDGQ2leifcZzm7DtTq9osSertZM" alt="Zelf" />
+			<div class="button" id="downloadButton">Download app</div>
+		</header>
+
+		<main class="page">
+			<p class="eyebrow">Zelf ID</p>
+			<h1 class="name-label" id="zelfName">migueltrevino.zelf</h1>
+			<p class="lede">One Zelf ID for every chain. The proof lives on Arweave.</p>
+
+			<div class="loading-badge" id="loadingBadge" style="display: none">
+				<div class="spinner"></div>
+				<span class="badge-label">Loading from <span class="badge-source">Arweave</span></span>
 			</div>
 
-			<div class="second-content">
-				<h1 class="name-label" id="zelfName">[YOUR_NAME].ZELF</h1>
+			<div class="layout">
+				<section class="proof-card">
+					<img id="zelfproof" src="https://arweave.net/szXAC_kSbjeLsB7hrZj0dID73GZEkDYPVUlI5ROAW7c" alt="Zelf proof" />
+				</section>
 
-				<div class="loading-badge" id="loadingBadge" style="display: none">
-					<div class="spinner"></div>
-					<span class="badge-label">Loading from <span class="badge-source">Arweave</span></span>
-				</div>
-
-				<!-- Address cards will be generated dynamically here -->
-				<div class="addresses-grid" id="addressesGrid"></div>
-
-				<div class="promo-div">
-					<h3>DO YOU WANT TO GET YOUR OWN TAG NAME?</h3>
-
-					<span> Use my <strong>Tag Name</strong> and get 10% off on your first tag!</span>
-
-					<div class="referral-code-div" id="copyReferralCode">
-						<span id="zelf-name-copy">...</span>
-						<div style="width: 24px; height: 24px; position: relative">
-							<svg xmlns="http://www.w3.org/2000/svg" width="17" height="16" viewBox="0 0 17 16" fill="none">
-								<path
-									d="M11.5013 0.666992H3.5013C2.76797 0.666992 2.16797 1.26699 2.16797 2.00033V11.3337H3.5013V2.00033H11.5013V0.666992ZM13.5013 3.33366H6.16797C5.43464 3.33366 4.83464 3.93366 4.83464 4.66699V14.0003C4.83464 14.7337 5.43464 15.3337 6.16797 15.3337H13.5013C14.2346 15.3337 14.8346 14.7337 14.8346 14.0003V4.66699C14.8346 3.93366 14.2346 3.33366 13.5013 3.33366ZM13.5013 14.0003H6.16797V4.66699H13.5013V14.0003Z"
-									fill="#181818"
-								/>
-							</svg>
-						</div>
-					</div>
-				</div>
+				<section class="details">
+					<h2 class="section-label">Wallets</h2>
+					<div class="addresses-grid" id="addressesGrid"></div>
+				</section>
 			</div>
-		</div>
 
-		<!-- Link the external JavaScript file -->
+			<section class="promo-div">
+				<div>
+					<h2>Get your own Zelf ID</h2>
+					<p>Use my Zelf ID and get 10% off on your first one.</p>
+				</div>
+				<div class="referral-code-div" id="copyReferralCode">
+					<span id="zelf-name-copy">migueltrevino.zelf</span>
+					<span class="copy-label">Copy</span>
+				</div>
+			</section>
+		</main>
+
 		<div class="toast-container" id="toastContainer"></div>
 		<script>
-			// Conditionally load script based on hostname
 			const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+			const styleLink = document.querySelector("[data-arns-css]");
+			if (!isLocalhost && styleLink) {
+				const nextCss = styleLink.getAttribute("data-arns-css");
+				if (nextCss && nextCss.startsWith("https://")) styleLink.href = nextCss;
+			}
 			const script = document.createElement("script");
-
-			script.src = isLocalhost
-				? "./main_v2.js"
-				: "https://qhd7a5b57lc7cq4n4dtx66bfpxykmynykgfq2wc5ewx2vvngiphq.arweave.net/gcfwdD36xfFDjeDnf3glffCmYbhRiw1YXSWvqtWmQ88";
+			script.src = isLocalhost ? "./main_v2.js" : "https://arweave.net/7XvsHAYtjNG_PndaBvHEgFi40A62S9ALL94Hlx8vl4g";
 			document.body.appendChild(script);
 		</script>
 	</body>
