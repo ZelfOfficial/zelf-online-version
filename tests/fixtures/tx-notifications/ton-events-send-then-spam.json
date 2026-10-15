@@ -1,0 +1,111 @@
+{
+  "_source": "GET https://tonapi.io/v2/accounts/0:d2329ea24d2424418aa2f537c72f261af84c06743d4c1fee0042589678823457/events?limit=2",
+  "_note": "qa99.zelf (#556): sends 0.887811953 TON at 01:52:15Z, then a TonAPI scam-flagged 0.00001 TON spam broadcast arrives 24 s later",
+  "_recordedAt": "2026-10-15T15:49:06.000Z",
+  "account": "0:d2329ea24d2424418aa2f537c72f261af84c06743d4c1fee0042589678823457",
+  "friendly": "EQDSMp6iTSQkQYqi9TfHLyYa-EwGdD1MH-4AQliWeII0V_8K",
+  "response": {
+    "events": [
+      {
+        "event_id": "3b41d33fbb9fd3720bf4f106a064c89b0eff4d061b81631125c4b068006906ad",
+        "account": {
+          "address": "0:d2329ea24d2424418aa2f537c72f261af84c06743d4c1fee0042589678823457",
+          "is_scam": false,
+          "is_wallet": true
+        },
+        "timestamp": 1791942759,
+        "actions": [
+          {
+            "type": "TonTransfer",
+            "status": "ok",
+            "TonTransfer": {
+              "sender": {
+                "address": "0:d3cadcae1fa3dd640c91dd6dc69531dc460cf056424576492845d3d4f77b0154",
+                "is_scam": false,
+                "is_wallet": true
+              },
+              "recipient": {
+                "address": "0:d2329ea24d2424418aa2f537c72f261af84c06743d4c1fee0042589678823457",
+                "is_scam": false,
+                "is_wallet": true
+              },
+              "amount": 10000,
+              "comment": "@pgon - крипто-фиатный кошелек в ТГ. Пополни по СБП / выведи по СБП / Оплаты QR в магазине. Промокод - 3ABSA1BERAA8"
+            },
+            "simple_preview": {
+              "name": "Gram Transfer",
+              "description": "Transferring 0.00001 Gram",
+              "value": "0.00001 Gram",
+              "accounts": [
+                {
+                  "address": "0:d3cadcae1fa3dd640c91dd6dc69531dc460cf056424576492845d3d4f77b0154",
+                  "is_scam": false,
+                  "is_wallet": true
+                }
+              ]
+            },
+            "base_transactions": [
+              "bb21c71ee86aa2a7bbd33e1ff1bc8705dd146e68c79b4dec06d18a550a976e33"
+            ]
+          }
+        ],
+        "is_scam": true,
+        "lt": 109813957000015,
+        "in_progress": false,
+        "extra": -9936,
+        "progress": 1,
+        "ext_msg_hash": "ff45cadd4f4b9d52dc8b4889bfae0e0dfff4f3d7e9fabd1881505ff0fbbf8285"
+      },
+      {
+        "event_id": "8c9131bb06dc9710ea66d6b8bfeb9abd16a72886560f2ea6e9f9cc3fb677797b",
+        "account": {
+          "address": "0:d2329ea24d2424418aa2f537c72f261af84c06743d4c1fee0042589678823457",
+          "is_scam": false,
+          "is_wallet": true
+        },
+        "timestamp": 1791942735,
+        "actions": [
+          {
+            "type": "TonTransfer",
+            "status": "ok",
+            "TonTransfer": {
+              "sender": {
+                "address": "0:d2329ea24d2424418aa2f537c72f261af84c06743d4c1fee0042589678823457",
+                "is_scam": false,
+                "is_wallet": true
+              },
+              "recipient": {
+                "address": "0:7b1100ec09b4136eae259b9e755b11972fa11eaa9bb4924e4f7a144aa9c04ff8",
+                "is_scam": false,
+                "is_wallet": true
+              },
+              "amount": 887811953
+            },
+            "simple_preview": {
+              "name": "Gram Transfer",
+              "description": "Transferring 0.887 Gram",
+              "value": "0.887 Gram",
+              "accounts": [
+                {
+                  "address": "0:7b1100ec09b4136eae259b9e755b11972fa11eaa9bb4924e4f7a144aa9c04ff8",
+                  "is_scam": false,
+                  "is_wallet": true
+                }
+              ]
+            },
+            "base_transactions": [
+              "24bcc0c7e94401f125582dcfad1c06bf20ae6b6759b72ae7d628fca9a8e54021"
+            ]
+          }
+        ],
+        "is_scam": false,
+        "lt": 109813897000001,
+        "in_progress": false,
+        "extra": -599265,
+        "progress": 1,
+        "ext_msg_hash": "b0bb90498fe5c1e8664761b41636ef75746c8acca4f8ce42781951cc1db0a763"
+      }
+    ],
+    "next_from": 109813897000001
+  }
+}
