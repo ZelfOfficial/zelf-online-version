@@ -11,7 +11,7 @@ const { createStellarWallet } = require("../../Wallet/modules/stellar");
 const { createPolkadotWallet, createKusamaWallet } = require("../../Wallet/modules/polkadot-kusama");
 const { createTonWallet } = require("../../Wallet/modules/ton");
 const { createAptosWallet } = require("../../Wallet/modules/aptos");
-const { decrypt, preview, applyPreviewHasPassword, _formattingError, ZELFPROOF_CLIENT_ERROR_STATUS } = require("../../ZelfProof/modules/zelf-proof.module");
+const { decrypt, preview, previewWithLegacyFallback, applyPreviewHasPassword, _formattingError, ZELFPROOF_CLIENT_ERROR_STATUS } = require("../../ZelfProof/modules/zelf-proof.module");
 const { effectivePassword } = require("../../ZelfID/modules/zelf-id-password.module");
 const OfflineProofModule = require("../../../Core/offline-proof");
 const config = require("../../../Core/config");
@@ -371,7 +371,9 @@ const previewTag = async (params, authUser) => {
 const previewZelfProof = async (params, authUser) => {
     const { zelfProof } = params;
 
-    const previewResult = await preview({
+    // v4 first, legacy stack as fallback: the legacy-only call returned 500 ERR_PARSE_FAILED for
+    // proofs minted by zelf-ids/lease (#175).
+    const previewResult = await previewWithLegacyFallback({
         zelfProof,
         addServerPassword: Boolean(params.addServerPassword),
     });

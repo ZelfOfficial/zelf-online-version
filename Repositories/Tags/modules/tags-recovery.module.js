@@ -2,6 +2,7 @@ const TagsModule = require("./tags.module");
 const TagsPartsModule = require("./tags-parts.module");
 const SessionModule = require("../../Session/modules/session.module");
 const { decrypt } = require("../../ZelfProof/modules/zelf-proof.module");
+const { effectivePassword } = require("../../ZelfID/modules/zelf-id-password.module");
 const { getDomainConfig } = require("../config/supported-domains");
 const TagsRegistrationModule = require("./tags-registration.module");
 
@@ -27,14 +28,20 @@ const leaseRecovery = async (payload, authUser) => {
 
 	await TagsModule._findDuplicatedTag(tagName, domain, domainConfig);
 
-	const { face, password } = await TagsPartsModule.decryptParams(payload, authUser);
+	const { face, password: rawPassword } = await TagsPartsModule.decryptParams(payload, authUser);
 
+	// Face-only: no password (clients send the placeholder), same as tags/decrypt and zelf-ids recovery.
+	const password = effectivePassword({ password: rawPassword, securityType: payload.securityType });
+
+	// Same SenseCrypt stack as tags/decrypt: v4 opens tags/lease and zelf-ids/lease proofs alike
+	// (the legacy stack failed v4 proofs with ERR_PARSE_FAILED).
 	const decryptedZelfProof = await decrypt({
 		addServerPassword: Boolean(addServerPassword),
 		faceBase64: face,
 		password,
 		zelfProof,
 		os: os || "DESKTOP",
+		stack: "v4",
 	});
 
 	const referralTagObject = await TagsModule._validateReferral(referralTagName, authUser, domainConfig);
