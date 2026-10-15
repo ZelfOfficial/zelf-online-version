@@ -203,7 +203,7 @@ const getTransaction = async (params) => {
 	try {
 		const event = await tonApiGet(`/events/${encodeURIComponent(eventId)}`);
 		const account = event.account?.address || "";
-		const txs = mapEventsToTransactions([event], address);
+		const txs = mapEventsToTransactions([event], account);
 		if (!txs.length) {
 			const error = new Error("transaction_not_found");
 			error.status = 404;
