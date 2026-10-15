@@ -36,7 +36,7 @@ describe("ZelfProof error status mapping", () => {
     it.each([
         ["ERR_INVALID_PASSWORD", 401],
         ["ERR_PASSWORD_REQUIRED", 409],
-        ["ERR_VERIFICATION_FAILED", 409],
+        ["ERR_VERIFICATION_FAILED", 422],
         ["ERR_INVALID_ZELFPROOF_BYTES", 400],
     ])("%s -> %i even if upstream says 500", (code, status) => {
         expect(_formattingError({ code, message: "x", status: 500 }).status).toBe(status);

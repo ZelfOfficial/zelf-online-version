@@ -11,7 +11,8 @@ const { createStellarWallet } = require("../../Wallet/modules/stellar");
 const { createPolkadotWallet, createKusamaWallet } = require("../../Wallet/modules/polkadot-kusama");
 const { createTonWallet } = require("../../Wallet/modules/ton");
 const { createAptosWallet } = require("../../Wallet/modules/aptos");
-const { decrypt, preview, applyPreviewHasPassword } = require("../../ZelfProof/modules/zelf-proof.module");
+const { decrypt, preview, applyPreviewHasPassword, _formattingError, ZELFPROOF_CLIENT_ERROR_STATUS } = require("../../ZelfProof/modules/zelf-proof.module");
+const { effectivePassword } = require("../../ZelfID/modules/zelf-id-password.module");
 const OfflineProofModule = require("../../../Core/offline-proof");
 const config = require("../../../Core/config");
 const { confirmPayUniqueAddress } = require("../../purchase-zelf/modules/balance-checker.module");
@@ -202,6 +203,26 @@ const searchTag = async (params, authUser) => {
     }
 };
 
+
+/**
+ * Map a ZelfProof/SenseCrypt failure to a thrown Error with distinct HTTP status + code.
+ * @param {{ code?: string, message?: string }|string} errPayload
+ */
+const throwMappedZelfProofError = (errPayload) => {
+    const raw = typeof errPayload === "string" ? { code: errPayload, message: errPayload } : errPayload || {};
+    const formatted = _formattingError({
+        code: raw.code || raw.message,
+        message: raw.message || raw.code || "decrypt_failed",
+        status: ZELFPROOF_CLIENT_ERROR_STATUS[raw.code],
+    });
+    const error = new Error(formatted.code || formatted.message || "decrypt_failed");
+
+    error.status = formatted.status || 500;
+    error.code = formatted.code || "InternalServerError";
+
+    throw error;
+};
+
 /**
  * decrypt tag
  * @param {Object} params
@@ -220,7 +241,14 @@ const decryptTag = async (params, authUser) => {
 
     if (!tagObject?.zelfProof) throw new Error("404:tag_not_found");
 
-    const { face, password } = await _decryptParams(params, authUser);
+    const { face, password: rawPassword } = await _decryptParams(params, authUser);
+
+    // Face-only proofs must be decrypted without a password; clients may still send the placeholder.
+    const password = effectivePassword({
+        password: rawPassword,
+        securityType: params.securityType,
+        hasPassword: tagObject.publicData?.hasPassword,
+    });
 
     const decryptedZelfProof = await decrypt({
         addServerPassword: Boolean(params.addServerPassword),
@@ -232,11 +260,7 @@ const decryptTag = async (params, authUser) => {
     });
 
     if (decryptedZelfProof.error) {
-        const error = new Error(decryptedZelfProof.error.code);
-
-        error.status = 409;
-
-        throw error;
+        throwMappedZelfProofError(decryptedZelfProof.error);
     }
 
     const { mnemonic, zkProof, solanaSecretKey } = decryptedZelfProof.metadata;
@@ -253,7 +277,7 @@ const decryptTag = async (params, authUser) => {
         zkProof,
         solanaSecretKey,
         arweavePrivateKey: arweave.privateKey,
-        password,
+        password: password || rawPassword,
     });
 
     const needsLegacyUpgrade = resolveEncryptVersion(tagObject.publicData) !== 4;
@@ -567,9 +591,7 @@ const deleteTag = async (params, authUser) => {
     const decryptedZelfProof = await decrypt({ ...decryptPayload, stack: "v4" });
 
     if (decryptedZelfProof.error) {
-        const error = new Error(decryptedZelfProof.error.code);
-        error.status = 409;
-        throw error;
+        throwMappedZelfProofError(decryptedZelfProof.error);
     }
 
     const deletedFiles = [];

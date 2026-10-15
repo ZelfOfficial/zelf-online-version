@@ -465,7 +465,7 @@ const upgrade = async (data) => {
 const ZELFPROOF_CLIENT_ERROR_STATUS = {
     ERR_INVALID_PASSWORD: 401,
     ERR_PASSWORD_REQUIRED: 409,
-    ERR_VERIFICATION_FAILED: 409,
+    ERR_VERIFICATION_FAILED: 422, // face mismatch — distinct from wrong password (401) / password required (409)
     ERR_INVALID_ZELFPROOF_BYTES: 400,
     ERR_INVALID_ZELFPROOF: 400,
 };
