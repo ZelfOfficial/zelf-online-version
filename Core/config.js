@@ -39,7 +39,9 @@ const ARWEAVE_DEFAULT_GRAPHQL_GATEWAYS = [
     "https://turbo-gateway.com",
     "https://ardrive.net",
 ];
-const ARWEAVE_DEFAULT_ARNS_GATEWAY_HOST = "arweave.net";
+// Zelf Link gateways in order of preference: ar.io reads the Solana name token first (#540).
+const ARWEAVE_DEFAULT_ARNS_GATEWAY_HOSTS = ["ar.io", "arweave.net", "ar-io.dev"];
+const ARWEAVE_DEFAULT_ARNS_GATEWAY_HOST = ARWEAVE_DEFAULT_ARNS_GATEWAY_HOSTS[0];
 
 /** Positive finite float from env; otherwise `fallback` (for USD rates and REWARD_PRICE). */
 const parsePositiveFloat = (value, fallback) => {
@@ -174,6 +176,7 @@ const configuration = {
         publicGatewayUrl: process.env.ARWEAVE_PUBLIC_GATEWAY_URL || ARWEAVE_DEFAULT_PUBLIC_GATEWAY_URL,
         graphqlGateways: csvOrDefault(process.env.ARWEAVE_GRAPHQL_GATEWAYS, ARWEAVE_DEFAULT_GRAPHQL_GATEWAYS),
         arnsGatewayHost: process.env.ARWEAVE_ARNS_GATEWAY_HOST || ARWEAVE_DEFAULT_ARNS_GATEWAY_HOST,
+        arnsGatewayHosts: csvOrDefault(process.env.ARWEAVE_ARNS_GATEWAY_HOSTS, ARWEAVE_DEFAULT_ARNS_GATEWAY_HOSTS),
         owner: process.env.ARWEAVE_OWNER,
         n: process.env.ARWAVE_N,
         e: process.env.ARWAVE_E,
