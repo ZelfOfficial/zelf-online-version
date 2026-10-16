@@ -3,8 +3,8 @@ const Arweave = require("arweave");
 const { Readable } = require("stream");
 const config = require("../../../Core/config");
 const {
-	buildTxUrl,
 	buildExplorerUrl,
+	resolveContentUrl,
 	isSingleTagLookupKey,
 	postGraphql,
 	fetchTxAsBase64Png,
@@ -106,7 +106,7 @@ const tagRegistration = async (tagProofQRCode, tagObject, fileName) => {
 	return formatCreatedRecord({
 		...uploadResult,
 		publicData,
-		url: buildTxUrl(uploadResult.id),
+		url: await resolveContentUrl(uploadResult.id),
 		explorerUrl: buildExplorerUrl(uploadResult.id),
 	});
 };
@@ -182,7 +182,7 @@ const receiptRegistration = async (dataUrl, tagObject, fileName) => {
 	return formatCreatedRecord({
 		...uploadResult,
 		publicData,
-		url: buildTxUrl(uploadResult.id),
+		url: await resolveContentUrl(uploadResult.id),
 		explorerUrl: buildExplorerUrl(uploadResult.id),
 	});
 };
@@ -301,7 +301,7 @@ const searchInArweave = async (key, value) => {
 
 	const formatted = formatSearchResults(searchResults);
 
-	return sortArweaveSearchResultsNewestFirst(formatted);
+	return _stampContentGateway(sortArweaveSearchResultsNewestFirst(formatted));
 };
 
 /**
@@ -341,6 +341,24 @@ const sortArweaveSearchResultsNewestFirst = (formattedResults) => {
 	});
 };
 
+/**
+ * Probe the newest transaction once and reuse that gateway for the rest of the page.
+ * @param {Array<Object>} rows
+ * @returns {Promise<Array<Object>>}
+ */
+const _stampContentGateway = async (rows) => {
+	const lead = rows.find((row) => row.id);
+	if (!lead) return rows;
+
+	const winner = await resolveContentUrl(lead.id);
+	const base = String(winner).replace(/\/[^/]+$/, "");
+	for (const row of rows) {
+		if (!row.id) continue;
+		row.url = `${base}/${row.id}`;
+	}
+	return rows;
+};
+
 const formatSearchResults = (searchResults) => {
 	const formattedResults = [];
 
@@ -352,7 +370,7 @@ const formatSearchResults = (searchResults) => {
 		const formattedResult = {
 			id: searchResult.node.id,
 			owner: searchResult.node.owner.address,
-			url: buildTxUrl(searchResult.node.id),
+			url: "",
 			explorerUrl: buildExplorerUrl(searchResult.node.id),
 			publicData: {},
 			size: searchResult.node.data.size,

@@ -128,7 +128,10 @@
 				document.querySelector(".layout")?.classList.remove("is-hidden");
 
 				const imageElement = document.getElementById("zelfproof");
-				if (zelfNameObject.url && imageElement) imageElement.src = zelfNameObject.url;
+				if (zelfNameObject.url && imageElement) {
+					imageElement.alt = data.tagName || name;
+					imageElement.src = zelfNameObject.url;
+				}
 				generateAddressCards();
 			} catch (error) {
 				console.error("Error fetching Zelf data:", error);

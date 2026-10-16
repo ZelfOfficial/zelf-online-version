@@ -4,7 +4,7 @@
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>Zelf ID</title>
-		<link rel="stylesheet" href="./main.css" data-arns-css="https://arweave.net/5W0_ISHRW5KAef7CQlbdFuG2OCODclyNBXNDY96oLT0" />
+		<link rel="stylesheet" href="./main.css" data-arns-css="https://arweave.net/3Jt2w9iZi0LdGcjbz1kCtP9SneHXPQY3uLVI7luDa_4" />
 		<link rel="icon" type="image/x-icon" href="https://arweave.net/HM7dvXkyOi2PZyxeoB4v-tNSPn3itV6fIK4pWoKM4U8" />
 		<link rel="icon" type="image/png" sizes="256x256" href="https://arweave.net/62kt5squQk-jAtyVfoNa2cW1mPKCiqDsqf-_OUGVgtY" />
 		<link rel="icon" type="image/png" sizes="164x164" href="https://arweave.net/5k6OpuYXy9bvsWG2xB9NzhRc-IjMUyKBHRPuVMnbAcw" />
@@ -30,7 +30,12 @@
 
 			<div class="layout">
 				<section class="proof-card">
-					<img id="zelfproof" src="https://arweave.net/szXAC_kSbjeLsB7hrZj0dID73GZEkDYPVUlI5ROAW7c" alt="Zelf proof" />
+					<style>
+						#zelfproof:not([src]) {
+							visibility: hidden;
+						}
+					</style>
+					<img id="zelfproof" alt="" />
 				</section>
 
 				<section class="details">
@@ -48,6 +53,23 @@
 					<span id="zelf-name-copy"></span>
 					<span class="copy-label">Copy</span>
 				</div>
+				<script>
+					(function () {
+						var host = location.hostname;
+						if (host === "localhost" || host === "127.0.0.1") {
+							host = new URLSearchParams(location.search).get("preview") || "";
+						}
+						var parts = ((host || "").split(".")[0] || "").split("_");
+						var undername = parts[0] || "";
+						var name = undername ? undername + "." + (parts[1] || "zelf") : "";
+						if (!name) return;
+						var title = document.getElementById("zelfName");
+						var copy = document.getElementById("zelf-name-copy");
+						if (title) title.textContent = name;
+						if (copy) copy.textContent = name;
+						document.title = name;
+					})();
+				</script>
 			</section>
 		</main>
 
@@ -60,7 +82,7 @@
 				if (nextCss && nextCss.startsWith("https://")) styleLink.href = nextCss;
 			}
 			const script = document.createElement("script");
-			script.src = isLocalhost ? "./main_v2.js" : "https://arweave.net/X6DElvJ_UGYRAKZ_gifbZZbAmo0c4rhW6jjEn80T6F8";
+			script.src = isLocalhost ? "./main_v2.js" : "https://arweave.net/8b6h9gaeFA8XJsVbYJdP0QRb6Ji7EpuvcOprSLss_5c";
 			document.body.appendChild(script);
 		</script>
 	</body>

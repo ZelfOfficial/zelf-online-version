@@ -5,7 +5,7 @@
 const axios = require("axios");
 const config = require("../../../Core/config");
 const TagsSearchModule = require("../../Tags/modules/tags-search.module");
-const { buildArnsUndernameUrl, buildArnsUndernameUrls } = require("./arweave-gateway.module");
+const { buildArnsUndernameUrls, resolveZelfLink } = require("./arweave-gateway.module");
 const { initAnt, resolveExpectedTransactionId, setAntRecord, mappingOfSites } = require("./ar-io-arns-shared.module");
 
 const mappingOfSitesRef = mappingOfSites;
@@ -36,7 +36,7 @@ const _checkGatewayUrl = async (url) => {
  */
 const get = async (params, authUser = {}) => {
 	const { tagObject, tagName, domain } = await _validateTagName(params.zelfName.split(".")[0], params.zelfName.split(".")[1], authUser);
-	const primaryUrl = buildArnsUndernameUrl(tagName, domain);
+	const primaryUrl = (await resolveZelfLink(tagName, domain)).url;
 
 	let records = null;
 	try {
@@ -116,7 +116,7 @@ const create = async (data, authUser = {}) => {
 	const domain = data.zelfName.split(".")[1];
 
 	const zelfName = await _validateTagName(data.zelfName.split(".")[0], data.zelfName.split(".")[1], authUser);
-	const primaryUrl = buildArnsUndernameUrl(tagName, domain);
+	const primaryUrl = (await resolveZelfLink(tagName, domain)).url;
 	const recordKey = domain === "zelf" ? `${tagName}` : `${tagName}_${domain}`;
 	const transactionId = resolveExpectedTransactionId(recordKey);
 

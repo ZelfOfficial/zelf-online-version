@@ -5,6 +5,8 @@ const {
 	getPublicGatewayUrl,
 	getArnsGatewayHost,
 	buildTxUrl,
+	resolveContentUrl,
+	_clearContentUrlCache,
 	buildExplorerUrl,
 	buildArnsUndernameUrl,
 	isSingleTagLookupKey,
@@ -15,6 +17,7 @@ const {
 describe("arweave-gateway.module", () => {
 	beforeEach(() => {
 		jest.restoreAllMocks();
+		_clearContentUrlCache();
 	});
 
 	it("returns default ranked graphql gateways", () => {
@@ -32,6 +35,22 @@ describe("arweave-gateway.module", () => {
 	it("builds tx and explorer urls", () => {
 		expect(buildTxUrl("abc123")).toBe("https://arweave.net/abc123");
 		expect(buildExplorerUrl("abc123")).toBe("https://viewblock.io/arweave/tx/abc123");
+	});
+
+	it("returns the ar.io url when that gateway serves the transaction", async () => {
+		const probe = jest.fn(async (url) => url.startsWith("https://ar.io/"));
+
+		await expect(resolveContentUrl("abc123", { probe, now: () => 1 })).resolves.toBe("https://ar.io/abc123");
+		expect(probe).toHaveBeenCalledTimes(1);
+		expect(probe.mock.calls[0][0]).toBe("https://ar.io/abc123");
+	});
+
+	it("falls through to arweave.net when ar.io does not serve the transaction", async () => {
+		const probe = jest.fn(async (url) => url.startsWith("https://arweave.net/"));
+
+		await expect(resolveContentUrl("def456", { probe, now: () => 1 })).resolves.toBe("https://arweave.net/def456");
+		expect(probe.mock.calls[0][0]).toBe("https://ar.io/def456");
+		expect(probe.mock.calls[1][0]).toBe("https://arweave.net/def456");
 	});
 
 	it("builds arns undername urls", () => {

@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const config = require("../../../Core/config");
 const {
-	buildTxUrl,
+	resolveContentUrl,
 	buildExplorerUrl,
 	postGraphql,
 	fetchTxAsBase64Png,
@@ -111,7 +111,7 @@ const zelfNameRegistration = async (zelfProofQRCode, zelfNameObject) => {
 
 	return {
 		...uploadResult,
-		url: buildTxUrl(uploadResult.id),
+		url: await resolveContentUrl(uploadResult.id),
 		explorerUrl: buildExplorerUrl(uploadResult.id),
 	};
 };

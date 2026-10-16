@@ -3,7 +3,7 @@ const SessionModule = require("../../Session/modules/session.module");
 const ArweaveModule = require("../../Arweave/modules/arweave.module");
 const ZNSPartsModule = require("./zns-parts.module");
 const ZNSSearchModule = require("./zns-search.module");
-const { buildTxUrl, buildExplorerUrl } = require("../../Arweave/modules/arweave-gateway.module");
+const { resolveContentUrl, buildExplorerUrl } = require("../../Arweave/modules/arweave-gateway.module");
 const { generateMnemonic } = require("../../Wallet/modules/helpers");
 const { createEthWallet } = require("../../Wallet/modules/eth");
 const { createSolanaWallet } = require("../../Wallet/modules/solana");
@@ -365,7 +365,7 @@ const previewZelfName = async (params, authUser) => {
 			const zelfNameObject = zelfNameObjects[index];
 
 			if (zelfNameObject.ipfs_pin_hash && zelfNameObject.publicData.arweaveId) {
-				zelfNameObject.url = buildTxUrl(zelfNameObject.publicData.arweaveId);
+				zelfNameObject.url = await resolveContentUrl(zelfNameObject.publicData.arweaveId);
 
 				zelfNameObject.explorerUrl = buildExplorerUrl(zelfNameObject.publicData.arweaveId);
 			}

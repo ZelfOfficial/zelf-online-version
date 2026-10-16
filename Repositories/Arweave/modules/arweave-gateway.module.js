@@ -42,7 +42,18 @@ const getArnsGatewayHost = () => getArnsGatewayHosts()[0];
 
 const getExplorerUrl = () => EXPLORER_URL;
 
-const buildTxUrl = (txId) => `${getPublicGatewayUrl()}/${txId}`;
+const AR_IO_CONTENT_GATEWAY = "https://ar.io";
+const CONTENT_HIT_CACHE_MS = 5 * 60 * 1000;
+const CONTENT_MISS_CACHE_MS = 60 * 1000;
+const _contentUrlCache = new Map();
+
+/** ar.io first, then the public gateway, then the other nodes that can serve a raw transaction. */
+const getContentGateways = () => {
+	const bases = [AR_IO_CONTENT_GATEWAY, getPublicGatewayUrl(), ...getGraphqlGateways()];
+	return [...new Set(bases.map(_normalizeGatewayBase).filter(Boolean))];
+};
+
+const buildTxUrl = (txId, gatewayBase = getPublicGatewayUrl()) => `${_normalizeGatewayBase(gatewayBase)}/${txId}`;
 
 const buildExplorerUrl = (txId) => `${EXPLORER_URL}/${txId}`;
 
@@ -104,6 +115,40 @@ const resolveZelfLink = async (tagName, domain = "zelf", { probe = _probe, now =
 
 const _clearZelfLinkCache = () => _zelfLinkCache.clear();
 
+const _clearContentUrlCache = () => _contentUrlCache.clear();
+
+/**
+ * First gateway that serves the transaction. ar.io is tried before the other nodes.
+ * A hit is cached for a few minutes. A miss is cached for about a minute.
+ * @param {string} txId
+ * @returns {Promise<string>}
+ */
+const resolveContentUrl = async (txId, { probe = _probe, now = Date.now } = {}) => {
+	const id = String(txId || "").trim();
+	const fallback = `${AR_IO_CONTENT_GATEWAY}/${id}`;
+	if (!id) return fallback;
+
+	const hit = _contentUrlCache.get(id);
+	if (hit && hit.expiresAt > now()) return hit.url;
+
+	const gateways = getContentGateways();
+	let url = null;
+	for (const base of gateways) {
+		const candidate = `${base}/${id}`;
+		if (await probe(candidate)) {
+			url = candidate;
+			break;
+		}
+	}
+
+	const resolved = url || fallback;
+	_contentUrlCache.set(id, {
+		url: resolved,
+		expiresAt: now() + (url ? CONTENT_HIT_CACHE_MS : CONTENT_MISS_CACHE_MS),
+	});
+	return resolved;
+};
+
 const isSingleTagLookupKey = (key) => SINGLE_TAG_LOOKUP_KEYS.has(key);
 
 /**
@@ -156,7 +201,7 @@ const postGraphql = async (queryString) => {
 };
 
 /**
- * Fetch raw transaction bytes from the public gateway, then fall back to GraphQL pool.
+ * Fetch raw transaction bytes, trying ar.io before the other gateways.
  * @param {string} txId
  * @returns {Promise<ArrayBuffer|null>}
  */
@@ -173,19 +218,10 @@ const fetchTxData = async (txId) => {
 		return null;
 	};
 
-	try {
-		const primary = await fetchFromBase(getPublicGatewayUrl());
-		if (primary) return primary;
-	} catch (error) {
-		console.warn("Arweave tx fetch failed on public gateway:", error?.message || error);
-	}
-
-	for (let index = 0; index < getGraphqlGateways().length; index++) {
-		const gatewayBase = getGraphqlGateways()[index];
-		if (gatewayBase === getPublicGatewayUrl()) continue;
+	for (const gatewayBase of getContentGateways()) {
 		try {
-			const fallback = await fetchFromBase(gatewayBase);
-			if (fallback) return fallback;
+			const data = await fetchFromBase(gatewayBase);
+			if (data) return data;
 		} catch (error) {
 			console.warn("Arweave tx fetch failed on gateway:", gatewayBase, error?.message || error);
 		}
@@ -213,6 +249,8 @@ module.exports = {
 	getArnsGatewayHost,
 	getExplorerUrl,
 	buildTxUrl,
+	resolveContentUrl,
+	_clearContentUrlCache,
 	buildExplorerUrl,
 	buildArnsUndernameUrl,
 	buildArnsUndernameUrls,

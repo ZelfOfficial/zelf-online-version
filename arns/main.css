@@ -167,6 +167,10 @@ body {
 	background: var(--paper);
 }
 
+.proof-card img:not([src]) {
+	visibility: hidden;
+}
+
 .button {
 	display: inline-flex;
 	align-items: center;
