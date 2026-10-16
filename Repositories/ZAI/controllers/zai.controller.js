@@ -1,6 +1,7 @@
 const { PassThrough } = require("stream");
 const Module = require("../modules/zai-identity.module");
 const ChatModule = require("../modules/zai-chat.module");
+const AngelaModule = require("../modules/zai-angela.module");
 const { errorHandler } = require("../../../Core/http-handler");
 
 /**
@@ -57,7 +58,7 @@ const getMe = async (ctx) => {
     }
 };
 
-const STREAM_TIMEOUT_MS = 90 * 1000;
+const STREAM_TIMEOUT_MS = AngelaModule.WAIT_TIMEOUT_MS + 10 * 1000; // hard stop; ZAI_TIMEOUT is sent at ~150 s
 const PING_MS = 15 * 1000;
 
 /**
@@ -97,8 +98,42 @@ const chat = async (ctx) => {
     }
 };
 
+/**
+ * Angela's signed answer (signature + body checked in middleware)
+ * @param {Object} ctx - Koa context
+ */
+const callback = async (ctx) => {
+    try {
+        ctx.body = { data: await AngelaModule.recordAnswer(ctx.request.body) };
+    } catch (error) {
+        const _exception = errorHandler(error, ctx);
+
+        ctx.status = _exception.status;
+
+        ctx.body = { message: _exception.message, code: _exception.code };
+    }
+};
+
+/**
+ * Result pickup after a dropped stream (same Zelf ID only)
+ * @param {Object} ctx - Koa context
+ */
+const getResult = async (ctx) => {
+    try {
+        ctx.body = { data: await AngelaModule.getResult(ctx.params.requestId, ctx.state.zai) };
+    } catch (error) {
+        const _exception = errorHandler(error, ctx);
+
+        ctx.status = _exception.status;
+
+        ctx.body = { message: _exception.message, code: _exception.code };
+    }
+};
+
 module.exports = {
     chat,
+    callback,
+    getResult,
     createSession,
     revokeIdentity,
     getMe,

@@ -17,5 +17,9 @@ module.exports = (server) => {
 
     server.post(`${PATH}/chat`, Middleware.zaiTokenValidation, Middleware.chatValidation, Controller.chat);
 
+    server.post(`${PATH}/callback`, Middleware.callbackValidation, Controller.callback);
+
+    server.get(`${PATH}/result/:requestId`, Middleware.zaiTokenValidation, Middleware.resultValidation, Controller.getResult);
+
     server.get(`${PATH}/me`, Middleware.zaiTokenValidation, Controller.getMe);
 };

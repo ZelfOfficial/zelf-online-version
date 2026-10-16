@@ -3,6 +3,7 @@ const { errorHandler } = require("../../../Core/http-handler");
 const Joi = require("joi");
 const ZaiIdentity = require("../modules/zai-identity.module");
 const ZaiChat = require("../modules/zai-chat.module");
+const ZaiAngela = require("../modules/zai-angela.module");
 
 const schemas = {
     identityToken: {
@@ -102,8 +103,52 @@ const chatValidation = async (ctx, next) => {
     await next();
 };
 
+const callbackSchema = Joi.object({
+    requestId: Joi.string().guid({ version: ["uuidv4"] }).required(),
+    text: Joi.string().allow("").max(8000).required(),
+}).unknown(false);
+
+/**
+ * POST /api/zai/callback (Angela → server). Verifies X-ZAI-Signature = HMAC-SHA256(raw body, ZAI_CALLBACK_SECRET)
+ * with a timing-safe compare, then validates the body. No token: the signature is the auth.
+ */
+const callbackValidation = async (ctx, next) => {
+    if (!ZaiAngela.isEnabled()) return _reject(ctx, ZaiIdentity.zaiError(503, "ZAI_DISABLED"));
+
+    const raw = ctx.request.rawBody ?? ctx.request.body?.[Symbol.for("unparsedBody")]; // koa-body includeUnparsed
+
+    if (!ZaiAngela.verifySignature(raw, ctx.headers["x-zai-signature"])) return _reject(ctx, ZaiIdentity.zaiError(401, "ZAI_BAD_SIGNATURE"));
+
+    const { error, value } = callbackSchema.validate(ctx.request.body || {}, { abortEarly: false });
+
+    if (error) {
+        ctx.status = 400;
+        ctx.body = { code: "ZAI_BAD_REQUEST", message: error.message };
+        return;
+    }
+
+    ctx.request.body = value;
+
+    await next();
+};
+
+/** GET /api/zai/result/:requestId — run after zaiTokenValidation. */
+const resultValidation = async (ctx, next) => {
+    const { error } = Joi.string().guid({ version: ["uuidv4"] }).required().validate(ctx.params?.requestId);
+
+    if (error) {
+        ctx.status = 400;
+        ctx.body = { code: "ZAI_BAD_REQUEST", message: "invalid requestId" };
+        return;
+    }
+
+    await next();
+};
+
 module.exports = {
     identityTokenValidation,
     zaiTokenValidation,
     chatValidation,
+    callbackValidation,
+    resultValidation,
 };
