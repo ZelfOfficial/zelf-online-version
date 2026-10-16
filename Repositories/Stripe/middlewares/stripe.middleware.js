@@ -46,15 +46,14 @@ const webhookValidation = async (ctx, next) => {
 		try {
 			event = stripe.webhooks.constructEvent(requestBody, signature, webhookSecret);
 		} catch (err) {
-			console.error("Webhook signature verification failed:", err.message);
+			// 400, not 200: a 2xx tells Stripe the event was delivered, so it never retried and the
+			// event was lost. Log only the error kind; never the secret, the header or the payload.
+			const reason = String(err?.message || "").split("\n")[0].slice(0, 200);
+			console.error("Stripe webhook signature verification failed:", err?.type || "Error", reason);
 
-			ctx.status = 200;
+			ctx.status = 400;
 
-			ctx.body = {
-				received: true,
-				processed: false,
-				error: "Webhook signature verification failed"
-			};
+			ctx.body = { error: "invalid_signature" };
 
 			return;
 		}
