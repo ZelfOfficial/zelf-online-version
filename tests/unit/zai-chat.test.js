@@ -320,3 +320,110 @@ describe("redaction keeps public chain ids", () => {
         expect(Redaction.redact(s)).toBe(s);
     });
 });
+
+describe("search_docs: sitemap-backed URLs + locale", () => {
+    const SITEMAP = `<?xml version="1.0"?><urlset>
+        <url><loc>https://docs.zelf.world/docs/guides/recover-zelf-id</loc></url>
+        <url><loc>https://docs.zelf.world/docs-es/guias/recuperar</loc></url>
+        <url><loc>https://docs.zelf.world/docs/api/zelf-ids/decrypt</loc></url>
+        <url><loc>https://docs.zelf.world/docs/intro</loc></url>
+    </urlset>`;
+    const FILES = {
+        "docs/02-guides/01-recover-zelf-id.md": "---\ntitle: Recover your Zelf ID\n---\nRecover your Zelf ID with the QR recovery code.",
+        "docs-es/guias/recuperacion.md": "---\ntitle: Recuperar tu Zelf ID\nslug: recuperar\n---\nRecover recuperar Zelf ID con el código QR.",
+        "docs/api/tags/decrypt-tag.md": "---\ntitle: Decrypt\nslug: /api/zelf-ids/decrypt\n---\nDecrypt a Zelf ID; recover data.",
+        "docs/guides/ghost.md": "---\ntitle: Ghost recover page\n---\nrecover recover recover recover (not published)",
+        "docs/intro/index.md": "# Intro\nrecover intro",
+    };
+    const http = (overrides = {}) => {
+        const calls = [];
+        return {
+            calls,
+            get: jest.fn(async (url) => {
+                calls.push(url);
+                if (url.includes("sitemap.xml")) {
+                    if (overrides.sitemapFails) throw new Error("ECONNRESET");
+                    return { data: SITEMAP };
+                }
+                if (url.includes("/git/trees/")) return { data: { tree: Object.keys(FILES).map((path) => ({ path })) } };
+                const path = Object.keys(FILES).find((p) => url.endsWith(p));
+                return { data: FILES[path] };
+            }),
+        };
+    };
+    const srcWith = (h) => ({ ...mockSources().sources, http: () => h });
+    beforeEach(() => Tools._internal.resetDocsCache());
+
+    test("URLs come from the sitemap (number prefixes stripped, slug honored, index collapsed); unpublished pages dropped", async () => {
+        const r = await Tools.runTool("search_docs", { query: "recover", k: 5 }, ZAI, srcWith(http()), { locale: "en" });
+        const urls = r.result.map((d) => d.url);
+        expect(urls).toEqual(
+            expect.arrayContaining([
+                "https://docs.zelf.world/docs/guides/recover-zelf-id",
+                "https://docs.zelf.world/docs/api/zelf-ids/decrypt",
+                "https://docs.zelf.world/docs/intro",
+            ])
+        );
+        expect(urls.some((u) => /ghost/.test(u))).toBe(false);
+        expect(r.cards.every((c) => c.type === "doc" && !/ghost/.test(c.url))).toBe(true);
+        expect(urls[0]).not.toMatch(/docs-es/);
+    });
+
+    test("locale es prefers /docs-es/ results (relative slug resolved)", async () => {
+        const r = await Tools.runTool("search_docs", { query: "recover", k: 2 }, ZAI, srcWith(http()), { locale: "es-CO" });
+        expect(r.result[0].url).toBe("https://docs.zelf.world/docs-es/guias/recuperar");
+    });
+
+    test("sitemap is cached with a TTL", async () => {
+        const h = http();
+        await Tools.runTool("search_docs", { query: "recover" }, ZAI, srcWith(h));
+        await Tools.runTool("search_docs", { query: "recover" }, ZAI, srcWith(h));
+        expect(h.calls.filter((u) => u.includes("sitemap.xml"))).toHaveLength(1);
+    });
+
+    test("sitemap fetch failure: no links at all (never a 404 card), no throw", async () => {
+        const r = await Tools.runTool("search_docs", { query: "recover" }, ZAI, srcWith(http({ sitemapFails: true })));
+        expect(r.result).toEqual({ items: [], note: "docs_unavailable" });
+        expect(r.cards).toEqual([]);
+    });
+
+    test("candidatePaths handles prefixes, index, absolute and relative slugs", () => {
+        const c = Tools._internal.candidatePaths;
+        expect(c("docs/01-intro/index.md")).toEqual(["/docs/intro"]);
+        expect(c("docs/a/02_b.mdx", { slug: "/x/y" })).toEqual(["/docs/x/y", "/docs/a/b"]);
+        expect(c("docs-es/a/b.md", { slug: "c" })).toEqual(["/docs-es/a/c", "/docs-es/a/b"]);
+    });
+});
+
+describe("chat locale (Joi body field or Accept-Language)", () => {
+    const Middleware = require("../../Repositories/ZAI/middlewares/zai.middleware");
+    const ctx = (body, headers = {}) => ({ request: { body }, headers, state: {} });
+    beforeEach(() => {
+        process.env.ZAI_MODEL_BASE_URL = "https://m/v1";
+        process.env.ZAI_MODEL = "m";
+        process.env.ZAI_MODEL_API_KEY = "k";
+    });
+    test("body locale wins; Accept-Language used otherwise; default en; bad value rejected", async () => {
+        const next = jest.fn();
+        const a = ctx({ message: "hi", locale: "es" }, { "accept-language": "en-US" });
+        await Middleware.chatValidation(a, next);
+        expect(a.request.body.locale).toBe("es");
+        const b = ctx({ message: "hi" }, { "accept-language": "fr;q=0.5, es-CO;q=0.9, *;q=0.1" });
+        await Middleware.chatValidation(b, next);
+        expect(b.request.body.locale).toBe("es-co");
+        const c = ctx({ message: "hi" });
+        await Middleware.chatValidation(c, next);
+        expect(c.request.body.locale).toBe("en");
+        const d = ctx({ message: "hi", locale: "<script>" });
+        await Middleware.chatValidation(d, next);
+        expect(d.status).toBe(400);
+        expect(next).toHaveBeenCalledTimes(3);
+    });
+    test("locale reaches search_docs through the chat loop", async () => {
+        const spy = jest.spyOn(Tools, "runTool");
+        const adapter = scriptedAdapter([{ toolCalls: [{ id: "d", name: "search_docs", arguments: '{"query":"recover"}' }] }, { content: "ok" }]);
+        await run(adapter, { message: "recover", locale: "es" }, mockSources().sources);
+        expect(spy.mock.calls[0][4]).toEqual({ locale: "es" });
+        spy.mockRestore();
+    });
+});

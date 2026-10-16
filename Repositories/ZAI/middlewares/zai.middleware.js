@@ -63,8 +63,25 @@ const chatSchema = Joi.object({
         .max(40)
         .items(Joi.object({ role: Joi.string().valid("user", "assistant").required(), content: Joi.string().allow("").max(4000).required() }).unknown(false))
         .default([]),
-    locale: Joi.string().max(10).default("en"),
+    locale: Joi.string()
+        .pattern(/^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})?$/)
+        .optional(),
 }).unknown(true); // tagName/domain/zelfName etc. are tolerated but stripped below: identity only comes from the token
+
+/** First well-formed language tag from Accept-Language (q-order respected), or null. */
+const _acceptLanguage = (ctx) => {
+    const header = String(ctx.headers?.["accept-language"] || "");
+    const tags = header
+        .split(",")
+        .map((part) => {
+            const [tag, ...params] = part.trim().split(";");
+            const q = params.map((p) => p.trim().match(/^q=([\d.]+)$/)).find(Boolean);
+            return { tag: tag.trim(), q: q ? Number(q[1]) : 1 };
+        })
+        .filter((t) => /^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})?$/.test(t.tag) && t.q > 0)
+        .sort((a, b) => b.q - a.q);
+    return tags[0]?.tag || null;
+};
 
 /** POST /api/zai/chat: 503 when no model is configured, then Joi body validation. Run after zaiTokenValidation. */
 const chatValidation = async (ctx, next) => {
@@ -78,7 +95,9 @@ const chatValidation = async (ctx, next) => {
         return;
     }
 
-    ctx.request.body = { message: value.message, history: value.history, locale: value.locale, conversationId: value.conversationId };
+    const locale = (value.locale || _acceptLanguage(ctx) || "en").toLowerCase();
+
+    ctx.request.body = { message: value.message, history: value.history, locale, conversationId: value.conversationId };
 
     await next();
 };

@@ -24,6 +24,7 @@ jest.mock("../../Repositories/License/modules/license.module", () => ({
 }));
 jest.mock("axios", () => ({
     get: jest.fn(async (url) => {
+        if (url.includes("sitemap.xml")) return { data: "<urlset><url><loc>https://docs.zelf.world/docs/recovery</loc></url></urlset>" };
         if (url.includes("/git/trees/")) return { data: { tree: [{ path: "docs/recovery.md" }] } };
         return { data: "---\ntitle: Recover your Zelf ID\n---\nTo recover your Zelf ID scan your QR recovery code and verify your face." };
     }),

@@ -312,9 +312,8 @@ const impl = {
         return { source: "license-json-ipfs", domain, url: rec?.url || null, plans };
     },
 
-    async search_docs({ query, k = 3 }, _zai, sources) {
-        const index = await loadDocsIndex(sources);
-        return scoreDocs(index, query, k).map(({ title, url, snippet }) => ({ title, url, snippet }));
+    async search_docs(args, _zai, sources, opts) {
+        return searchDocs(args, sources, opts?.locale);
     },
 
     async search_code({ query, k = 3 }, _zai, sources) {
@@ -360,24 +359,102 @@ const impl = {
     },
 };
 
-/* ------------------------------------------------------------------ docs index (public repo, cached 1h) */
+/* ------------------------------------------------------------------ docs index (public repo + live sitemap) */
+const DOCS_SITE = "https://docs.zelf.world";
+const SITEMAP_URL = `${DOCS_SITE}/sitemap.xml`;
+const SITEMAP_TTL_MS = Number(process.env.ZAI_DOCS_SITEMAP_TTL_MS || 60 * 60 * 1000);
+const SITEMAP_RETRY_MS = 5 * 60 * 1000;
+const DOCS_TTL_MS = 60 * 60 * 1000;
+
+const normPath = (p) => {
+    const clean = String(p || "").replace(/[?#].*$/, "").replace(/\/+$/, "");
+    return clean || "/";
+};
+
+let _sitemap = { at: 0, paths: null, failedAt: 0 };
+/**
+ * Set of URL paths published on docs.zelf.world (cached with TTL).
+ * On fetch failure keeps the last good copy; with none, returns null (search_docs then returns no results,
+ * so we never emit a link that could 404).
+ */
+const loadSitemap = async (sources) => {
+    const now = Date.now();
+    if (_sitemap.paths && now - _sitemap.at < SITEMAP_TTL_MS) return _sitemap.paths;
+    if (_sitemap.failedAt && now - _sitemap.failedAt < SITEMAP_RETRY_MS) return _sitemap.paths;
+    try {
+        const { data } = await sources.http().get(SITEMAP_URL, { timeout: 8000, responseType: "text" });
+        const paths = new Set();
+        for (const m of String(data).matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)) {
+            try {
+                const u = new URL(m[1]);
+                if (u.origin === DOCS_SITE) paths.add(normPath(decodeURIComponent(u.pathname)));
+            } catch (_) {
+                /* skip bad loc */
+            }
+        }
+        if (!paths.size) throw new Error("empty_sitemap");
+        _sitemap = { at: now, paths, failedAt: 0 };
+    } catch (_) {
+        _sitemap = { ..._sitemap, failedAt: now };
+    }
+    return _sitemap.paths;
+};
+
+const frontmatter = (body) => {
+    const m = String(body).match(/^---\s*\n([\s\S]*?)\n---/);
+    const fm = {};
+    if (!m) return fm;
+    for (const line of m[1].split("\n")) {
+        const kv = line.match(/^(\w+):\s*(.+?)\s*$/);
+        if (kv) fm[kv[1]] = kv[2].replace(/^["']|["']$/g, "");
+    }
+    return fm;
+};
+
+/**
+ * Candidate site paths for a repo file, Docusaurus-style: route base = top folder (docs / docs-es),
+ * number prefixes stripped from every segment, index/README collapse to the folder, frontmatter slug honored
+ * (absolute slug is relative to the route base; relative slug replaces the last segment).
+ */
+const candidatePaths = (repoPath, fm = {}) => {
+    const parts = repoPath.replace(/\.mdx?$/, "").split("/");
+    const root = parts.shift();
+    const strip = (seg) => seg.replace(/^\d+[-_.]\s*/, "");
+    let segs = parts.map(strip);
+    if (/^(index|readme)$/i.test(segs[segs.length - 1] || "")) segs.pop();
+    const out = [];
+    if (fm.id && !fm.slug) out.push([...segs.slice(0, -1), fm.id]);
+    if (fm.slug) {
+        const slug = fm.slug.replace(/\/+$/, "");
+        if (slug.startsWith("/")) out.push(slug.split("/").filter(Boolean));
+        else out.push([...segs.slice(0, -1), ...slug.split("/").filter(Boolean)]);
+    }
+    out.push(segs);
+    return [...new Set(out.map((s) => normPath(`/${[root, ...s].join("/")}`)))];
+};
+
+/** Resolve a repo file to a published URL, or null if the sitemap does not have it. */
+const resolveDocUrl = (repoPath, fm, sitemap) => {
+    if (!sitemap) return null;
+    for (const c of candidatePaths(repoPath, fm)) if (sitemap.has(c)) return `${DOCS_SITE}${c}`;
+    return null;
+};
+
 let _docsCache = { at: 0, docs: null };
 const loadDocsIndex = async (sources) => {
-    if (_docsCache.docs && Date.now() - _docsCache.at < 3600 * 1000) return _docsCache.docs;
+    if (_docsCache.docs && Date.now() - _docsCache.at < DOCS_TTL_MS) return _docsCache.docs;
     const http = sources.http();
     const { data } = await http.get(`https://api.github.com/repos/${DOCS_REPO}/git/trees/HEAD?recursive=1`, { timeout: 8000 });
     const paths = (data?.tree || []).map((t) => t.path).filter((p) => /^docs(-es)?\/.*\.mdx?$/.test(p)).slice(0, 400);
     const docs = [];
     await Promise.all(
-        paths.map(async (path) => {
+        paths.map(async (repoPath) => {
             try {
-                const { data: text } = await http.get(`https://raw.githubusercontent.com/${DOCS_REPO}/HEAD/${path}`, { timeout: 8000, responseType: "text" });
+                const { data: text } = await http.get(`https://raw.githubusercontent.com/${DOCS_REPO}/HEAD/${repoPath}`, { timeout: 8000, responseType: "text" });
                 const body = String(text);
-                const title = (body.match(/^title:\s*(.+)$/m) || body.match(/^#\s+(.+)$/m) || [null, path])[1].replace(/["']/g, "").trim();
-                const url = path.startsWith("docs/")
-                    ? `https://docs.zelf.world/${path.replace(/\.mdx?$/, "").replace(/\/index$/, "")}`
-                    : `https://github.com/${DOCS_REPO}/blob/HEAD/${path}`;
-                docs.push({ title, url, body });
+                const fm = frontmatter(body);
+                const title = (fm.title || (body.match(/^#\s+(.+)$/m) || [])[1] || repoPath).trim();
+                docs.push({ title, repoPath, fm, lang: repoPath.startsWith("docs-es/") ? "es" : "en", body: body.replace(/^---[\s\S]*?\n---/, "") });
             } catch (_) {
                 /* skip */
             }
@@ -386,21 +463,31 @@ const loadDocsIndex = async (sources) => {
     _docsCache = { at: Date.now(), docs };
     return docs;
 };
-const scoreDocs = (docs, query, k) => {
-    const terms = String(query || "").toLowerCase().split(/\W+/).filter((t) => t.length > 2);
+
+const scoreDocs = (docs, query, k, locale = "en") => {
+    const terms = String(query || "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t.length > 2);
     if (!terms.length) return [];
+    const wantEs = /^es\b/i.test(String(locale || ""));
     return docs
         .map((d) => {
             const lower = d.body.toLowerCase();
             const titleLower = d.title.toLowerCase();
             let score = 0;
-            for (const t of terms) score += (lower.split(t).length - 1) + (titleLower.includes(t) ? 5 : 0);
+            for (const t of terms) score += lower.split(t).length - 1 + (titleLower.includes(t) ? 5 : 0);
             const at = Math.max(0, lower.indexOf(terms[0]) - 80);
-            return { ...d, score, snippet: d.body.slice(at, at + 300).replace(/\s+/g, " ").trim() };
+            return { ...d, score, preferred: (d.lang === "es") === wantEs, snippet: d.body.slice(at, at + 300).replace(/\s+/g, " ").trim() };
         })
-        .filter((d) => d.score > 0)
-        .sort((a, b) => b.score - a.score)
+        .filter((d) => d.score > 0 && d.url)
+        .sort((a, b) => Number(b.preferred) - Number(a.preferred) || b.score - a.score)
         .slice(0, k);
+};
+
+/** search_docs: only results whose URL is in the live sitemap; locale "es" prefers /docs-es/ pages. */
+const searchDocs = async ({ query, k = 3 }, sources, locale) => {
+    const [docs, sitemap] = await Promise.all([loadDocsIndex(sources), loadSitemap(sources)]);
+    if (!sitemap) return { items: [], note: "docs_unavailable" };
+    const withUrls = docs.map((d) => ({ ...d, url: resolveDocUrl(d.repoPath, d.fm, sitemap) }));
+    return scoreDocs(withUrls, query, k, locale).map(({ title, url, snippet }) => ({ title, url, snippet }));
 };
 
 /* ------------------------------------------------------------------ cards (from tool results only) */
@@ -433,13 +520,13 @@ const cardsFor = (name, result) => {
  * Run one tool call for the verified identity.
  * @returns {Promise<{ name, result, cards, ignoredArgs }>} result is already redacted.
  */
-const runTool = async (name, rawArgs, zai, sources = defaultSources) => {
+const runTool = async (name, rawArgs, zai, sources = defaultSources, opts = {}) => {
     if (!TOOL_NAMES.has(name)) return { name, result: { error: "unknown_tool" }, cards: [], ignoredArgs: [] };
     if (!zai?.zelfName) return { name, result: { error: "no_identity" }, cards: [], ignoredArgs: [] };
     const { args, ignoredArgs } = scopeArgs(name, rawArgs);
     let result;
     try {
-        result = await impl[name](args, zai, sources);
+        result = await impl[name](args, zai, sources || defaultSources, opts);
     } catch (_) {
         result = { error: "tool_unavailable" };
     }
@@ -457,5 +544,19 @@ module.exports = {
     MAX_TOOL_CALLS_PER_TURN,
     definitions,
     runTool,
-    _internal: { scopeArgs, normTx, cardsFor, scoreDocs, userAddressFor, defaultSources, resetDocsCache: () => (_docsCache = { at: 0, docs: null }) },
+    _internal: {
+        scopeArgs,
+        normTx,
+        cardsFor,
+        scoreDocs,
+        candidatePaths,
+        resolveDocUrl,
+        loadSitemap,
+        userAddressFor,
+        defaultSources,
+        resetDocsCache: () => {
+            _docsCache = { at: 0, docs: null };
+            _sitemap = { at: 0, paths: null, failedAt: 0 };
+        },
+    },
 };

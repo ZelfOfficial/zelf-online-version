@@ -115,7 +115,7 @@ const runChat = async ({ zai, body, emit, signal, adapter = Adapter, sources, re
                     content = { error: "tool_limit_reached" };
                 } else {
                     toolCallsUsed++;
-                    const res = await Tools.runTool(call.name, call.arguments, zai, sources);
+                    const res = await Tools.runTool(call.name, call.arguments, zai, sources, { locale: body.locale });
                     content = res.result;
                     for (const card of res.cards) if (card.hash) redactor.allow(card.hash);
                     JSON.stringify(content, (k, v) => {
