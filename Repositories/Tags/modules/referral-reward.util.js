@@ -1,5 +1,9 @@
 /** Canonical wallet identity is independent of a reservation's `.hold` suffix. */
-const referralName = (name) => String(name || "").trim().toLowerCase().replace(/\.hold$/, "");
+const referralName = (name) =>
+    String(name || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\.hold$/, "");
 const recordReferralName = (record) => referralName(record.publicData?.tagName || record.publicData?.zelfName || record.name || record.tagName);
 
 // Older receipts omitted the domain for registration. Check both formats before
@@ -36,4 +40,45 @@ const explicitReferralPrice = (record) => {
     return Number.isFinite(value) && value >= 0 ? value : 0;
 };
 
-module.exports = { referralName, rewardFriendKeys, findReferralRecord, groupReferralRecords, explicitReferralPrice };
+/** Referrals that count toward the reward; the rest are kept only as history. */
+const DEFAULT_REFERRAL_REWARD_LIMIT = 10;
+const referralRewardLimit = (value = process.env.REFERRAL_REWARD_LIMIT) => {
+    const n = Number(value);
+    return Number.isInteger(n) && n > 0 ? n : DEFAULT_REFERRAL_REWARD_LIMIT;
+};
+
+const _recordTime = (record) => {
+    const raw = record?.publicData?.registeredAt || record?.date_pinned || record?.created_at || record?.publicData?.createdAt;
+    const t = raw ? Date.parse(String(raw).replace(" ", "T")) : NaN;
+    return Number.isFinite(t) ? t : Number.MAX_SAFE_INTEGER;
+};
+
+/**
+ * Pick which friends count toward the reward: friends already rewarded first, then the earliest
+ * referrals until `limit`. Everything else is history (no reward).
+ * @param {Map<string, Object>} friends name -> referral record
+ * @param {Set<string>} rewarded names already rewarded/being rewarded
+ * @param {number} limit
+ * @returns {Set<string>}
+ */
+const countedReferralFriends = (friends, rewarded, limit) => {
+    const counted = new Set();
+    for (const name of friends.keys()) if (rewarded.has(name) && counted.size < limit) counted.add(name);
+    const rest = [...friends.entries()].filter(([name]) => !counted.has(name)).sort((a, b) => _recordTime(a[1]) - _recordTime(b[1]));
+    for (const [name] of rest) {
+        if (counted.size >= limit) break;
+        counted.add(name);
+    }
+    return counted;
+};
+
+module.exports = {
+    DEFAULT_REFERRAL_REWARD_LIMIT,
+    referralRewardLimit,
+    countedReferralFriends,
+    referralName,
+    rewardFriendKeys,
+    findReferralRecord,
+    groupReferralRecords,
+    explicitReferralPrice,
+};
