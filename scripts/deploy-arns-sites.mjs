@@ -18,6 +18,7 @@ const config = require("../Core/config");
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const execute = process.argv.includes("--execute");
+const only = process.argv.find((arg) => arg.startsWith("--only="))?.slice("--only=".length);
 
 const bundles = [
 	{
@@ -115,7 +116,10 @@ const txUrl = (id) => `https://arweave.net/${id}`;
 	assertGatewayEnv();
 	console.log(execute ? "EXECUTE — uploading ArNS site bundles" : "DRY RUN — pass --execute to upload");
 
-	for (const bundle of bundles) {
+	const selected = only ? bundles.filter((bundle) => bundle.name === only) : bundles;
+	if (!selected.length) throw new Error(`Unknown bundle "${only}"`);
+
+	for (const bundle of selected) {
 		const dir = path.join(root, bundle.dir);
 		for (const fileName of [bundle.css, bundle.js, bundle.html]) {
 			const fullPath = path.join(dir, fileName);
@@ -133,7 +137,7 @@ const txUrl = (id) => `https://arweave.net/${id}`;
 
 	const envUpdates = {};
 
-	for (const bundle of bundles) {
+	for (const bundle of selected) {
 		const dir = path.join(root, bundle.dir);
 		const cssId = await uploadFile(client, path.join(dir, bundle.css), contentTypes.css);
 		const jsId = await uploadFile(client, path.join(dir, bundle.js), contentTypes.js);

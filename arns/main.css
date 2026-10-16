@@ -139,6 +139,10 @@ body {
 	}
 }
 
+.layout.is-hidden {
+	display: none;
+}
+
 .layout {
 	display: grid;
 	grid-template-columns: 1fr;

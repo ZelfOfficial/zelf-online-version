@@ -15,10 +15,10 @@
 		const apiUrl = "https://v4.zelf.world";
 
 		let zelfNameObject = {};
-		// v4 Zelf IDs first (IPFS + Arweave), v3 tags as fallback.
+		// v4 Zelf IDs first (IPFS + Arweave), then older tags.
 		const searchEndpoints = [
 			{ path: "/api/zelf-ids/search", environment: "all" },
-			{ path: "/api/tags/search", environment: "arweave" },
+			{ path: "/api/tags/search", environment: "all" },
 		];
 
 		// Constants
@@ -74,27 +74,26 @@
 			const copyElement = document.getElementById("zelf-name-copy");
 			if (nameElement) nameElement.textContent = text;
 			if (copyElement) copyElement.textContent = text;
+			if (text) document.title = text;
 		}
 
 		function showNotFound(name) {
 			setNameLabels(name);
 			const lede = document.querySelector(".lede");
-			if (lede) lede.textContent = "This Zelf ID was not found yet. If it was just created, try again in a few minutes.";
-			document.body.classList.add("zelf-not-found");
+			if (lede) lede.textContent = "This Zelf ID isn't registered yet.";
+			document.querySelector(".layout")?.classList.add("is-hidden");
 		}
 
 		// Show the name from the hostname right away; never fall back to another person's name.
 		setNameLabels(hostZelfName);
 
-		// Make an API call to fetch the image URL
 		async function fetchZelfData(tagName, domain) {
+			const name = `${tagName}.${domain || "zelf"}`;
+			setNameLabels(name);
 			try {
-				// show loading badge while we fetch decentralized data
 				setLoading(true);
-				// JWT token from localStorage
 				await getSessionToken();
 
-				// Set up headers
 				const headers = new Headers();
 				headers.append("Authorization", `Bearer ${localStorage.getItem("sessionToken")}`);
 				headers.append("Content-Type", "application/json");
@@ -119,38 +118,21 @@
 					}
 				}
 
-				if (!data) {
-					showNotFound(`${tagName}.${domain || "zelf"}`);
+				if (!data?.tagObject) {
+					showNotFound(name);
 					return;
 				}
 
-
 				zelfNameObject = data.tagObject;
+				setNameLabels(data.tagName || name);
+				document.querySelector(".layout")?.classList.remove("is-hidden");
 
-				// Update the image URL in the HTML
 				const imageElement = document.getElementById("zelfproof");
-				const zelfNameElement = document.getElementById("zelfName");
-				const zelfNameCopyElement = document.getElementById("zelf-name-copy");
-
-				if (!imageElement || !zelfNameElement || !zelfNameCopyElement) {
-					throw new Error("Required DOM elements not found");
-				}
-
-				// Get the tagName from the response or construct it from the request
-				const displayTagName = data.tagName || `${tagName}.${domain || "zelf"}`;
-
-				// Set the zelfName in the HTML
-				zelfNameElement.innerHTML = displayTagName;
-				zelfNameCopyElement.innerHTML = displayTagName;
-
-				if (zelfNameObject.url) {
-					imageElement.src = zelfNameObject.url;
-					generateAddressCards();
-				} else {
-					console.error("Image URL not found in the response");
-				}
+				if (zelfNameObject.url && imageElement) imageElement.src = zelfNameObject.url;
+				generateAddressCards();
 			} catch (error) {
 				console.error("Error fetching Zelf data:", error);
+				showNotFound(name);
 			} finally {
 				setLoading(false);
 			}
