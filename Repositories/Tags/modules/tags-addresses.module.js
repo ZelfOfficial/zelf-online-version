@@ -88,7 +88,7 @@ const EXTRA_PARAMS_ALLOWED_KEYS = [
     "paymentMethod",
 ];
 
-const EXTRA_PARAMS_SECURITY_TYPES = new Set(["pin", "password", "securePassword"]);
+const EXTRA_PARAMS_SECURITY_TYPES = new Set(["pin", "password"]);
 
 /** Drop these first when the allow-listed JSON is still over 250 chars. */
 const EXTRA_PARAMS_OPTIONAL_KEYS = ["eventID", "eventPrice", "renewedAt", "price", "duration"];

@@ -52,7 +52,8 @@ const schemas = {
         domain: string().required(),
         faceBase64: string().required(),
         password: string().allow("", null),
-        securityType: stringEnum(["pin", "password", "securePassword", "withoutPassword"]).optional(),
+        // Accepted for older clients but ignored: the server derives pin/password from the decrypted password.
+        securityType: string().allow("", null).optional(),
         os: stringEnum(["DESKTOP", "ANDROID", "IOS"]).required(),
         captchaToken: stringOptionalEmptyAsNull().optional(),
     },

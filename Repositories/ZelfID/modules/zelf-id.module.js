@@ -5,7 +5,7 @@ const { assertTagAvailable } = require("../../Tags/modules/tag-availability");
  */
 const moment = require("moment");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
-const { NO_PASSWORD_PLACEHOLDER, effectivePassword } = require("./zelf-id-password.module");
+const { NO_PASSWORD_PLACEHOLDER, effectivePassword, resolveSecurityType, decryptWithPasswordFallback } = require("./zelf-id-password.module");
 const TagsSearchModule = require("../../Tags/modules/tags-search.module");
 const { generateMnemonic } = require("../../Wallet/modules/helpers");
 const { createEthWallet } = require("../../Wallet/modules/eth");
@@ -122,17 +122,11 @@ const leaseTag = async (params, authUser) => {
 
     if (!face) throw new Error("409:face_not_found");
 
-    // Face-only clients send the placeholder; treat it as "no password" (backward compatible).
-    if (password === NO_PASSWORD_PLACEHOLDER) securityType = "withoutPassword";
+    // Derived from the decrypted password only (client securityType is ignored, incl. legacy "securePassword").
+    // No password (or the face-only placeholder) means a face-only proof.
+    securityType = resolveSecurityType(password);
 
-    if (!password && securityType !== "withoutPassword") throw new Error("409:password_not_found");
-
-    if (password && !securityType) {
-        securityType = /^\d{6}$/.test(password) ? "pin" : "password";
-    }
-
-    const proofSecurityType =
-        securityType === "pin" ? "pin" : securityType === "password" || securityType === "securePassword" ? "password" : "";
+    const proofSecurityType = securityType === "withoutPassword" ? "" : securityType;
 
     const { eth, btc, solana, sui, stellar, polkadot, kusama, ton, aptos, zkProof, mnemonic, arweave } = await _createWalletsFromPhrase({
         ...params,
@@ -306,23 +300,20 @@ const decryptTag = async (params, authUser) => {
 
     const { face, password: rawPassword } = await _decryptParams(params, authUser);
 
-    // Face-only proofs must be decrypted without a password; clients may still send the placeholder.
-    const password = effectivePassword({
-        password: rawPassword,
-        securityType: params.securityType,
-        hasPassword: tagObject.publicData?.hasPassword,
-    });
-
+    // Face-only proofs are decrypted without a password (placeholder accepted); a stale hasPassword never drops a needed password.
     const decryptPayload = {
         addServerPassword: Boolean(params.addServerPassword),
         faceBase64: face,
-        password,
         zelfProof: tagObject?.zelfProof,
         hasPassword: tagObject.publicData.hasPassword,
     };
 
     let needsLegacyUpgrade = resolveEncryptVersion(tagObject.publicData) !== 4;
-    const decryptedZelfProof = await decrypt(withV4(decryptPayload));
+    const { result: decryptedZelfProof, password } = await decryptWithPasswordFallback((args) => decrypt(withV4(args)), decryptPayload, {
+        password: rawPassword,
+        hasPassword: tagObject.publicData?.hasPassword,
+    });
+    decryptPayload.password = password;
 
     if (decryptedZelfProof.error) {
         throwMappedZelfProofError(decryptedZelfProof.error);
@@ -748,25 +739,7 @@ const _createWalletsFromPhrase = async (params) => {
     };
 };
 
-const _decryptParams = async (params, authUser) => {
-    if (params.removePGP) {
-        return {
-            password: params.password,
-            mnemonic: params.mnemonic,
-            face: params.faceBase64,
-        };
-    }
-
-    const password = params.password ? await SessionModule.sessionDecrypt(params.password, authUser) : null;
-    const mnemonic = params.mnemonic ? await SessionModule.sessionDecrypt(params.mnemonic, authUser) : null;
-    const face = params.faceBase64 ? await SessionModule.sessionDecrypt(params.faceBase64, authUser) : null;
-
-    return {
-        password,
-        mnemonic,
-        face,
-    };
-};
+const _decryptParams = (params, authUser) => ZelfIdPartsModule.decryptParams(params, authUser);
 
 /**
  * Decrypt the stored proof on v4 then unpin IPFS.

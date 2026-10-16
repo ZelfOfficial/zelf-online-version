@@ -11,9 +11,9 @@ const {
 } = require("../../Repositories/ZelfProof/modules/zelf-proof.module");
 
 describe("Tags decrypt #50 — effectivePassword reuse + distinct statuses", () => {
-    it("strips password for face-only / placeholder / withoutPassword (same rules Tags now applies)", () => {
+    it("strips placeholder / face-only; securityType never changes the password", () => {
         expect(effectivePassword({ password: NO_PASSWORD_PLACEHOLDER })).toBeNull();
-        expect(effectivePassword({ password: "x", securityType: "withoutPassword" })).toBeNull();
+        expect(effectivePassword({ password: "x", securityType: "withoutPassword" })).toBe("x");
         expect(effectivePassword({ password: "x", hasPassword: "false" })).toBeNull();
         expect(effectivePassword({ password: "x", hasPassword: false })).toBeNull();
         expect(effectivePassword({ password: "secret", hasPassword: "true", securityType: "securePassword" })).toBe(

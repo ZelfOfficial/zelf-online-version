@@ -31,7 +31,7 @@ const leaseRecovery = async (payload, authUser) => {
 	const { face, password: rawPassword } = await TagsPartsModule.decryptParams(payload, authUser);
 
 	// Face-only: no password (clients send the placeholder), same as tags/decrypt and zelf-ids recovery.
-	const password = effectivePassword({ password: rawPassword, securityType: payload.securityType });
+	const password = effectivePassword({ password: rawPassword });
 
 	// Same SenseCrypt stack as tags/decrypt: v4 opens tags/lease and zelf-ids/lease proofs alike
 	// (the legacy stack failed v4 proofs with ERR_PARSE_FAILED).

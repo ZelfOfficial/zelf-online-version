@@ -34,7 +34,7 @@ const leaseRecovery = async (payload, authUser) => {
     const { face, password: rawPassword } = await ZelfIdPartsModule.decryptParams(payload, authUser);
 
     // Face-only: no password (placeholder accepted for older clients).
-    const password = effectivePassword({ password: rawPassword, securityType: payload.securityType });
+    const password = effectivePassword({ password: rawPassword });
 
     const decryptedZelfProof = await decrypt(
         withV4({
@@ -102,7 +102,7 @@ const leaseRecovery = async (payload, authUser) => {
 
     tagObject.zelfProof = skipZelfProof ? zelfProof : tagObject.zelfProof;
 
-    const securityType = resolveSecurityType(password, payload.securityType);
+    const securityType = resolveSecurityType(password);
 
     await ZelfIdModule.persistZelfIdLease(tagObject, referralTagObject, domainConfig, securityType, authUser);
 
