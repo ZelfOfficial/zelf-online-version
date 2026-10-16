@@ -1,3 +1,4 @@
+const ZaiIdentity = require("../../ZAI/modules/zai-identity.module");
 const Module = require("../modules/zelf-id.module");
 const RevenueCatModule = require("../../Tags/modules/revenue-cat.module");
 const RewardRoutesController = require("../../Tags/controllers/reward-routes.controller");
@@ -269,6 +270,8 @@ const decryptTag = async (ctx) => {
         };
 
         const data = await Module.decryptTag(requestData, ctx.state.user);
+
+        ZaiIdentity.attachIdentityToken(data, requestData.domain);
 
         ctx.body = { data };
     } catch (error) {
