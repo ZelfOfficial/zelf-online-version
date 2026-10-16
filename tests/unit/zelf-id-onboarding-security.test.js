@@ -13,17 +13,18 @@ describe("zelf-id password normalization (backward compatible placeholder)", () 
         expect(isNoPassword("secret")).toBe(false);
     });
 
-    it("drops the password for face-only proofs, placeholder, or withoutPassword", () => {
+    it("drops the password for face-only proofs or placeholder; ignores securityType", () => {
         expect(effectivePassword({ password: NO_PASSWORD_PLACEHOLDER })).toBeNull();
-        expect(effectivePassword({ password: "x", securityType: "withoutPassword" })).toBeNull();
+        expect(effectivePassword({ password: "x", securityType: "withoutPassword" })).toBe("x");
         expect(effectivePassword({ password: "x", hasPassword: "false" })).toBeNull();
         expect(effectivePassword({ password: "x", hasPassword: false })).toBeNull();
         expect(effectivePassword({ password: "x", hasPassword: "true" })).toBe("x");
         expect(effectivePassword({ password: "123456", securityType: "pin" })).toBe("123456");
     });
 
-    it("honours explicit securityType and infers otherwise", () => {
-        expect(resolveSecurityType("ab12cd", "pin")).toBe("pin");
+    it("derives pin/password from the plaintext password only", () => {
+        expect(resolveSecurityType("ab12cd", "pin")).toBe("password");
+        expect(resolveSecurityType("ab12cd", "securePassword")).toBe("password");
         expect(resolveSecurityType("123456")).toBe("pin");
         expect(resolveSecurityType("longer-pass")).toBe("password");
         expect(resolveSecurityType(NO_PASSWORD_PLACEHOLDER, "pin")).toBe("withoutPassword");

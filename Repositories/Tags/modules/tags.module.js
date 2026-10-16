@@ -12,7 +12,7 @@ const { createPolkadotWallet, createKusamaWallet } = require("../../Wallet/modul
 const { createTonWallet } = require("../../Wallet/modules/ton");
 const { createAptosWallet } = require("../../Wallet/modules/aptos");
 const { decrypt, preview, previewWithLegacyFallback, applyPreviewHasPassword, _formattingError, ZELFPROOF_CLIENT_ERROR_STATUS } = require("../../ZelfProof/modules/zelf-proof.module");
-const { effectivePassword } = require("../../ZelfID/modules/zelf-id-password.module");
+const { NO_PASSWORD_PLACEHOLDER, effectivePassword, resolveSecurityType, decryptWithPasswordFallback } = require("../../ZelfID/modules/zelf-id-password.module");
 const OfflineProofModule = require("../../../Core/offline-proof");
 const config = require("../../../Core/config");
 const { confirmPayUniqueAddress } = require("../../purchase-zelf/modules/balance-checker.module");
@@ -68,11 +68,9 @@ const leaseTag = async (params, authUser) => {
 
     if (!face) throw new Error("409:face_not_found");
 
-    if (!password && securityType !== "withoutPassword") throw new Error("409:password_not_found");
-
-    if (password && !securityType) {
-        securityType = /^\d{6}$/.test(password) ? "pin" : "password";
-    }
+    // Derived from the decrypted password only (client securityType is ignored, incl. legacy "securePassword").
+    // No password (or the face-only placeholder) means a face-only proof.
+    securityType = resolveSecurityType(password);
 
     const { eth, btc, solana, sui, stellar, polkadot, kusama, ton, aptos, zkProof, mnemonic, arweave } = await _createWalletsFromPhrase({
         ...params,
@@ -243,21 +241,18 @@ const decryptTag = async (params, authUser) => {
 
     const { face, password: rawPassword } = await _decryptParams(params, authUser);
 
-    // Face-only proofs must be decrypted without a password; clients may still send the placeholder.
-    const password = effectivePassword({
-        password: rawPassword,
-        securityType: params.securityType,
-        hasPassword: tagObject.publicData?.hasPassword,
-    });
-
-    const decryptedZelfProof = await decrypt({
-        addServerPassword: Boolean(params.addServerPassword),
-        faceBase64: face,
-        password,
-        zelfProof: tagObject?.zelfProof,
-        hasPassword: tagObject.publicData.hasPassword,
-        stack: "v4",
-    });
+    // Face-only proofs are decrypted without a password (placeholder accepted); a stale hasPassword never drops a needed password.
+    const { result: decryptedZelfProof, password } = await decryptWithPasswordFallback(
+        decrypt,
+        {
+            addServerPassword: Boolean(params.addServerPassword),
+            faceBase64: face,
+            zelfProof: tagObject?.zelfProof,
+            hasPassword: tagObject.publicData.hasPassword,
+            stack: "v4",
+        },
+        { password: rawPassword, hasPassword: tagObject.publicData?.hasPassword }
+    );
 
     if (decryptedZelfProof.error) {
         throwMappedZelfProofError(decryptedZelfProof.error);
@@ -558,26 +553,7 @@ const _createWalletsFromPhrase = async (params) => {
  * @param {Object} params
  * @param {Object} authUser
  */
-const _decryptParams = async (params, authUser) => {
-    if (params.removePGP) {
-        return {
-            password: params.password,
-            mnemonic: params.mnemonic,
-            face: params.faceBase64,
-        };
-    }
-
-    // Use session decryption for all parameters consistently
-    const password = params.password ? await SessionModule.sessionDecrypt(params.password, authUser) : null;
-    const mnemonic = params.mnemonic ? await SessionModule.sessionDecrypt(params.mnemonic, authUser) : null;
-    const face = params.faceBase64 ? await SessionModule.sessionDecrypt(params.faceBase64, authUser) : null;
-
-    return {
-        password,
-        mnemonic,
-        face,
-    };
-};
+const _decryptParams = (params, authUser) => TagsPartsModule.decryptParams(params, authUser);
 
 const deleteTag = async (params, authUser) => {
     const { tagName, domain, faceBase64, password } = params;

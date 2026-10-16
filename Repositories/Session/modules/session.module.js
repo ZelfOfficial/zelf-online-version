@@ -217,6 +217,21 @@ const sessionDecrypt = async (content, authUser) => {
 	}
 };
 
+const PGP_MESSAGE_HEADER = "-----BEGIN PGP MESSAGE-----";
+
+/** True when the value is an armored PGP message (what the extension sends). */
+const isPGPMessage = (value) => typeof value === "string" && value.trimStart().startsWith(PGP_MESSAGE_HEADER);
+
+/**
+ * Single-field rule for client secrets: PGP-decrypt with the session key when armored, otherwise plaintext as sent.
+ * @param {string|null|undefined} value
+ * @param {Object} authUser
+ */
+const decryptIfPGP = async (value, authUser) => {
+	if (value === undefined || value === null || value === "") return null;
+	return isPGPMessage(value) ? module.exports.sessionDecrypt(value, authUser) : value;
+};
+
 const walletEncrypt = async (content, walletScopeKey, password = "", legacyIdentifier = null) => {
 	let pgpRecord = await PGPKeyModule.findStorageKey({ scopeKey: walletScopeKey, legacyIdentifier });
 	const shouldRotateStorageKey = Boolean(password);
@@ -308,6 +323,8 @@ module.exports = {
 	encryptContent,
 	extractPublicKey,
 	sessionDecrypt,
+	decryptIfPGP,
+	isPGPMessage,
 	walletEncrypt,
 	walletDecrypt,
 	deleteSession,

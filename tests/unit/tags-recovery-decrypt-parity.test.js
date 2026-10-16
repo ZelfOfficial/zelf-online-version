@@ -40,8 +40,9 @@ describe("tags/lease-recovery decrypt parity", () => {
         expect(args.stack).toBe("v4");
     });
 
-    it("drops any password when securityType is withoutPassword", async () => {
-        expect((await run("whatever", "withoutPassword")).password).toBeNull();
+    it("ignores securityType (incl. legacy securePassword): a real password is always used", async () => {
+        expect((await run("whatever", "withoutPassword")).password).toBe("whatever");
+        expect((await run("whatever", "securePassword")).password).toBe("whatever");
     });
 
     it("keeps a real password", async () => {

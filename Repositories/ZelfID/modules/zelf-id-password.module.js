@@ -6,34 +6,65 @@
  */
 const NO_PASSWORD_PLACEHOLDER = "NO_PASSWORD_PLACEHOLDER";
 
-const SECURITY_TYPES = ["pin", "password", "securePassword", "withoutPassword"];
 
 /** True when the value means "no password" (empty or the client placeholder). */
 const isNoPassword = (password) => !password || password === NO_PASSWORD_PLACEHOLDER;
 
 /**
  * Password to hand to ZelfProof encrypt/decrypt, or null for face-only.
- * @param {{ password?: string, securityType?: string, hasPassword?: string|boolean }} params
+ * @param {{ password?: string, hasPassword?: string|boolean }} params
  * @returns {string|null}
  */
-const effectivePassword = ({ password, securityType, hasPassword } = {}) => {
+// securityType is accepted from clients for compatibility but never changes how a password is used.
+const effectivePassword = ({ password, hasPassword } = {}) => {
     if (isNoPassword(password)) return null;
-    if (securityType === "withoutPassword") return null;
     if (String(hasPassword) === "false") return null;
     return password;
 };
 
 /**
- * Security type to record for a new proof. Honours an explicit client value; otherwise infers
- * (6 digits → pin, any other password → password, none/placeholder → withoutPassword).
- * @param {string|null|undefined} password raw password from the client
- * @param {string|undefined} securityType client-provided security type
- * @returns {"pin"|"password"|"securePassword"|"withoutPassword"}
+ * Security type to record for a proof, always derived from the decrypted (plaintext) password:
+ * none/placeholder -> withoutPassword, 6 digits -> pin, anything else -> password.
+ * Any client-sent securityType (including the retired "securePassword" from extension 2.1.43) is ignored.
+ * @param {string|null|undefined} password plaintext password (after PGP decryption)
+ * @returns {"pin"|"password"|"withoutPassword"}
  */
-const resolveSecurityType = (password, securityType) => {
+const resolveSecurityType = (password) => {
     if (isNoPassword(password)) return "withoutPassword";
-    if (SECURITY_TYPES.includes(securityType)) return securityType;
     return /^\d{6}$/.test(password) ? "pin" : "password";
 };
 
-module.exports = { NO_PASSWORD_PLACEHOLDER, isNoPassword, effectivePassword, resolveSecurityType };
+const isPasswordRequiredError = (error) => {
+    const code = error?.code || "";
+    const message = String(error?.message || "").toUpperCase();
+    return code === "ERR_PASSWORD_REQUIRED" || message.includes("PASSWORD IS REQUIRED") || message.includes("PASSWORD_REQUIRED");
+};
+
+/**
+ * Decrypt with the password the proof's publicData implies, retrying with the client's real password when the proof
+ * says one is required. publicData.hasPassword can be stale ("false" on proofs that do need a password, e.g. qa.zelf),
+ * so it may only pick the first attempt, never drop a password the proof needs.
+ * @param {(args: Object) => Promise<Object>} decryptFn
+ * @param {Object} args decrypt arguments without password
+ * @param {{ password?: string, hasPassword?: string|boolean }} passwordInput
+ * @returns {Promise<{ result: Object, password: string|null }>}
+ */
+const decryptWithPasswordFallback = async (decryptFn, args, { password, hasPassword } = {}) => {
+    const first = effectivePassword({ password, hasPassword });
+    const real = effectivePassword({ password });
+    const canRetry = !first && Boolean(real);
+
+    let result;
+    try {
+        result = await decryptFn({ ...args, password: first });
+    } catch (error) {
+        if (canRetry && isPasswordRequiredError(error)) return { result: await decryptFn({ ...args, password: real }), password: real };
+        throw error;
+    }
+    if (canRetry && result?.error && isPasswordRequiredError(result.error)) {
+        return { result: await decryptFn({ ...args, password: real }), password: real };
+    }
+    return { result, password: first };
+};
+
+module.exports = { NO_PASSWORD_PLACEHOLDER, isNoPassword, effectivePassword, resolveSecurityType, isPasswordRequiredError, decryptWithPasswordFallback };
