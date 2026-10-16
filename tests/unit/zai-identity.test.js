@@ -13,7 +13,7 @@ jest.mock("../../Repositories/ZAI/models/zai-revoked-token.model", () => {
 const jwt = require("jsonwebtoken");
 const RevokedToken = require("../../Repositories/ZAI/models/zai-revoked-token.model");
 const Zai = require("../../Repositories/ZAI/modules/zai-identity.module");
-const { requireZaiToken } = require("../../Repositories/ZAI/middlewares/zai-auth.middleware");
+const { zaiTokenValidation: requireZaiToken } = require("../../Repositories/ZAI/middlewares/zai.middleware");
 
 const record = () => ({
     id: "bafyRecord",
@@ -117,5 +117,34 @@ describe("zAI identity tokens", () => {
         const identityToken = Zai.issueIdentityToken(record(), "zelf");
         expect(identityToken).toBeTruthy();
         await expect(Zai.exchangeForZaiToken(identityToken)).rejects.toMatchObject({ status: 503, code: "ZAI_DISABLED" });
+    });
+});
+
+describe("zAI controller/middleware wiring", () => {
+    const Controller = require("../../Repositories/ZAI/controllers/zai.controller");
+    const Middleware = require("../../Repositories/ZAI/middlewares/zai.middleware");
+    beforeEach(() => {
+        process.env.IDENTITY_JWT_SECRET = "identity-test-secret";
+        process.env.ZAI_JWT_SECRET = "zai-test-secret";
+    });
+
+    test("identityTokenValidation: missing → 401 ZAI_TOKEN_MISSING, Bearer is normalised into body", async () => {
+        const missing = { headers: {}, request: { body: {} }, state: {} };
+        const next = jest.fn();
+        await Middleware.identityTokenValidation(missing, next);
+        expect(next).not.toHaveBeenCalled();
+        expect([missing.status, missing.body.code]).toEqual([401, "ZAI_TOKEN_MISSING"]);
+
+        const viaHeader = { headers: { authorization: "Bearer abc" }, request: { body: {} }, state: {} };
+        await Middleware.identityTokenValidation(viaHeader, next);
+        expect(next).toHaveBeenCalled();
+        expect(viaHeader.request.body.identityToken).toBe("abc");
+    });
+
+    test("controller maps module errors to { message, code } with status", async () => {
+        const ctx = { request: { body: { identityToken: jwt.sign({ tagName: "x" }, "session-secret") } }, state: {} };
+        await Controller.createSession(ctx);
+        expect(ctx.status).toBe(403);
+        expect(ctx.body).toEqual({ message: "ZAI_SCOPE_DENIED", code: "ZAI_SCOPE_DENIED" });
     });
 });

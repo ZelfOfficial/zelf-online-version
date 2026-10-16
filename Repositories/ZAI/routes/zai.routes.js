@@ -1,37 +1,19 @@
-/**
- * zAI auth routes. Mounted on the unprotected router: they carry their own token checks
- * (identity / zAI JWTs use their own secrets, not the session JWT secret).
- */
-const ZaiIdentity = require("../modules/zai-identity.module");
-const { bearer, sendError, requireZaiToken } = require("../middlewares/zai-auth.middleware");
-
 const config = require("../../../Core/config");
 
-const PATH = config.basePath("/zai");
+const Controller = require("../controllers/zai.controller");
 
-const identityFrom = (ctx) => ctx.request.body?.identityToken || bearer(ctx);
+const Middleware = require("../middlewares/zai.middleware");
 
+const base = "/zai";
+
+// Registered on the unprotected router (Routes/unprotected-repositories.js): identity/zAI tokens are
+// signed with their own secrets and checked by Middleware, not by the session JWT guard.
 module.exports = (server) => {
-    // Exchange a valid identity token (from decrypt) for a short-lived zAI token.
-    server.post(`${PATH}/session`, async (ctx) => {
-        try {
-            ctx.body = { data: await ZaiIdentity.exchangeForZaiToken(identityFrom(ctx)) };
-        } catch (error) {
-            sendError(ctx, error);
-        }
-    });
+    const PATH = config.basePath(base);
 
-    // Lock / logout: revoke the identity token and every zAI token derived from it.
-    server.post(`${PATH}/revoke`, async (ctx) => {
-        try {
-            ctx.body = { data: await ZaiIdentity.revokeIdentityToken(identityFrom(ctx)) };
-        } catch (error) {
-            sendError(ctx, error);
-        }
-    });
+    server.post(`${PATH}/session`, Middleware.identityTokenValidation, Controller.createSession);
 
-    // Who am I (zAI token only) — smoke test for the /api/zai/* guard.
-    server.get(`${PATH}/me`, requireZaiToken, async (ctx) => {
-        ctx.body = { data: { zelfName: ctx.state.zai.zelfName, zid: ctx.state.zai.zid, addresses: ctx.state.zai.addresses } };
-    });
+    server.post(`${PATH}/revoke`, Middleware.identityTokenValidation, Controller.revokeIdentity);
+
+    server.get(`${PATH}/me`, Middleware.zaiTokenValidation, Controller.getMe);
 };

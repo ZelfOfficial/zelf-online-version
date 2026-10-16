@@ -27,10 +27,13 @@ const zaiSecret = () => process.env.ZAI_JWT_SECRET || null;
 const isIdentityEnabled = () => !!identitySecret();
 const isZaiEnabled = () => !!identitySecret() && !!zaiSecret();
 
+/** Errors in the "NNN:CODE" + clientCode format that Core/http-handler errorHandler maps to { status, message, code }. */
 const zaiError = (status, code) => {
-    const error = new Error(code);
+    const error = new Error(`${status}:${code}`);
     error.status = status;
     error.code = code;
+    error.clientCode = code;
+    error.clientMessage = code;
     return error;
 };
 
@@ -155,7 +158,22 @@ const revokeIdentityToken = async (identityToken) => {
     return { revoked: true, jti: claims.jti };
 };
 
+/** Public view of the verified zAI identity (for GET /api/zai/me). */
+const getZaiIdentity = (zai) => ({ zelfName: zai.zelfName, zid: zai.zid, addresses: zai.addresses });
+
+/** Shape stored in ctx.state.zai by the guard middleware. */
+const toZaiState = (claims) => ({
+    zelfName: claims.sub,
+    zid: claims.zid,
+    addresses: claims.addr || {},
+    jti: claims.jti,
+    parentJti: claims.parent_jti,
+});
+
 module.exports = {
+    zaiError,
+    getZaiIdentity,
+    toZaiState,
     IDENTITY_TTL_SECONDS,
     ZAI_TTL_SECONDS,
     isIdentityEnabled,
