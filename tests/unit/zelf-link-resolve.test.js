@@ -32,3 +32,31 @@ describe("Zelf Link gateways", () => {
 		expect(parseZelfName("../x")).toBeNull();
 	});
 });
+
+describe("zelf-link route", () => {
+	let handler;
+	require("../../Repositories/ZelfLink/routes/zelf-link.routes")({ get: (_p, h) => (handler = h) });
+	const ctxFor = (query = {}) => ({ params: { zelfName: "x.zelf" }, query, set: jest.fn(), redirect: jest.fn() });
+	afterEach(() => jest.restoreAllMocks());
+
+	test("not found: 404 JSON, HTML page, no redirect", async () => {
+		jest.spyOn(gw, "resolveZelfLink").mockResolvedValue({ url: "https://x_zelf.ar.io", urls: [], resolved: false });
+		const json = ctxFor({ format: "json" });
+		await handler(json);
+		expect(json.status).toBe(404);
+		expect(json.body.error).toBe("zelf_link_not_found");
+		const html = ctxFor();
+		await handler(html);
+		expect(html.status).toBe(404);
+		expect(html.type).toBe("html");
+		expect(html.body).toContain("x.zelf");
+		expect(html.redirect).not.toHaveBeenCalled();
+	});
+
+	test("found: redirects", async () => {
+		jest.spyOn(gw, "resolveZelfLink").mockResolvedValue({ url: "https://x_zelf.ar.io", urls: [], resolved: true });
+		const ctx = ctxFor();
+		await handler(ctx);
+		expect(ctx.redirect).toHaveBeenCalledWith("https://x_zelf.ar.io");
+	});
+});
