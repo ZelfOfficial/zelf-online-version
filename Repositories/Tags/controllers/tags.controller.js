@@ -1,3 +1,4 @@
+const ZaiIdentity = require("../../ZAI/modules/zai-identity.module");
 const Module = require("../modules/tags.module");
 const RewardRoutesController = require("./reward-routes.controller");
 const { updateOldTagObject } = require("../modules/my-tags.module");
@@ -314,6 +315,8 @@ const decryptTag = async (ctx) => {
         };
 
         const data = await Module.decryptTag(requestData, ctx.state.user);
+
+        ZaiIdentity.attachIdentityToken(data, requestData.domain);
 
         ctx.body = { data };
     } catch (error) {
