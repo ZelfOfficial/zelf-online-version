@@ -15,5 +15,7 @@ module.exports = (server) => {
 
     server.post(`${PATH}/revoke`, Middleware.identityTokenValidation, Controller.revokeIdentity);
 
+    server.post(`${PATH}/chat`, Middleware.zaiTokenValidation, Middleware.chatValidation, Controller.chat);
+
     server.get(`${PATH}/me`, Middleware.zaiTokenValidation, Controller.getMe);
 };

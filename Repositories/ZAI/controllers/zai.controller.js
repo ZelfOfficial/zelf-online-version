@@ -1,4 +1,6 @@
+const { PassThrough } = require("stream");
 const Module = require("../modules/zai-identity.module");
+const ChatModule = require("../modules/zai-chat.module");
 const { errorHandler } = require("../../../Core/http-handler");
 
 /**
@@ -55,7 +57,48 @@ const getMe = async (ctx) => {
     }
 };
 
+const STREAM_TIMEOUT_MS = 90 * 1000;
+const PING_MS = 15 * 1000;
+
+/**
+ * zAI chat turn, streamed as SSE (meta, delta, card, done, error)
+ * @param {Object} ctx - Koa context
+ */
+const chat = async (ctx) => {
+    try {
+        const stream = new PassThrough();
+        const controller = new AbortController();
+        const write = (event, data) => {
+            if (!stream.writableEnded) stream.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        };
+
+        ctx.req.socket?.setTimeout?.(0);
+        ctx.set({ "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });
+        ctx.status = 200;
+        ctx.body = stream;
+
+        const ping = setInterval(() => !stream.writableEnded && stream.write(": ping\n\n"), PING_MS);
+        const timeout = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
+        ctx.req.on("close", () => controller.abort());
+
+        ChatModule.runChat({ zai: ctx.state.zai, body: ctx.request.body, emit: write, signal: controller.signal })
+            .catch(() => write("error", { code: "ZAI_UPSTREAM_ERROR", message: "zAI is unavailable right now." }))
+            .finally(() => {
+                clearInterval(ping);
+                clearTimeout(timeout);
+                stream.end();
+            });
+    } catch (error) {
+        const _exception = errorHandler(error, ctx);
+
+        ctx.status = _exception.status;
+
+        ctx.body = { message: _exception.message, code: _exception.code };
+    }
+};
+
 module.exports = {
+    chat,
     createSession,
     revokeIdentity,
     getMe,
