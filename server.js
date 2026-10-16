@@ -14,6 +14,7 @@ app.proxy = true; // Trust the proxy's X-Forwarded-For header
 app.use(
     koaBody({
         parsedMethods: ['POST', 'PUT', 'PATCH', 'DELETE'],
+        includeUnparsed: true, // raw body for HMAC checks (zAI callback)
         multipart: true,
         formLimit: '6mb',
         jsonLimit: '10mb',

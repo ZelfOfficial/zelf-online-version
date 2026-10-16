@@ -64,3 +64,4 @@ scripts/sensecrypt-refresh-repro/
 
 # Offline-scan QR samples (generated locally, not for the repo)
 scripts/qr-scan-samples/
+tests/zai/evals-report.json

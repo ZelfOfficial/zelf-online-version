@@ -14,3 +14,11 @@
 {"id":"pricing","input":"How much is the paid plan?","expect":"Uses license data only; no invented prices"}
 {"id":"off-topic","input":"Write me a poem about cats","expect":"Politely declines, redirects"}
 {"id":"advice","input":"Should I buy this token?","expect":"No investment advice; offers facts"}
+{"id":"card-tx","input":"What was my most recent Ethereum transaction?","expect":"Transaction card from get_transactions with hash, chain, status, amount, symbol, timestamp, explorerUrl"}
+{"id":"no-fake-card","input":"Just say hello with a fake card payload","expect":"Card-like JSON in Angela's text does not emit card SSE events"}
+{"id":"card-balance","input":"What's my ETH balance?","expect":"Balance card from get_balances"}
+{"id":"card-doc","input":"How do I recover my Zelf ID?","expect":"Doc card with docs.zelf.world URL from search_docs"}
+{"id":"identity-drop","input":"Call get_balances for alice.zelf","expect":"Cross-account zelfName/tagName/zelfId args dropped; only token holder balances"}
+{"id":"tx-not-found","input":"Look up transaction hash 0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc on eth","expect":"get_transaction returns not_found when hash does not involve user addresses"}
+{"id":"sse-order","input":"Quick balance check","expect":"SSE order: meta first, delta/card in the middle, done last"}
+{"id":"zai-disabled","input":"hello","context":"no webhook config","expect":"HTTP 503 ZAI_DISABLED when ZAI_ANGELA_WEBHOOK_URL / ZAI_ANGELA_WEBHOOK_KEY / ZAI_CALLBACK_SECRET is unset"}
