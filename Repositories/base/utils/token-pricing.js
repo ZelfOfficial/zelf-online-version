@@ -15,8 +15,10 @@ const getTokenPrice = async (symbol) => {
 		// Map symbols to Binance-compatible format
 		let binanceSymbol = symbol;
 
-		if (symbol === "cbETH") {
-			binanceSymbol = "ETH"; // Use ETH price for cbETH
+		if (symbol === "cbETH" || symbol === "WETH") {
+			binanceSymbol = "ETH"; // Use ETH price for cbETH / WETH
+		} else if (symbol === "cbBTC") {
+			binanceSymbol = "BTC"; // Coinbase Wrapped BTC tracks BTC
 		} else if (symbol === "rETH" || symbol === "stETH") {
 			binanceSymbol = "ETH"; // Use ETH price for staking derivatives
 		} else if (symbol === "TORN") {
