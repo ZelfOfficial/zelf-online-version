@@ -18,6 +18,10 @@ const { getTickerPrice } = require("../../binance/modules/binance.module");
 const { get_ApiKey } = require("../../Solana/modules/oklink");
 const etherscanChains = require("../../etherscan/chains.json");
 const { getVerification, setVerification } = require("../../etherscan/modules/verification-cache.module");
+const { formatUnits } = require("ethers");
+const { getBalancesInSingleCall } = require("./bsc-multicall.module");
+const { getPrices, priceForToken } = require("./bsc-prices.module");
+const COMMON_TOKENS = require("../data/common-tokens.json");
 
 const BSC_CHAIN_ID = (etherscanChains && etherscanChains["bsc-mainnet"]) || 56;
 
@@ -432,7 +436,11 @@ function prioritizeCuratedBscForRpc(max) {
 	return out;
 }
 
-const getBalance = async (params) => {
+/**
+ * Legacy explorer path (NodeReal + CoinGecko + BscScan verification). Only used when every BSC RPC is down.
+ * Kept unchanged so the emergency behaviour matches what production returned before.
+ */
+const getBalanceLegacy = async (params) => {
 	try {
 		const address = params.id;
 		const { price } = await getTickerPrice({ symbol: "BNB" });
@@ -542,6 +550,163 @@ const getBalance = async (params) => {
 	} catch (error) {
 		console.error({ error });
 	}
+};
+
+const BNB_IMAGE =
+	"https://dynamic-assets.coinbase.com/36f266bc4826775268588346777c84c1ae035e7de268a6e124bcc22659f0aa2bf4f66dcad89b2ac978cfdb4d51c2d9f63cf7157769efb500b20ca16a6d5719c7/asset_icons/7deb6ff58870072405c0418d85501c4521c3296e33ef58452be98e4ca592ed19.png";
+const NATIVE_BNB = { symbol: "BNB", priceSymbol: "BNB", coingeckoId: "binancecoin" };
+
+// Once balances are ready, wait at most this long for history; otherwise answer with the cached list (or []).
+const TX_GRACE_MS = Number(process.env.BSC_TX_GRACE_MS || 500);
+const TX_CACHE_MS = Number(process.env.BSC_TX_CACHE_MS || 60000);
+const BALANCE_CACHE_MS = Number(process.env.BSC_BALANCE_CACHE_MS || 10000);
+
+const txCache = new Map(); // address -> { transactions, at }
+const txInflight = new Map(); // address -> Promise<transactions[]>
+const balanceCache = new Map(); // address -> { data, at }
+const balanceInflight = new Map(); // address -> Promise<data>
+
+/** Recent BNB transactions (current sources: OKLink → BscScan → Bogotá), cached per address, one fetch in flight per address. */
+const fetchRecentTransactions = (address) => {
+	const key = address.toLowerCase();
+	const cached = txCache.get(key);
+
+	if (cached && Date.now() - cached.at <= TX_CACHE_MS) return Promise.resolve(cached.transactions);
+
+	if (txInflight.has(key)) return txInflight.get(key);
+
+	const p = getTransactionsList({ id: address }, { show: "10" })
+		.then((r) => {
+			const transactions = Array.isArray(r?.transactions) ? r.transactions : [];
+
+			txCache.set(key, { transactions, at: Date.now() });
+
+			return transactions;
+		})
+		.catch(() => cached?.transactions || [])
+		.finally(() => txInflight.delete(key));
+
+	txInflight.set(key, p);
+
+	return p;
+};
+
+/**
+ * Never let history block balances: called once balances are ready, waits at most TX_GRACE_MS more, then answers with
+ * the last cached list (or []). The fetch keeps running and fills the cache for the next call.
+ */
+const transactionsWithinGrace = async (address, pending) => {
+	let timer;
+	const timeout = new Promise((resolve) => {
+		timer = setTimeout(() => resolve(txCache.get(address.toLowerCase())?.transactions || []), TX_GRACE_MS);
+	});
+
+	try {
+		return await Promise.race([pending, timeout]);
+	} finally {
+		clearTimeout(timer);
+	}
+};
+
+/** Same token shape the explorer path returned (the extension reads these fields as-is). */
+const formatCommonToken = (token, rawBalance, price) => {
+	const amount = Number(formatUnits(rawBalance, token.decimals));
+	const fiatBalance = amount * price;
+
+	return {
+		_amount: amount,
+		_fiatBalance: fiatBalance.toFixed(7),
+		_price: price,
+		address: token.contractAddress.toLowerCase(),
+		amount: amount.toFixed(12),
+		decimals: token.decimals,
+		fiatBalance: parseFloat(fiatBalance.toFixed(7)),
+		image: token.image || "",
+		name: token.name,
+		price: price.toFixed(6),
+		symbol: token.symbol,
+		tokenType: "BEP-20",
+	};
+};
+
+/**
+ * Fast path: native BNB + curated BEP-20 balances in ONE Multicall3 eth_call, prices from one cached batch,
+ * transactions fetched in parallel and never allowed to block balances. Response shape unchanged.
+ */
+const getBalanceFast = async (address) => {
+	const pendingTransactions = fetchRecentTransactions(address); // starts now, in parallel with balances
+
+	const [{ nativeWei, tokenBalances }, prices] = await Promise.all([getBalancesInSingleCall(address, COMMON_TOKENS), getPrices([NATIVE_BNB, ...COMMON_TOKENS])]);
+
+	const tokens = COMMON_TOKENS.filter((t) => (tokenBalances.get(t.contractAddress.toLowerCase()) || 0n) > 0n)
+		.map((t) => formatCommonToken(t, tokenBalances.get(t.contractAddress.toLowerCase()), priceForToken(t, prices)))
+		.sort((a, b) => Number(b.fiatBalance) - Number(a.fiatBalance));
+
+	const price = priceForToken(NATIVE_BNB, prices);
+	const BSCValue = Number(formatUnits(nativeWei, 18));
+	const fiatBalance = BSCValue * price;
+	const totalFiatBalance = Number(tokens.reduce((s, t) => s + Number(t.fiatBalance || t._fiatBalance || 0), 0).toFixed(8));
+
+	tokens.push({
+		amount: BSCValue.toString(),
+		fiatBalance: fiatBalance,
+		image: BNB_IMAGE,
+		name: "Binance",
+		price: price,
+		symbol: "BNB",
+		tokenType: "BNB",
+	});
+
+	const transactions = await transactionsWithinGrace(address, pendingTransactions);
+
+	return {
+		address,
+		balance: BSCValue,
+		fiatBalance,
+		account: { asset: "BNB", fiatBalance: fiatBalance.toString(), price },
+		tokenHoldings: { total: tokens.length, balance: totalFiatBalance, tokens },
+		transactions,
+	};
+};
+
+/**
+ * GET /bsc/address/:id — short per-address cache (Home and Wallet ask for the same address back to back) and
+ * one computation in flight per address. Falls back to the legacy explorer path only if every RPC is down.
+ */
+const getBalance = async (params) => {
+	const address = params.id;
+	const key = String(address).toLowerCase();
+	const cached = balanceCache.get(key);
+
+	if (cached && Date.now() - cached.at <= BALANCE_CACHE_MS) return cached.data;
+
+	if (balanceInflight.has(key)) return balanceInflight.get(key);
+
+	const p = (async () => {
+		try {
+			const data = await getBalanceFast(address);
+
+			balanceCache.set(key, { data, at: Date.now() });
+
+			return data;
+		} catch (error) {
+			console.error({ bsc_fast_balance_error: error?.message || error });
+
+			return getBalanceLegacy(params);
+		}
+	})().finally(() => balanceInflight.delete(key));
+
+	balanceInflight.set(key, p);
+
+	return p;
+};
+
+/** Test helper: clear per-address caches. */
+const _resetBscCaches = () => {
+	txCache.clear();
+	txInflight.clear();
+	balanceCache.clear();
+	balanceInflight.clear();
 };
 
 const getTokens = async (params) => {
@@ -833,9 +998,7 @@ const getTransactionsList = async (params, query) => {
 		let price = 0;
 
 		try {
-			const p = await getTickerPrice({ symbol: "BNB" });
-
-			price = Number(p?.price || 0);
+			price = priceForToken(NATIVE_BNB, await getPrices([NATIVE_BNB]));
 		} catch (_) {}
 
 		// Try OKLink first
@@ -866,7 +1029,10 @@ const getTransactionsList = async (params, query) => {
 };
 
 module.exports = {
+	_resetBscCaches,
 	getBalance,
+	getBalanceFast,
+	getBalanceLegacy,
 	getGasTracker,
 	getTransactionsList,
 	getTransactionStatus,
