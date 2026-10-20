@@ -12,8 +12,9 @@ const normalizeIp = (ip) => {
 };
 
 const deviceScopeKey = (deviceKey, identityKey) => {
-    if (!deviceKey || !identityKey) return null;
-    return `${deviceKey}::${identityKey}`;
+    if (!deviceKey) return null;
+    if (identityKey) return `${deviceKey}::${identityKey}`;
+    return deviceKey;
 };
 
 const getOrCreateState = async (scope, key) => {
@@ -36,17 +37,19 @@ const getOrCreateState = async (scope, key) => {
     }
 
     if (row.windowStartedAt && now - new Date(row.windowStartedAt) > windowMs) {
+        const lockStillActive =
+            row.lockedUntil && new Date(row.lockedUntil).getTime() > now.getTime();
+        const $set = {
+            failureCount: 0,
+            windowStartedAt: now,
+            expiresAt: new Date(now.getTime() + stateTtlMs()),
+        };
+        if (!lockStillActive) {
+            $set.lockedUntil = null;
+        }
         const updated = await FaceAttemptState.findOneAndUpdate(
             { scope, key },
-            {
-                $set: {
-                    failureCount: 0,
-                    windowStartedAt: now,
-                    lockedUntil: null,
-                    lockoutLevel: 0,
-                    expiresAt: new Date(now.getTime() + stateTtlMs()),
-                },
-            },
+            { $set },
             { new: true }
         ).lean();
         return updated;
@@ -82,10 +85,13 @@ const assertFaceAttemptAllowed = async ({ identityKey, ip, deviceKey }) => {
     }
 
     const devKey = deviceScopeKey(deviceKey, identityKey);
-    const checks = [
-        await assertNotLocked("identity", identityKey),
-        devKey ? await assertNotLocked("device", devKey) : { locked: false, failureCount: 0 },
-    ];
+    const checks = [];
+    if (identityKey) {
+        checks.push(await assertNotLocked("identity", identityKey));
+    }
+    if (devKey) {
+        checks.push(await assertNotLocked("device", devKey));
+    }
 
     if (cfg().ipLockoutEnabled) {
         const normalizedIp = normalizeIp(ip);
@@ -104,7 +110,7 @@ const assertFaceAttemptAllowed = async ({ identityKey, ip, deviceKey }) => {
         }
     }
 
-    const identityFailures = checks[0].failureCount || 0;
+    const identityFailures = identityKey && checks.length ? checks[0].failureCount || 0 : 0;
     const powAfter = cfg().powAfterFailures || 2;
     return {
         failureCount: identityFailures,
@@ -130,9 +136,10 @@ const incrementFailures = async (scope, key) => {
               : cfg().deviceMaxFailures || 10;
 
     if (nextCount >= maxByScope) {
-        lockoutLevel = Math.min((lockoutLevel || 0) + 1, (cfg().lockoutStepsSec || []).length - 1);
-        const durationSec = lockoutDurationSec(lockoutLevel);
+        const durationSec = lockoutDurationSec(lockoutLevel || 0);
         lockedUntil = new Date(now.getTime() + durationSec * 1000);
+        const maxLevel = (cfg().lockoutStepsSec || []).length - 1;
+        lockoutLevel = Math.min((lockoutLevel || 0) + 1, maxLevel);
     }
 
     await FaceAttemptState.updateOne(
@@ -151,7 +158,7 @@ const incrementFailures = async (scope, key) => {
 
 const recordFailedAttempt = async ({ identityKey, ip, deviceKey }) => {
     if (!cfg().enabled) return;
-    await incrementFailures("identity", identityKey);
+    if (identityKey) await incrementFailures("identity", identityKey);
     const devKey = deviceScopeKey(deviceKey, identityKey);
     if (devKey) await incrementFailures("device", devKey);
     if (cfg().ipLockoutEnabled) {
@@ -170,7 +177,9 @@ const recordSuccessfulAttempt = async ({ identityKey, deviceKey }) => {
         lockoutLevel: 0,
         expiresAt: new Date(now.getTime() + stateTtlMs()),
     };
-    await FaceAttemptState.updateOne({ scope: "identity", key: identityKey }, { $set: reset });
+    if (identityKey) {
+        await FaceAttemptState.updateOne({ scope: "identity", key: identityKey }, { $set: reset });
+    }
     const devKey = deviceScopeKey(deviceKey, identityKey);
     if (devKey) {
         await FaceAttemptState.updateOne({ scope: "device", key: devKey }, { $set: reset });

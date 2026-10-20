@@ -38,7 +38,7 @@ const gate = (action) => async (ctx, next) => {
     }
 };
 
-const handleLockoutError = (ctx, err) => {
+const handleFaceSecurityError = (ctx, err) => {
     if (err?.clientCode === "face_locked" || err?.status === 429) {
         const retryAfter = err.retryAfterSeconds || 60;
         ctx.status = 429;
@@ -50,6 +50,15 @@ const handleLockoutError = (ctx, err) => {
         };
         return true;
     }
+    if (err?.clientCode === "face_replay_detected") {
+        ctx.status = 409;
+        ctx.body = {
+            message: err.clientMessage || "Face replay detected",
+            code: "face_replay_detected",
+            clientMessage: err.clientMessage,
+        };
+        return true;
+    }
     return false;
 };
 
@@ -57,7 +66,7 @@ const wrapGate = (action) => async (ctx, next) => {
     try {
         await gate(action)(ctx, next);
     } catch (err) {
-        if (handleLockoutError(ctx, err)) return;
+        if (handleFaceSecurityError(ctx, err)) return;
         throw err;
     }
 };

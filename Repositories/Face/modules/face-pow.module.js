@@ -4,6 +4,8 @@ const FacePowUsed = require("../models/face-pow-used.model");
 const FacePowChallenge = require("../models/face-pow-challenge.model");
 
 const ALGORITHM = "SHA-256";
+/** Clients must match: count leading zero bits in SHA-256(salt + solution) hex digest. */
+const DIFFICULTY_MODE = "leading_zero_bits";
 
 const getSecret = () => {
     const secret = config.faceSecurity?.pow?.hmacSecret;
@@ -14,8 +16,8 @@ const getSecret = () => {
 };
 
 const difficultyForFailures = (failureCount) => {
-    const base = config.faceSecurity?.pow?.baseDifficulty || 4;
-    const max = config.faceSecurity?.pow?.maxDifficulty || 8;
+    const base = config.faceSecurity?.pow?.baseDifficulty || 16;
+    const max = config.faceSecurity?.pow?.maxDifficulty || 19;
     const extra = Math.max(0, Math.floor((failureCount || 0) / 2));
     return Math.min(max, base + extra);
 };
@@ -57,6 +59,7 @@ const issueChallenge = async ({ action, identifier, failureCount = 0 }) => {
     return {
         challengeId,
         algorithm: ALGORITHM,
+        difficultyMode: DIFFICULTY_MODE,
         salt,
         difficulty,
         expiresAt: expiresAtIso,
@@ -64,9 +67,27 @@ const issueChallenge = async ({ action, identifier, failureCount = 0 }) => {
     };
 };
 
+const leadingZeroBits = (hashHex) => {
+    const hash = Buffer.from(hashHex, "hex");
+    let bits = 0;
+    for (const byte of hash) {
+        if (byte === 0) {
+            bits += 8;
+            continue;
+        }
+        for (let j = 7; j >= 0; j--) {
+            if (byte & (1 << j)) {
+                return bits + (7 - j);
+            }
+        }
+        return bits;
+    }
+    return bits;
+};
+
 const hashMeetsDifficulty = (hashHex, difficulty) => {
-    const prefix = "0".repeat(Math.max(0, difficulty));
-    return hashHex.startsWith(prefix);
+    const required = Math.max(0, Number(difficulty) || 0);
+    return leadingZeroBits(hashHex) >= required;
 };
 
 /**
@@ -147,8 +168,10 @@ const verifySolution = async (params) => {
 
 module.exports = {
     ALGORITHM,
+    DIFFICULTY_MODE,
     issueChallenge,
     verifySolution,
     difficultyForFailures,
     hashMeetsDifficulty,
+    leadingZeroBits,
 };

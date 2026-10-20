@@ -8,13 +8,17 @@ process.env.FACE_NONCE_ENFORCEMENT = "require";
 process.env.FACE_ATTEMPT_LIMITER_ENABLED = "true";
 process.env.FACE_ATTEMPT_IDENTITY_MAX_FAILURES = "3";
 process.env.FACE_ATTEMPT_POW_AFTER_FAILURES = "1";
-process.env.FACE_POW_BASE_DIFFICULTY = "1";
+process.env.FACE_POW_BASE_DIFFICULTY = "8";
+process.env.FACE_ATTEMPT_LOCKOUT_STEPS_SEC = "900,3600,86400";
+process.env.FACE_ATTEMPT_IDENTITY_WINDOW_SEC = "900";
 
 const FacePow = require("../../Repositories/Face/modules/face-pow.module");
 const FaceNonce = require("../../Repositories/Face/modules/face-nonce.module");
 const FaceAttemptLimiter = require("../../Repositories/Face/modules/face-attempt-limiter.module");
 const { pickWhitelistedBody } = require("../../Repositories/Face/modules/face-body-whitelist.module");
 const FaceReplay = require("../../Repositories/Face/modules/face-replay.module");
+const FaceSecurity = require("../../Repositories/Face/modules/face-security.module");
+const FaceMiddleware = require("../../Repositories/Face/middlewares/face.middleware");
 const FacePowChallenge = require("../../Repositories/Face/models/face-pow-challenge.model");
 const FacePowUsed = require("../../Repositories/Face/models/face-pow-used.model");
 const FaceNonceModel = require("../../Repositories/Face/models/face-nonce.model");
@@ -133,6 +137,7 @@ describe("face nonce", () => {
 describe("face attempt lockout", () => {
     beforeEach(async () => {
         await FaceAttemptState.deleteMany({});
+        jest.useRealTimers();
     });
 
     it("locks identity after max failures", async () => {
@@ -152,6 +157,94 @@ describe("face attempt lockout", () => {
                 deviceKey: "dev-2",
             })
         ).rejects.toMatchObject({ clientCode: "face_locked", status: 429 });
+    });
+
+    it("uses first lockout step (900s) on initial lock", async () => {
+        const identityKey = "decrypt:alice@zelf";
+        for (let i = 0; i < 3; i++) {
+            await FaceAttemptLimiter.recordFailedAttempt({
+                identityKey,
+                deviceKey: "dev-1",
+            });
+        }
+
+        try {
+            await FaceAttemptLimiter.assertFaceAttemptAllowed({ identityKey, deviceKey: "dev-1" });
+            throw new Error("expected lock");
+        } catch (err) {
+            expect(err.retryAfterSeconds).toBeLessThanOrEqual(900);
+            expect(err.retryAfterSeconds).toBeGreaterThan(850);
+        }
+    });
+
+    it("keeps lock active after failure window rolls but before lock expires", async () => {
+        const identityKey = "decrypt:alice@zelf";
+        const now = Date.now();
+        await FaceAttemptState.create({
+            scope: "identity",
+            key: identityKey,
+            failureCount: 0,
+            windowStartedAt: new Date(now - 16 * 60 * 1000),
+            lockedUntil: new Date(now + 30 * 60 * 1000),
+            lockoutLevel: 1,
+            expiresAt: new Date(now + 3600000),
+        });
+
+        await expect(
+            FaceAttemptLimiter.assertFaceAttemptAllowed({ identityKey, deviceKey: "dev-1" })
+        ).rejects.toMatchObject({ clientCode: "face_locked" });
+
+        const row = await FaceAttemptState.findOne({ scope: "identity", key: identityKey }).lean();
+        expect(row.lockedUntil).toBeTruthy();
+        expect(new Date(row.lockedUntil).getTime()).toBeGreaterThan(Date.now());
+    });
+
+    it("isolates zelf-keys lockout per JWT tag when body has no tag", async () => {
+        const keyF = FaceSecurity.buildLockoutIdentityKey(
+            "store-password",
+            { faceBase64: "x" },
+            { state: { user: { session: "sess-f", tagName: "f", domain: "zelf" } } }
+        );
+        const keyP = FaceSecurity.buildLockoutIdentityKey(
+            "store-password",
+            { faceBase64: "x" },
+            { state: { user: { session: "sess-p", tagName: "p", domain: "zelf" } } }
+        );
+        expect(keyF).toBe("store-password:f@zelf");
+        expect(keyP).toBe("store-password:p@zelf");
+
+        for (let i = 0; i < 3; i++) {
+            await FaceAttemptLimiter.recordFailedAttempt({
+                identityKey: keyF,
+                deviceKey: "sess-f",
+            });
+        }
+
+        await expect(
+            FaceAttemptLimiter.assertFaceAttemptAllowed({ identityKey: keyF, deviceKey: "sess-f" })
+        ).rejects.toMatchObject({ clientCode: "face_locked" });
+
+        await expect(
+            FaceAttemptLimiter.assertFaceAttemptAllowed({ identityKey: keyP, deviceKey: "sess-p" })
+        ).resolves.toBeDefined();
+    });
+});
+
+describe("face pow difficulty", () => {
+    it("uses leading zero bits", () => {
+        expect(FacePow.leadingZeroBits("0000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")).toBe(16);
+        expect(
+            FacePow.hashMeetsDifficulty(
+                "0000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                16
+            )
+        ).toBe(true);
+        expect(
+            FacePow.hashMeetsDifficulty(
+                "0001ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                16
+            )
+        ).toBe(false);
     });
 });
 
@@ -177,6 +270,53 @@ describe("body whitelist", () => {
         expect(body.tolerance).toBeUndefined();
         expect(body.removePGP).toBeUndefined();
         expect(body.securityType).toBeUndefined();
+    });
+});
+
+describe("face replay middleware", () => {
+    beforeEach(async () => {
+        await FaceReplayDigest.deleteMany({});
+        await FaceNonceModel.deleteMany({});
+    });
+
+    it("returns JSON face_replay_detected from gate middleware", async () => {
+        await FaceReplay.recordReplay({
+            faceBase64: "aGVsbG8=",
+            identifier: "alice@zelf",
+            action: "decrypt",
+        });
+
+        const { nonce } = await FaceNonce.createNonce({
+            action: "decrypt",
+            identifier: "alice@zelf",
+            sessionKey: "s1",
+        });
+
+        const ctx = {
+            request: {
+                body: {
+                    tagName: "alice",
+                    domain: "zelf",
+                    faceBase64: "aGVsbG8=",
+                    faceNonce: nonce,
+                    os: "DESKTOP",
+                },
+                ip: "127.0.0.1",
+            },
+            state: { user: { session: "s1", tagName: "alice", domain: "zelf" } },
+            path: "/api/tags/decrypt",
+            set() {},
+            get() {},
+        };
+
+        const mw = FaceMiddleware.gate("decrypt");
+        await mw(ctx, async () => {
+            ctx.status = 200;
+        });
+
+        expect(ctx.status).toBe(409);
+        expect(ctx.body.code).toBe("face_replay_detected");
+        expect(ctx.body.clientMessage).toMatch(/fresh nonce/i);
     });
 });
 

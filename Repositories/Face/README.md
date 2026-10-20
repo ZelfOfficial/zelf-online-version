@@ -5,8 +5,9 @@ Shared lockout, proof-of-work, capture nonces, and request body whitelisting for
 ## Client flow
 
 1. `POST /api/face/nonce` with `{ action, identifier }` → `{ nonce, expiresAt, pow? }`.
-2. Face endpoints include `faceNonce` and, when required, `pow: { challengeId, solution, salt, difficulty, expiresAt, signature }`.
-3. `428` + `pow_required` when PoW is mandatory; `429` + `face_locked` + `retryAfter` when locked out.
+2. Face endpoints include `faceNonce` and, when required, `pow: { challengeId, solution }` (challenge fields are stored server-side by `challengeId`).
+3. PoW: `SHA-256(salt + solution)` must have at least `difficulty` **leading zero bits** in the hex digest (`difficultyMode: leading_zero_bits`). Default base difficulty is **16 bits** (~1s at ~100k hashes/s).
+4. `428` + `pow_required` when PoW is mandatory; `429` + `face_locked` + `retryAfter` when locked out; `409` + `face_replay_detected` when the same face capture is reused.
 
 ## Configuration
 
@@ -34,6 +35,6 @@ Legacy mappings: `securePassword` → `password`; `newTagName` → `tagName` whe
 
 ## Lockout scopes
 
-- **Identity** (`action:tag@domain`) — primary lockout and PoW threshold.
+- **Identity** (`action:tag@domain` or JWT `tagName@domain` / `session:<id>` when the body has no tag) — primary lockout and PoW threshold. No shared `unknown` bucket.
 - **Device** — JWT `session` + identity composite (not global session-only).
 - **IP** — metrics only unless `FACE_ATTEMPT_IP_LOCKOUT_ENABLED=true` (default `false` for shared NAT).

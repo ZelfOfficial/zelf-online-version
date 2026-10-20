@@ -809,9 +809,9 @@ const configuration = {
             /** Generate on server only: openssl rand -hex 32 — never commit a real value. */
             hmacSecret: process.env.FACE_POW_HMAC_SECRET || "",
             challengeTtlSec: Math.max(60, Number(process.env.FACE_POW_CHALLENGE_TTL_SEC) || 300),
-            /** Leading hex zeroes required in SHA-256(salt + solution). */
-            baseDifficulty: Math.max(1, Number(process.env.FACE_POW_BASE_DIFFICULTY) || 4),
-            maxDifficulty: Math.max(4, Number(process.env.FACE_POW_MAX_DIFFICULTY) || 8),
+            /** Leading zero bits in SHA-256(salt + solution) hex digest (~16 ≈ 1s at ~100k H/s). */
+            baseDifficulty: Math.max(8, Number(process.env.FACE_POW_BASE_DIFFICULTY) || 16),
+            maxDifficulty: Math.max(16, Number(process.env.FACE_POW_MAX_DIFFICULTY) || 19),
             /** `log` = issue challenges but allow missing/invalid; `require` = enforce 428/409. */
             enforcement: String(process.env.FACE_POW_ENFORCEMENT || "log").toLowerCase(),
         },

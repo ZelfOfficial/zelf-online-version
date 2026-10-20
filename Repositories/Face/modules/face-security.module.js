@@ -9,7 +9,25 @@ const config = require("../../../Core/config");
 const powEnforcement = () => String(config.faceSecurity?.pow?.enforcement || "log").toLowerCase();
 const nonceEnforcement = () => String(config.faceSecurity?.nonce?.enforcement || "log").toLowerCase();
 
-const buildIdentifier = (body, ctx) => {
+const identityFromAuthUser = (authUser) => {
+    if (!authUser || typeof authUser !== "object") return null;
+    const domain = authUser.domain || "zelf";
+    if (authUser.tagName) {
+        return `${String(authUser.tagName).toLowerCase()}@${String(domain).toLowerCase()}`;
+    }
+    if (authUser.ethAddress) {
+        return `wallet:${String(authUser.ethAddress).toLowerCase()}`;
+    }
+    if (authUser.identifier) {
+        return `auth:${String(authUser.identifier)}`;
+    }
+    if (authUser.session) {
+        return `session:${String(authUser.session)}`;
+    }
+    return null;
+};
+
+const buildBodyIdentifier = (body, ctx) => {
     if (body?.zelfProof) {
         return `zelfProof:${String(body.zelfProof).slice(0, 64)}`;
     }
@@ -19,13 +37,31 @@ const buildIdentifier = (body, ctx) => {
         return `${String(tagName).toLowerCase()}@${String(domain).toLowerCase()}`;
     }
     if (body?.identifier) return String(body.identifier);
-    if (body?.zelfName) return `${String(body.zelfName).toLowerCase()}@${String(domain || "zelf").toLowerCase()}`;
+    if (body?.zelfName) {
+        return `${String(body.zelfName).toLowerCase()}@${String(domain || "zelf").toLowerCase()}`;
+    }
     if (body?.id) return `record:${body.id}`;
     if (body?.owner) return `wallet:${String(body.owner).toLowerCase()}`;
     if (body?.email) return `email:${String(body.email).toLowerCase()}`;
     if (body?.staffEmail) return `staff:${String(body.staffEmail).toLowerCase()}`;
     if (body?.lawyerEmail) return `lawyer:${String(body.lawyerEmail).toLowerCase()}`;
-    return "unknown";
+    return null;
+};
+
+/** Resource id for nonce/replay/PoW binding (body first, then JWT session identity). */
+const buildIdentifier = (body, ctx) => {
+    const fromBody = buildBodyIdentifier(body, ctx);
+    if (fromBody) return fromBody;
+    const fromAuth = identityFromAuthUser(ctx.state?.user);
+    if (fromAuth) return fromAuth;
+    return null;
+};
+
+/** Identity-scoped lockout key; null => device/session scope only (no shared fallback). */
+const buildLockoutIdentityKey = (action, body, ctx) => {
+    const identifier = buildIdentifier(body, ctx);
+    if (!identifier) return null;
+    return `${action}:${identifier}`;
 };
 
 const sessionKeyFromUser = (authUser) => {
@@ -103,18 +139,20 @@ const runFaceSecurityPre = async (ctx, action) => {
     }
 
     const identifier = buildIdentifier(body, ctx);
+    const identityKey = buildLockoutIdentityKey(action, body, ctx);
     const sessionKey = sessionKeyFromUser(authUser);
     const ip = ctx.request.ip;
 
     ctx.state.faceSecurity = {
         action,
         identifier,
+        identityKey,
         sessionKey,
         ip,
     };
 
     const { failureCount, powRequired } = await FaceAttemptLimiter.assertFaceAttemptAllowed({
-        identityKey: `${action}:${identifier}`,
+        identityKey,
         ip,
         deviceKey: sessionKey,
     });
@@ -196,7 +234,7 @@ const runFaceSecurityPost = async (ctx) => {
     const meta = ctx.state.faceSecurity;
     if (!meta) return;
 
-    const identityKey = `${meta.action}:${meta.identifier}`;
+    const identityKey = meta.identityKey;
     try {
         if (isFaceFailureResponse(ctx)) {
             await FaceAttemptLimiter.recordFailedAttempt({
@@ -230,6 +268,8 @@ const runFaceSecurityPost = async (ctx) => {
 
 module.exports = {
     buildIdentifier,
+    buildLockoutIdentityKey,
+    identityFromAuthUser,
     sessionKeyFromUser,
     issueFaceNonce,
     runFaceSecurityPre,
