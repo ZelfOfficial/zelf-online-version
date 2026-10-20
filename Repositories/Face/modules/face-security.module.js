@@ -21,6 +21,10 @@ const buildIdentifier = (body, ctx) => {
     if (body?.identifier) return String(body.identifier);
     if (body?.zelfName) return `${String(body.zelfName).toLowerCase()}@${String(domain || "zelf").toLowerCase()}`;
     if (body?.id) return `record:${body.id}`;
+    if (body?.owner) return `wallet:${String(body.owner).toLowerCase()}`;
+    if (body?.email) return `email:${String(body.email).toLowerCase()}`;
+    if (body?.staffEmail) return `staff:${String(body.staffEmail).toLowerCase()}`;
+    if (body?.lawyerEmail) return `lawyer:${String(body.lawyerEmail).toLowerCase()}`;
     return "unknown";
 };
 
@@ -92,6 +96,11 @@ const runFaceSecurityPre = async (ctx, action) => {
     }
 
     ctx.request.body = body;
+
+    const hasFace = body.faceBase64 != null && String(body.faceBase64).trim() !== "";
+    if (!hasFace) {
+        return true;
+    }
 
     const identifier = buildIdentifier(body, ctx);
     const sessionKey = sessionKeyFromUser(authUser);
@@ -204,7 +213,6 @@ const runFaceSecurityPost = async (ctx) => {
         } else if (ctx.status && ctx.status < 400) {
             await FaceAttemptLimiter.recordSuccessfulAttempt({
                 identityKey,
-                ip: meta.ip,
                 deviceKey: meta.sessionKey,
             });
             if (ctx.request.body?.faceBase64) {

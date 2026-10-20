@@ -796,9 +796,11 @@ const configuration = {
                 .split(",")
                 .map((s) => Math.max(60, Number(s.trim()) || 900))
                 .filter(Boolean),
-            /** Failed attempts from one IP across any identities in one hour before IP lockout. */
-            ipMaxFailuresPerHour: Math.max(1, Number(process.env.FACE_ATTEMPT_IP_MAX_FAILURES_PER_HOUR) || 20),
-            /** Failed attempts per JWT session id in the identity window before device-scoped lockout. */
+            /** Off by default — shared NAT; enable only for high-abuse environments. */
+            ipLockoutEnabled: process.env.FACE_ATTEMPT_IP_LOCKOUT_ENABLED === "true",
+            /** When IP lockout is enabled, failures/hour before IP block (generous). */
+            ipMaxFailuresPerHour: Math.max(1, Number(process.env.FACE_ATTEMPT_IP_MAX_FAILURES_PER_HOUR) || 100),
+            /** Per session + per identity (tag/record) before device-scoped lockout. */
             deviceMaxFailures: Math.max(1, Number(process.env.FACE_ATTEMPT_DEVICE_MAX_FAILURES) || 10),
             /** Start requiring PoW after this many identity failures in the window (inclusive). */
             powAfterFailures: Math.max(1, Number(process.env.FACE_ATTEMPT_POW_AFTER_FAILURES) || 2),

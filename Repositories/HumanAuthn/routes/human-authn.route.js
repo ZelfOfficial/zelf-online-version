@@ -53,6 +53,7 @@ module.exports = (server) => {
         OptionalJwtMiddleware.optionalJwt,
         PaymentMiddleware.paymentRequired,
         Middleware.upgradeValidation,
+        FaceMiddleware.gate("upgrade"),
         Controller.upgrade
     );
 

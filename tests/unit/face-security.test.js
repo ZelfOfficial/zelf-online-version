@@ -162,6 +162,8 @@ describe("body whitelist", () => {
                 tagName: "a",
                 domain: "zelf",
                 faceBase64: "x",
+                os: "DESKTOP",
+                addServerPassword: true,
                 tolerance: "HARDENED",
                 removePGP: true,
                 securePassword: "secret",
@@ -169,7 +171,9 @@ describe("body whitelist", () => {
             "decrypt"
         );
         expect(rejected).toEqual(expect.arrayContaining(["tolerance", "removePGP"]));
+        expect(body.os).toBe("DESKTOP");
         expect(body.password).toBe("secret");
+        expect(body.addServerPassword).toBe(true);
         expect(body.tolerance).toBeUndefined();
         expect(body.securityType).toBeUndefined();
     });

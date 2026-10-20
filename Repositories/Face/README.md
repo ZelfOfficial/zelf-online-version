@@ -21,3 +21,17 @@ const FaceMiddleware = require("../../Face/middlewares/face.middleware");
 
 server.post(`${PATH}/decrypt`, Middleware.decryptValidation, FaceMiddleware.gate("decrypt"), Controller.decryptTag);
 ```
+
+Use `FaceMiddleware.gateIfFace(action)` when `faceBase64` is optional (BlockDAG zelf wallet flows).
+
+## Body whitelist
+
+Unknown body keys are **stripped silently** (logged server-side), never rejected. Known server-only keys documented in `STRIPPED_SERVER_ONLY_FIELDS` inside `face-body-whitelist.module.js` include: `removePGP`, `tolerance`, `requireLiveness`, `verifierKey`, `referenceFaceBase64`, `livenessDetectionPriorCreation`, and similar upstream overrides.
+
+Legitimate client fields include `password` (PGP-armored), legacy `securePassword` (mapped to `password`), `faceNonce`, `pow`, `masterPassword`, and action-specific fields aligned with route Joi schemas (extension 2.1.56 / mobile / dashboard).
+
+## Lockout scopes
+
+- **Identity** (`action:tag@domain`) — primary lockout and PoW threshold.
+- **Device** — JWT `session` + identity composite (not global session-only).
+- **IP** — metrics only unless `FACE_ATTEMPT_IP_LOCKOUT_ENABLED=true` (default `false` for shared NAT).

@@ -13,7 +13,7 @@ module.exports = (server) => {
     const PATH = config.basePath(base);
 
     server.post(`${PATH}/store/password`, Middleware.storePasswordValidation, FaceMiddleware.gate("store-password"), Controller.storePassword);
-    server.post(`${PATH}/store/passwords`, Middleware.storePasswordsBulkValidation, Controller.storePasswordsBulk);
+    server.post(`${PATH}/store/passwords`, Middleware.storePasswordsBulkValidation, FaceMiddleware.gate("store-passwords-bulk"), Controller.storePasswordsBulk);
     server.post(`${PATH}/store/zotp`, Middleware.storeZOTPValidation, FaceMiddleware.gate("store-zotp"), Controller.storeZOTP);
     server.post(`${PATH}/store/notes`, Middleware.storeNotesValidation, FaceMiddleware.gate("store-notes"), Controller.storeNotes);
     server.post(`${PATH}/store/credit-card`, Middleware.storeCreditCardValidation, FaceMiddleware.gate("store-credit-card"), Controller.storeCreditCard);

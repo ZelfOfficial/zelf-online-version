@@ -21,7 +21,7 @@ module.exports = (server) => {
     server.post(`${PATH}/encrypt-qr-code`, Middleware.encryptValidation, FaceMiddleware.gate("encrypt"), Controller.encryptQRCode);
     server.post(`${PATH}/decrypt`, Middleware.decryptValidation, FaceMiddleware.gate("decrypt"), Controller.decrypt);
     server.post(`${PATH}/preview`, Middleware.previewValidation, Controller.preview);
-    server.post(`${PATH}/upgrade`, Middleware.upgradeValidation, Controller.upgrade);
+    server.post(`${PATH}/upgrade`, Middleware.upgradeValidation, FaceMiddleware.gate("upgrade"), Controller.upgrade);
 
     console.info(`[dev] JWT routes mounted at ${PATH} (no ZNS payment)`);
 };

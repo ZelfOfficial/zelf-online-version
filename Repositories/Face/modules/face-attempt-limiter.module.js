@@ -11,7 +11,10 @@ const normalizeIp = (ip) => {
     return s.length ? s : null;
 };
 
-const scopeKey = (scope, key) => `${scope}:${key}`;
+const deviceScopeKey = (deviceKey, identityKey) => {
+    if (!deviceKey || !identityKey) return null;
+    return `${deviceKey}::${identityKey}`;
+};
 
 const getOrCreateState = async (scope, key) => {
     const now = new Date();
@@ -59,7 +62,7 @@ const lockoutDurationSec = (level) => {
 };
 
 const assertNotLocked = async (scope, key) => {
-    if (!cfg().enabled) return { locked: false, failureCount: 0 };
+    if (!cfg().enabled || !key) return { locked: false, failureCount: 0 };
 
     const row = await getOrCreateState(scope, key);
     if (row.lockedUntil && new Date(row.lockedUntil).getTime() > Date.now()) {
@@ -70,6 +73,7 @@ const assertNotLocked = async (scope, key) => {
 };
 
 /**
+ * Identity + per-session-per-tag device scopes can lock; IP lockout is opt-in (shared NAT).
  * @param {{ identityKey: string, ip?: string, deviceKey?: string }} keys
  */
 const assertFaceAttemptAllowed = async ({ identityKey, ip, deviceKey }) => {
@@ -77,11 +81,18 @@ const assertFaceAttemptAllowed = async ({ identityKey, ip, deviceKey }) => {
         return { failureCount: 0, powRequired: false };
     }
 
+    const devKey = deviceScopeKey(deviceKey, identityKey);
     const checks = [
         await assertNotLocked("identity", identityKey),
-        ip ? await assertNotLocked("ip", normalizeIp(ip)) : { locked: false, failureCount: 0 },
-        deviceKey ? await assertNotLocked("device", deviceKey) : { locked: false, failureCount: 0 },
+        devKey ? await assertNotLocked("device", devKey) : { locked: false, failureCount: 0 },
     ];
+
+    if (cfg().ipLockoutEnabled) {
+        const normalizedIp = normalizeIp(ip);
+        if (normalizedIp) {
+            checks.push(await assertNotLocked("ip", normalizedIp));
+        }
+    }
 
     for (const c of checks) {
         if (c.locked) {
@@ -102,7 +113,7 @@ const assertFaceAttemptAllowed = async ({ identityKey, ip, deviceKey }) => {
 };
 
 const incrementFailures = async (scope, key) => {
-    if (!cfg().enabled) return;
+    if (!cfg().enabled || !key) return;
 
     const now = new Date();
     const row = await getOrCreateState(scope, key);
@@ -115,7 +126,7 @@ const incrementFailures = async (scope, key) => {
         scope === "identity"
             ? cfg().identityMaxFailures || 5
             : scope === "ip"
-              ? cfg().ipMaxFailuresPerHour || 20
+              ? cfg().ipMaxFailuresPerHour || 100
               : cfg().deviceMaxFailures || 10;
 
     if (nextCount >= maxByScope) {
@@ -141,12 +152,15 @@ const incrementFailures = async (scope, key) => {
 const recordFailedAttempt = async ({ identityKey, ip, deviceKey }) => {
     if (!cfg().enabled) return;
     await incrementFailures("identity", identityKey);
-    const normalizedIp = normalizeIp(ip);
-    if (normalizedIp) await incrementFailures("ip", normalizedIp);
-    if (deviceKey) await incrementFailures("device", deviceKey);
+    const devKey = deviceScopeKey(deviceKey, identityKey);
+    if (devKey) await incrementFailures("device", devKey);
+    if (cfg().ipLockoutEnabled) {
+        const normalizedIp = normalizeIp(ip);
+        if (normalizedIp) await incrementFailures("ip", normalizedIp);
+    }
 };
 
-const recordSuccessfulAttempt = async ({ identityKey, ip, deviceKey }) => {
+const recordSuccessfulAttempt = async ({ identityKey, deviceKey }) => {
     if (!cfg().enabled) return;
     const now = new Date();
     const reset = {
@@ -157,14 +171,15 @@ const recordSuccessfulAttempt = async ({ identityKey, ip, deviceKey }) => {
         expiresAt: new Date(now.getTime() + stateTtlMs()),
     };
     await FaceAttemptState.updateOne({ scope: "identity", key: identityKey }, { $set: reset });
-    const normalizedIp = normalizeIp(ip);
-    if (normalizedIp) await FaceAttemptState.updateOne({ scope: "ip", key: normalizedIp }, { $set: reset });
-    if (deviceKey) await FaceAttemptState.updateOne({ scope: "device", key: deviceKey }, { $set: reset });
+    const devKey = deviceScopeKey(deviceKey, identityKey);
+    if (devKey) {
+        await FaceAttemptState.updateOne({ scope: "device", key: devKey }, { $set: reset });
+    }
 };
 
 module.exports = {
     assertFaceAttemptAllowed,
     recordFailedAttempt,
     recordSuccessfulAttempt,
-    scopeKey,
+    deviceScopeKey,
 };

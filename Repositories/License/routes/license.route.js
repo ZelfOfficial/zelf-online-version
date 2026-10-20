@@ -1,5 +1,6 @@
 const Controller = require("../controllers/license.controller");
 const Middleware = require("../middlewares/license.middleware");
+const FaceMiddleware = require("../../Face/middlewares/face.middleware");
 const config = require("../../../Core/config");
 const base = "/license";
 
@@ -8,8 +9,8 @@ module.exports = (server) => {
 	// Route definitions
 	server.get(`${PATH}`, Middleware.searchValidation, Controller.searchLicense);
 	server.get(`${PATH}/my-license`, Middleware.getMyLicenseValidation, Controller.getMyLicense);
-	server.post(`${PATH}`, Middleware.createValidation, Controller.createOrUpdateLicense);
-	server.delete(`${PATH}`, Middleware.deleteValidation, Controller.deleteLicense);
+	server.post(`${PATH}`, Middleware.createValidation, FaceMiddleware.gate("license-create"), Controller.createOrUpdateLicense);
+	server.delete(`${PATH}`, Middleware.deleteValidation, FaceMiddleware.gate("license-delete"), Controller.deleteLicense);
 };
 
 
