@@ -25,6 +25,8 @@ const checkNotReplay = async ({ faceBase64, identifier, action }) => {
         const error = new Error("409:face_replay_detected");
         error.status = 409;
         error.clientCode = "face_replay_detected";
+        error.clientMessage =
+            "This face capture was already used for this action. Take a new photo, request a fresh nonce from POST /api/face/nonce, and try again.";
         throw error;
     }
 };

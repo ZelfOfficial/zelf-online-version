@@ -157,7 +157,7 @@ describe("face attempt lockout", () => {
 
 describe("body whitelist", () => {
     it("drops server-only fields and maps securePassword to password", () => {
-        const { body, rejected } = pickWhitelistedBody(
+        const { body, strippedServerOnly } = pickWhitelistedBody(
             {
                 tagName: "a",
                 domain: "zelf",
@@ -170,11 +170,12 @@ describe("body whitelist", () => {
             },
             "decrypt"
         );
-        expect(rejected).toEqual(expect.arrayContaining(["tolerance", "removePGP"]));
+        expect(strippedServerOnly).toEqual(expect.arrayContaining(["tolerance", "removePGP"]));
         expect(body.os).toBe("DESKTOP");
         expect(body.password).toBe("secret");
         expect(body.addServerPassword).toBe(true);
         expect(body.tolerance).toBeUndefined();
+        expect(body.removePGP).toBeUndefined();
         expect(body.securityType).toBeUndefined();
     });
 });

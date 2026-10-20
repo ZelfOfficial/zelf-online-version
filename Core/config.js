@@ -821,7 +821,10 @@ const configuration = {
             enforcement: String(process.env.FACE_NONCE_ENFORCEMENT || "log").toLowerCase(),
         },
         bodyWhitelist: {
+            /** Strip server-only fields (tolerance, removePGP, …). Default on. */
             enabled: process.env.FACE_BODY_WHITELIST_ENABLED !== "false",
+            /** Full per-action allow-list; default off — logs keys that would be dropped. */
+            strict: process.env.FACE_BODY_STRICT_WHITELIST === "true",
         },
         replay: {
             /** SHA-256 digest of accepted face payloads; TTL for replay detection. */

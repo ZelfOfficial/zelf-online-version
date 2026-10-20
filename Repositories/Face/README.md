@@ -26,9 +26,11 @@ Use `FaceMiddleware.gateIfFace(action)` when `faceBase64` is optional (BlockDAG 
 
 ## Body whitelist
 
-Unknown body keys are **stripped silently** (logged server-side), never rejected. Known server-only keys documented in `STRIPPED_SERVER_ONLY_FIELDS` inside `face-body-whitelist.module.js` include: `removePGP`, `tolerance`, `requireLiveness`, `verifierKey`, `referenceFaceBase64`, `livenessDetectionPriorCreation`, and similar upstream overrides.
+With `FACE_BODY_WHITELIST_ENABLED=true` (default), only **`STRIPPED_SERVER_ONLY_FIELDS`** are removed (`removePGP`, `tolerance`, `requireLiveness`, `verifierKey`, etc.). All other client fields pass through.
 
-Legitimate client fields include `password` (PGP-armored), legacy `securePassword` (mapped to `password`), `faceNonce`, `pow`, `masterPassword`, and action-specific fields aligned with route Joi schemas (extension 2.1.56 / mobile / dashboard).
+`FACE_BODY_STRICT_WHITELIST=true` enables the per-action allow-list (off by default). When strict is off, keys that strict mode would drop are **kept** and logged as `strict whitelist would drop keys`.
+
+Legacy mappings: `securePassword` → `password`; `newTagName` → `tagName` when `tagName` is missing (tags lease-recovery extension payload).
 
 ## Lockout scopes
 

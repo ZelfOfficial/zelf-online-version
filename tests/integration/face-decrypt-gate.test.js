@@ -102,7 +102,7 @@ describe("tags decrypt face gate (integration-style)", () => {
             },
             "decrypt"
         );
-        expect(rejected).toEqual(expect.arrayContaining(["tolerance", "removePGP"]));
+        expect(rejected).toEqual([]);
         expect(body.tolerance).toBeUndefined();
         expect(body.removePGP).toBeUndefined();
         expect(body.faceBase64).toBe("x");

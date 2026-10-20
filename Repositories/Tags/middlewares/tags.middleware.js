@@ -48,7 +48,8 @@ const schemas = {
     },
     leaseRecovery: {
         zelfProof: string().required(),
-        tagName: string().required(),
+        tagName: string(),
+        newTagName: string(),
         domain: string().required(),
         faceBase64: string().required(),
         password: string().allow("", null),
@@ -365,11 +366,17 @@ const leaseValidation = async (ctx, next) => {
  * @param {*} next - Next middleware
  */
 const leaseRecoveryValidation = async (ctx, next) => {
-    const { zelfProof, tagName, domain, faceBase64, password, securityType, os, captchaToken } = ctx.request.body;
+    const body = ctx.request.body || {};
+    if (!body.tagName && body.newTagName) {
+        body.tagName = body.newTagName;
+    }
+
+    const { zelfProof, tagName, domain, faceBase64, password, securityType, os, captchaToken, newTagName } = body;
 
     const valid = validate(schemas.leaseRecovery, {
         zelfProof,
         tagName,
+        newTagName,
         domain,
         faceBase64,
         password,
