@@ -134,6 +134,19 @@ describe("face nonce", () => {
     });
 });
 
+describe("face attempt lockout TTL", () => {
+    it("retains state through lock duration plus level decay", () => {
+        const now = new Date("2026-06-01T12:00:00Z");
+        const lockedUntil = new Date(now.getTime() + 86400 * 1000);
+        const expires = FaceAttemptLimiter.computeStateExpiresAt(
+            { windowStartedAt: now, lockedUntil },
+            now
+        );
+        expect(expires.getTime()).toBeGreaterThanOrEqual(lockedUntil.getTime() + 86400 * 1000);
+        expect(expires.getTime()).toBeGreaterThan(now.getTime() + 3600 * 1000);
+    });
+});
+
 describe("face attempt lockout", () => {
     beforeEach(async () => {
         await FaceAttemptState.deleteMany({});
@@ -231,6 +244,21 @@ describe("face attempt lockout", () => {
 });
 
 describe("face pow difficulty", () => {
+    it("escalates +1 bit per two failures after powAfter (not before)", () => {
+        const config = require("../../Core/config");
+        const base = config.faceSecurity.pow.baseDifficulty;
+        const powAfter = config.faceSecurity.attemptLimiter.powAfterFailures;
+        const ladder = (fc) =>
+            Math.min(
+                config.faceSecurity.pow.maxDifficulty,
+                base + Math.max(0, Math.floor((fc - powAfter) / 2))
+            );
+        expect(FacePow.difficultyForFailures(powAfter)).toBe(ladder(powAfter));
+        expect(FacePow.difficultyForFailures(powAfter + 1)).toBe(ladder(powAfter + 1));
+        expect(FacePow.difficultyForFailures(powAfter + 2)).toBe(ladder(powAfter + 2));
+        expect(FacePow.difficultyForFailures(powAfter + 4)).toBe(ladder(powAfter + 4));
+    });
+
     it("uses leading zero bits", () => {
         expect(FacePow.leadingZeroBits("0000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")).toBe(16);
         expect(

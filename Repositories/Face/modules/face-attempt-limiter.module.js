@@ -3,7 +3,21 @@ const FaceAttemptState = require("../models/face-attempt-state.model");
 
 const cfg = () => config.faceSecurity?.attemptLimiter || {};
 
-const stateTtlMs = () => Math.max((cfg().identityWindowSec || 900) * 2 * 1000, 3600000);
+const lockoutLevelDecayMs = () => (cfg().lockoutLevelDecaySec || 86400) * 1000;
+
+/**
+ * Mongo TTL must cover active lock + escalation decay (not just 2× failure window).
+ * @param {{ windowStartedAt?: Date, lockedUntil?: Date|null }} row
+ */
+const computeStateExpiresAt = (row, now = new Date()) => {
+    const windowMs = (cfg().identityWindowSec || 900) * 1000;
+    const windowStart = row.windowStartedAt ? new Date(row.windowStartedAt).getTime() : now.getTime();
+    const windowEnd = windowStart + windowMs;
+    const lockEnd = row.lockedUntil ? new Date(row.lockedUntil).getTime() : 0;
+    const anchor = Math.max(windowEnd, lockEnd, now.getTime());
+    const withLockDecay = lockEnd > 0 ? lockEnd + lockoutLevelDecayMs() : anchor;
+    return new Date(Math.max(anchor, withLockDecay));
+};
 
 const normalizeIp = (ip) => {
     if (ip == null || ip === "") return null;
@@ -31,7 +45,7 @@ const getOrCreateState = async (scope, key) => {
             windowStartedAt: now,
             lockedUntil: null,
             lockoutLevel: 0,
-            expiresAt: new Date(now.getTime() + stateTtlMs()),
+            expiresAt: computeStateExpiresAt({ windowStartedAt: now, lockedUntil: null }, now),
         });
         return row.toObject();
     }
@@ -42,7 +56,13 @@ const getOrCreateState = async (scope, key) => {
         const $set = {
             failureCount: 0,
             windowStartedAt: now,
-            expiresAt: new Date(now.getTime() + stateTtlMs()),
+            expiresAt: computeStateExpiresAt(
+                {
+                    windowStartedAt: now,
+                    lockedUntil: lockStillActive ? row.lockedUntil : null,
+                },
+                now
+            ),
         };
         if (!lockStillActive) {
             $set.lockedUntil = null;
@@ -150,7 +170,13 @@ const incrementFailures = async (scope, key) => {
                 windowStartedAt: row.windowStartedAt || now,
                 lockedUntil,
                 lockoutLevel,
-                expiresAt: new Date(now.getTime() + stateTtlMs()),
+                expiresAt: computeStateExpiresAt(
+                    {
+                        windowStartedAt: row.windowStartedAt || now,
+                        lockedUntil,
+                    },
+                    now
+                ),
             },
         }
     );
@@ -175,7 +201,10 @@ const recordSuccessfulAttempt = async ({ identityKey, deviceKey }) => {
         windowStartedAt: now,
         lockedUntil: null,
         lockoutLevel: 0,
-        expiresAt: new Date(now.getTime() + stateTtlMs()),
+        expiresAt: computeStateExpiresAt(
+            { windowStartedAt: now, lockedUntil: null },
+            now
+        ),
     };
     if (identityKey) {
         await FaceAttemptState.updateOne({ scope: "identity", key: identityKey }, { $set: reset });
@@ -191,4 +220,5 @@ module.exports = {
     recordFailedAttempt,
     recordSuccessfulAttempt,
     deviceScopeKey,
+    computeStateExpiresAt,
 };

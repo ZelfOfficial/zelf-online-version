@@ -18,7 +18,8 @@ const getSecret = () => {
 const difficultyForFailures = (failureCount) => {
     const base = config.faceSecurity?.pow?.baseDifficulty || 16;
     const max = config.faceSecurity?.pow?.maxDifficulty || 19;
-    const extra = Math.max(0, Math.floor((failureCount || 0) / 2));
+    const powAfter = config.faceSecurity?.attemptLimiter?.powAfterFailures || 2;
+    const extra = Math.max(0, Math.floor(((failureCount || 0) - powAfter) / 2));
     return Math.min(max, base + extra);
 };
 

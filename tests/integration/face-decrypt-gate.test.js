@@ -44,7 +44,7 @@ const makeCtx = (bodyOverrides = {}) => {
             ip: "203.0.113.10",
         },
         state: {
-            user: { session: "sess-a", identifier: "ext-user" },
+            user: { session: "sess-a", tagName: "alice.zelf", domain: "zelf", identifier: "ext-user" },
             extractedDomain: "zelf",
         },
         status: undefined,

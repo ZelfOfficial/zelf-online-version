@@ -4,9 +4,9 @@ Shared lockout, proof-of-work, capture nonces, and request body whitelisting for
 
 ## Client flow
 
-1. `POST /api/face/nonce` with `{ action, identifier }` → `{ nonce, expiresAt, pow? }`.
+1. `POST /api/face/nonce` with `{ action }` (optional legacy `identifier`, **ignored for binding**) → `{ nonce, expiresAt, bindingIdentifier, pow? }`. The server resolves `bindingIdentifier` from the JWT (tag@domain, etc.) with the same rules as the face gate.
 2. Face endpoints include `faceNonce` and, when required, `pow: { challengeId, solution }` (challenge fields are stored server-side by `challengeId`).
-3. PoW: `SHA-256(salt + solution)` must have at least `difficulty` **leading zero bits** in the hex digest (`difficultyMode: leading_zero_bits`). Default base difficulty is **16 bits** (~1s at ~100k hashes/s).
+3. PoW: `SHA-256(salt + solution)` must have at least `difficulty` **leading zero bits** in the hex digest (`difficultyMode: leading_zero_bits`). Default **16** bits at the first PoW threshold (`powAfterFailures`, default 2), then **+1 bit per two** additional identity failures, capped at **19**.
 4. `428` + `pow_required` when PoW is mandatory; `429` + `face_locked` + `retryAfter` when locked out; `409` + `face_replay_detected` when the same face capture is reused.
 
 ## Configuration

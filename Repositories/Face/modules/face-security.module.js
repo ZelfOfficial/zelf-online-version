@@ -48,20 +48,36 @@ const buildBodyIdentifier = (body, ctx) => {
     return null;
 };
 
-/** Resource id for nonce/replay/PoW binding (body first, then JWT session identity). */
-const buildIdentifier = (body, ctx) => {
-    const fromBody = buildBodyIdentifier(body, ctx);
-    if (fromBody) return fromBody;
+/**
+ * Nonce / replay / PoW binding: authenticated session identity first so clients cannot
+ * mismatch (e.g. zelf-keys with no tag in body). Body fields are fallback when JWT has no tag.
+ */
+const resolveFaceBindingIdentifier = (body, ctx) => {
     const fromAuth = identityFromAuthUser(ctx.state?.user);
     if (fromAuth) return fromAuth;
-    return null;
+    return buildBodyIdentifier(body, ctx);
 };
+
+/** @deprecated use resolveFaceBindingIdentifier */
+const buildIdentifier = resolveFaceBindingIdentifier;
 
 /** Identity-scoped lockout key; null => device/session scope only (no shared fallback). */
 const buildLockoutIdentityKey = (action, body, ctx) => {
-    const identifier = buildIdentifier(body, ctx);
+    const identifier = resolveFaceBindingIdentifier(body, ctx);
     if (!identifier) return null;
     return `${action}:${identifier}`;
+};
+
+/**
+ * Resolve binding + lockout keys for POST /api/face/nonce (ignores client `identifier` for binding).
+ */
+const resolveFaceNonceContext = (ctx) => {
+    const action = ctx.request.body?.action;
+    const body = ctx.request.body || {};
+    const bindingIdentifier = resolveFaceBindingIdentifier(body, ctx);
+    const sessionKey = sessionKeyFromUser(ctx.state?.user);
+    const identityKey = bindingIdentifier ? `${action}:${bindingIdentifier}` : null;
+    return { action, bindingIdentifier, sessionKey, identityKey };
 };
 
 const sessionKeyFromUser = (authUser) => {
@@ -138,7 +154,7 @@ const runFaceSecurityPre = async (ctx, action) => {
         return true;
     }
 
-    const identifier = buildIdentifier(body, ctx);
+    const identifier = resolveFaceBindingIdentifier(body, ctx);
     const identityKey = buildLockoutIdentityKey(action, body, ctx);
     const sessionKey = sessionKeyFromUser(authUser);
     const ip = ctx.request.ip;
@@ -268,7 +284,9 @@ const runFaceSecurityPost = async (ctx) => {
 
 module.exports = {
     buildIdentifier,
+    resolveFaceBindingIdentifier,
     buildLockoutIdentityKey,
+    resolveFaceNonceContext,
     identityFromAuthUser,
     sessionKeyFromUser,
     issueFaceNonce,

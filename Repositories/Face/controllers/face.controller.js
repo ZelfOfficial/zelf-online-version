@@ -4,9 +4,17 @@ const FaceAttemptLimiter = require("../modules/face-attempt-limiter.module");
 
 const issueNonce = async (ctx) => {
     try {
-        const { action, identifier } = ctx.request.body;
-        const sessionKey = FaceSecurity.sessionKeyFromUser(ctx.state.user);
-        const identityKey = `${action}:${identifier}`;
+        const { action, bindingIdentifier, sessionKey, identityKey } =
+            FaceSecurity.resolveFaceNonceContext(ctx);
+
+        if (!bindingIdentifier) {
+            ctx.status = 409;
+            ctx.body = {
+                message: "Could not resolve face binding identity for this session",
+                code: "face_identifier_unresolvable",
+            };
+            return;
+        }
 
         let failureCount = 0;
         try {
@@ -31,14 +39,19 @@ const issueNonce = async (ctx) => {
             throw err;
         }
 
-        const data = await FaceSecurity.issueFaceNonce({
+        const noncePayload = await FaceSecurity.issueFaceNonce({
             action,
-            identifier,
+            identifier: bindingIdentifier,
             sessionKey,
             failureCount,
         });
 
-        ctx.body = { data };
+        ctx.body = {
+            data: {
+                ...noncePayload,
+                bindingIdentifier,
+            },
+        };
     } catch (error) {
         const _exception = errorHandler(error, ctx);
         ctx.status = _exception.status;

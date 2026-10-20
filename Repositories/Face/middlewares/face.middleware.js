@@ -2,7 +2,8 @@ const { string, validate } = require("../../../Core/JoiUtils");
 const FaceSecurity = require("../modules/face-security.module");
 const nonceIssueSchema = {
     action: string().required(),
-    identifier: string().required(),
+    /** Legacy / ignored for binding; server resolves `bindingIdentifier` from JWT + body. */
+    identifier: string().optional(),
 };
 
 const nonceIssueValidation = async (ctx, next) => {

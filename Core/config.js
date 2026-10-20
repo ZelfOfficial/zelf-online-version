@@ -791,6 +791,11 @@ const configuration = {
             identityMaxFailures: Math.max(1, Number(process.env.FACE_ATTEMPT_IDENTITY_MAX_FAILURES) || 5),
             /** Rolling window (seconds) for counting consecutive failures on an identity. */
             identityWindowSec: Math.max(60, Number(process.env.FACE_ATTEMPT_IDENTITY_WINDOW_SEC) || 15 * 60),
+            /** Keep lockoutLevel after lockedUntil for escalation (Mongo TTL anchor). Default 24h. */
+            lockoutLevelDecaySec: Math.max(
+                3600,
+                Number(process.env.FACE_ATTEMPT_LOCKOUT_LEVEL_DECAY_SEC) || 86400
+            ),
             /** Progressive lockout durations in seconds (15m, 1h, 24h). */
             lockoutStepsSec: (process.env.FACE_ATTEMPT_LOCKOUT_STEPS_SEC || "900,3600,86400")
                 .split(",")
