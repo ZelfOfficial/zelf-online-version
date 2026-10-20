@@ -27,6 +27,7 @@ module.exports = (server) => {
     require("../Repositories/fantom/routes/fantom-scrapping.route")(server);
     //G
     //H
+    require("../Repositories/Face/routes/face.routes")(server);
     require("../Repositories/HumanAuthn/routes/human-authn-protected.route")(server);
     require("../Repositories/HumanAuthn/routes/human-authn-jwt.route")(server);
     require("../Repositories/FaceCertificates/routes/face-certificates-protected.route")(server);

@@ -780,6 +780,53 @@ const configuration = {
         tagPayConfirmations: Math.max(1, Number(process.env.BLOCKDAG_TAG_PAY_CONFIRMATIONS) || 1),
         nowNodesAPIKey: process.env.BLOCKDAG_NOW_NODES_API_KEY,
     },
+    /**
+     * Face anti-abuse: attempt lockout, in-house PoW, capture nonces (#192 / #193).
+     * PoW/nonce enforcement defaults to `log` so older extension builds keep working until clients ship nonces.
+     */
+    faceSecurity: {
+        attemptLimiter: {
+            enabled: process.env.FACE_ATTEMPT_LIMITER_ENABLED !== "false",
+            /** Consecutive failed face/liveness/password attempts per identity before lockout. */
+            identityMaxFailures: Math.max(1, Number(process.env.FACE_ATTEMPT_IDENTITY_MAX_FAILURES) || 5),
+            /** Rolling window (seconds) for counting consecutive failures on an identity. */
+            identityWindowSec: Math.max(60, Number(process.env.FACE_ATTEMPT_IDENTITY_WINDOW_SEC) || 15 * 60),
+            /** Progressive lockout durations in seconds (15m, 1h, 24h). */
+            lockoutStepsSec: (process.env.FACE_ATTEMPT_LOCKOUT_STEPS_SEC || "900,3600,86400")
+                .split(",")
+                .map((s) => Math.max(60, Number(s.trim()) || 900))
+                .filter(Boolean),
+            /** Failed attempts from one IP across any identities in one hour before IP lockout. */
+            ipMaxFailuresPerHour: Math.max(1, Number(process.env.FACE_ATTEMPT_IP_MAX_FAILURES_PER_HOUR) || 20),
+            /** Failed attempts per JWT session id in the identity window before device-scoped lockout. */
+            deviceMaxFailures: Math.max(1, Number(process.env.FACE_ATTEMPT_DEVICE_MAX_FAILURES) || 10),
+            /** Start requiring PoW after this many identity failures in the window (inclusive). */
+            powAfterFailures: Math.max(1, Number(process.env.FACE_ATTEMPT_POW_AFTER_FAILURES) || 2),
+        },
+        pow: {
+            /** Generate on server only: openssl rand -hex 32 — never commit a real value. */
+            hmacSecret: process.env.FACE_POW_HMAC_SECRET || "",
+            challengeTtlSec: Math.max(60, Number(process.env.FACE_POW_CHALLENGE_TTL_SEC) || 300),
+            /** Leading hex zeroes required in SHA-256(salt + solution). */
+            baseDifficulty: Math.max(1, Number(process.env.FACE_POW_BASE_DIFFICULTY) || 4),
+            maxDifficulty: Math.max(4, Number(process.env.FACE_POW_MAX_DIFFICULTY) || 8),
+            /** `log` = issue challenges but allow missing/invalid; `require` = enforce 428/409. */
+            enforcement: String(process.env.FACE_POW_ENFORCEMENT || "log").toLowerCase(),
+        },
+        nonce: {
+            ttlSec: Math.max(30, Number(process.env.FACE_NONCE_TTL_SEC) || 90),
+            /** `log` = allow missing nonce (audit log); `require` = reject missing/invalid. */
+            enforcement: String(process.env.FACE_NONCE_ENFORCEMENT || "log").toLowerCase(),
+        },
+        bodyWhitelist: {
+            enabled: process.env.FACE_BODY_WHITELIST_ENABLED !== "false",
+        },
+        replay: {
+            /** SHA-256 digest of accepted face payloads; TTL for replay detection. */
+            enabled: process.env.FACE_REPLAY_DETECTION_ENABLED !== "false",
+            retentionDays: Math.max(1, Number(process.env.FACE_REPLAY_RETENTION_DAYS) || 7),
+        },
+    },
 };
 
 /**

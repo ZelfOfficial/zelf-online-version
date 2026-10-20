@@ -3,6 +3,7 @@ const config = require("../../../Core/config");
 const Controller = require("../controllers/human-authn.controller");
 
 const Middleware = require("../middlewares/human-authn.middleware");
+const FaceMiddleware = require("../../Face/middlewares/face.middleware");
 const PaymentMiddleware = require("../middlewares/payment.middleware");
 const OptionalJwtMiddleware = require("../middlewares/optional-jwt.middleware");
 
@@ -17,6 +18,7 @@ module.exports = (server) => {
         OptionalJwtMiddleware.optionalJwt,
         PaymentMiddleware.paymentRequired,
         Middleware.encryptValidation,
+        FaceMiddleware.gate("encrypt"),
         Controller.encrypt
     );
 
@@ -25,6 +27,7 @@ module.exports = (server) => {
         OptionalJwtMiddleware.optionalJwt,
         PaymentMiddleware.paymentRequired,
         Middleware.encryptValidation,
+        FaceMiddleware.gate("encrypt"),
         Controller.encryptQRCode
     );
 
@@ -33,6 +36,7 @@ module.exports = (server) => {
         OptionalJwtMiddleware.optionalJwt,
         PaymentMiddleware.paymentRequired,
         Middleware.decryptValidation,
+        FaceMiddleware.gate("decrypt"),
         Controller.decrypt
     );
 
