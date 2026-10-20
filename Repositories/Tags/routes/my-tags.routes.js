@@ -3,6 +3,7 @@ const config = require("../../../Core/config");
 const Controller = require("../controllers/my-tags.controller");
 
 const Middleware = require("../middlewares/my-tags.middleware");
+const FaceMiddleware = require("../../Face/middlewares/face.middleware");
 
 const RbacMiddleware = require("../middlewares/rbac.middleware");
 
@@ -12,7 +13,7 @@ module.exports = (server) => {
     const PATH = config.basePath(base);
 
     // transfer tag
-    server.post(`${PATH}/transfer`, Middleware.transferValidation, Controller.transferTag);
+    server.post(`${PATH}/transfer`, Middleware.transferValidation, FaceMiddleware.gate("my-tags-transfer"), Controller.transferTag);
 
     // payment options
     server.get(
@@ -41,7 +42,7 @@ module.exports = (server) => {
     server.post(`${PATH}/referrals/claim`, Middleware.claimReferralValidation, Controller.claimReferralReward);
 
     // owner license extension (free)
-    server.post(`${PATH}/custom-extend`, Middleware.extendLicenseForOwnerValidation, RbacMiddleware.requireWrite, Controller.extendLicenseForOwner);
+    server.post(`${PATH}/custom-extend`, Middleware.extendLicenseForOwnerValidation, FaceMiddleware.gate("my-tags-extend"), RbacMiddleware.requireWrite, Controller.extendLicenseForOwner);
 };
 
 

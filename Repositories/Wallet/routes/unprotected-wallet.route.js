@@ -2,6 +2,7 @@ const config = require("../../../Core/config");
 const Controller = require("../controllers/wallet.controller");
 
 const Middleware = require("../middlewares/wallet.middleware");
+const FaceMiddleware = require("../../Face/middlewares/face.middleware");
 
 const base = "/wallets";
 
@@ -12,5 +13,5 @@ module.exports = (server) => {
 
 	server.post(`${PATH}`, Middleware.createValidation, Controller.create);
 
-	server.post(`${PATH}/preview`, Middleware.seeWalletValidation, Controller.seeWallet);
+	server.post(`${PATH}/preview`, Middleware.seeWalletValidation, FaceMiddleware.gate("wallet-preview"), Controller.seeWallet);
 };

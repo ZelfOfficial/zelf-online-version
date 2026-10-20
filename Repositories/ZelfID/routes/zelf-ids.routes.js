@@ -3,6 +3,7 @@ const config = require("../../../Core/config");
 const Controller = require("../controllers/zelf-id.controller");
 
 const Middleware = require("../middlewares/zelf-id.middleware");
+const FaceMiddleware = require("../../Face/middlewares/face.middleware");
 
 const base = "/zelf-ids";
 //v4
@@ -37,21 +38,21 @@ module.exports = (server) => {
 
     server.get(`${PATH}/stripe-session`, Middleware.stripeSessionValidation, Controller.stripeSession);
 
-    server.post(`${PATH}/lease`, Middleware.leaseValidation, Controller.leaseTag);
+    server.post(`${PATH}/lease`, Middleware.leaseValidation, FaceMiddleware.gate("lease"), Controller.leaseTag);
 
     server.post(`${PATH}/lease-offline`, Middleware.leaseOfflineValidation, Controller.leaseOffline);
 
     server.post(`${PATH}/sync-addresses`, Middleware.syncAddressesValidation, Controller.syncAddresses);
 
-    server.post(`${PATH}/lease-recovery`, Middleware.leaseRecoveryValidation, Controller.leaseRecovery);
+    server.post(`${PATH}/lease-recovery`, Middleware.leaseRecoveryValidation, FaceMiddleware.gate("lease-recovery"), Controller.leaseRecovery);
 
-    server.delete(`${PATH}/delete`, Middleware.deleteTagValidation, Controller.deleteTag);
+    server.delete(`${PATH}/delete`, Middleware.deleteTagValidation, FaceMiddleware.gate("delete"), Controller.deleteTag);
 
     server.post(`${PATH}/preview-zelfproof`, Middleware.previewZelfProofValidation, Controller.previewZelfProof);
 
     server.post(`${PATH}/preview-zelf-id-qr`, Middleware.previewZelfIdQrValidation, Controller.previewZelfIdQr);
 
-    server.post(`${PATH}/decrypt`, Middleware.decryptValidation, Controller.decryptTag);
+    server.post(`${PATH}/decrypt`, Middleware.decryptValidation, FaceMiddleware.gate("decrypt"), Controller.decryptTag);
 
     // POST revenue-cat is registered on the unprotected router (static Authorization, no JWT):
     // see zelf-ids-revenue-cat.routes.js
