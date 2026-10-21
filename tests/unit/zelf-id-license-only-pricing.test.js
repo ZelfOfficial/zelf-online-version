@@ -70,6 +70,18 @@ describe("Zelf ID plan prices come only from license planPricing", () => {
         expect(() => getZelfIdPrice({ tagName: "abc.zelf", duration: "1", domainConfig: d, requestedPlan: "premium" })).toThrow("409:");
     });
 
+    test("lease-time getZelfIdPrice ignores legacy 10% referral discount when referrer is not whitelisted", () => {
+        const d = live();
+        const quote = getZelfIdPrice({
+            tagName: "abcdefgh.zelf",
+            duration: "1",
+            referralTagName: "jim.zelf",
+            domainConfig: d,
+        });
+        expect(quote.discount).toBe(0);
+        expect(quote.price).toBe(quote.priceWithoutDiscount);
+    });
+
     test("Zelf ID plan quotes ignore legacy 10% referral discount when referrer is not whitelisted", () => {
         const d = live();
         const bare = "jim";

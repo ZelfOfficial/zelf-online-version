@@ -406,12 +406,6 @@ const buildMetadata = (params, tagObject, domainConfig) => {
     const encryptVersion = resolveEncryptVersion(tagObject.publicData);
     const requestedPlan = params.plan || params.requestedPlan;
 
-    require("./zelf-id-plan.module").assertPurchaseKeepsPaidValue({
-        publicData: tagObject.publicData,
-        requestedPlan,
-        tagName: params.tagName || tagObject.fullTagName,
-        domainConfig,
-    });
     const v4Stamp = resolveV4PaymentStamp({
         tagName: params.tagName || tagObject.fullTagName,
         encryptVersion,

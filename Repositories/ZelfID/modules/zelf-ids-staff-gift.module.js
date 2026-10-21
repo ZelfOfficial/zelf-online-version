@@ -6,7 +6,7 @@
  * - Existing name: stamped with the same code a paid upgrade uses (addDurationToTag), price 0, paymentMethod "gift".
  */
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
-const { assertLicenseOffersPlan, getBareName } = require("./zelf-id-plan.module");
+const { assertLicenseOffersPlan, assertPurchaseKeepsPaidValue, getBareName } = require("./zelf-id-plan.module");
 
 const STAFF_TYPES = new Set(["staff", "staff_account"]);
 const WRITE_ROLES = new Set(["write", "admin"]);
@@ -91,6 +91,13 @@ const giftZelfId = async (params = {}, jwt, deps = {}) => {
         tagObject.publicData = { ...(tagObject.publicData || {}), v: provenance.version, origin: provenance.type };
     }
     if (!provenance) provenance = Offline.detectProofProvenance(tagObject.publicData || {});
+
+    assertPurchaseKeepsPaidValue({
+        publicData: tagObject.publicData,
+        requestedPlan: plan,
+        tagName: fullName,
+        domainConfig,
+    });
 
     const result = await addDurationToTag(
         {

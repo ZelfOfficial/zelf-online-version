@@ -600,7 +600,7 @@ async function extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecod
         ? require("../../ZelfID/modules/my-zelf-id.module").addDurationToTag
         : require("./my-tags.module").addDurationToTag;
 
-    await addDurationToTag(
+    const extension = await addDurationToTag(
         {
             tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
             price: amountToPay,
@@ -608,9 +608,15 @@ async function extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecod
             duration: tokenDecoded.duration || 1,
             plan: tokenDecoded.plan,
             domainConfig,
+            paymentCaptured: isZelfId,
+            paymentSource: isZelfId ? "smart_contract" : undefined,
         },
         tagObject,
     );
+
+    if (isZelfId && extension?.manualReview) {
+        return extension;
+    }
 }
 
 async function verifyAvalancheSmartContractPayment(tagName, domain, token, txHash) {

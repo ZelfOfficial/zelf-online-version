@@ -83,9 +83,23 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token) => {
             duration: tokenDecoded.duration || 1,
             plan: tokenDecoded.plan,
             domainConfig,
+            paymentCaptured: true,
+            paymentSource: network,
         },
         tagObject
     );
+
+    if (extension.manualReview) {
+        return {
+            tagObject: extension.tagObject || tagObject,
+            confirmed: false,
+            manualReview: true,
+            status: extension.status,
+            reason: extension.reason,
+            expiresAt: extension.expiresAt || tagObject.publicData?.expiresAt || null,
+            amountReceived: paymentConfirmation.amountReceived,
+        };
+    }
 
     if (extension.expiresAt && tagObject.publicData) {
         tagObject.publicData.expiresAt = extension.expiresAt;
@@ -111,13 +125,6 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig) 
     if (tagData.available) throwPaymentConfirmationTagNotFound(tagName, domain);
 
     const tagObject = tagData.tagObject;
-    const { assertPurchaseKeepsPaidValue } = require("./zelf-id-plan.module");
-    assertPurchaseKeepsPaidValue({
-        publicData: tagObject.publicData,
-        requestedPlan: tokenDecoded.plan,
-        tagName,
-        domainConfig,
-    });
     const initiatedAt = tokenDecoded.initiatedAt ? moment.unix(tokenDecoded.initiatedAt) : null;
     const renewedAt = tagObject.publicData.renewedAt || tagObject.publicData.registeredAt;
 
@@ -125,6 +132,14 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig) 
     if (initiatedAt && renewedAt && moment(renewedAt).isAfter(initiatedAt)) {
         return { cache: true, confirmed: true, amountReceived: 0, tagObject, expiresAt: tagObject.publicData?.expiresAt || null };
     }
+
+    const { assertPurchaseKeepsPaidValue } = require("./zelf-id-plan.module");
+    assertPurchaseKeepsPaidValue({
+        publicData: tagObject.publicData,
+        requestedPlan: tokenDecoded.plan,
+        tagName,
+        domainConfig,
+    });
 
     const referralTagName = tagObject.publicData.referralTagName || tokenDecoded.referralTagName || "";
     const duration = normalizePaymentDuration(tokenDecoded.duration || "1");
@@ -217,6 +232,47 @@ const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata) 
 const addDurationToTag = async (params, tagObject) => {
     const { domain } = params;
     const domainConfig = params.domainConfig || getDomainConfig(domain || "zelf");
+    const tagKey = domainConfig.getTagKey();
+    const bareName =
+        params.tagName ||
+        String(tagObject.publicData?.[tagKey] || tagObject.publicData?.tagName || tagObject.publicData?.zelfName || "")
+            .split(".")[0];
+    const { getPurchaseKeepsPaidValueViolation } = require("./zelf-id-plan.module");
+    const violation = getPurchaseKeepsPaidValueViolation({
+        publicData: tagObject.publicData,
+        requestedPlan: params.plan || params.requestedPlan,
+        tagName: bareName,
+        domainConfig,
+    });
+
+    if (violation) {
+        if (params.paymentCaptured) {
+            const { recordPurchaseManualReview } = require("./zelf-id-purchase-manual-review.module");
+            await recordPurchaseManualReview({
+                tagName: bareName,
+                domain: domain || domainConfig.name,
+                plan: params.plan,
+                duration: params.duration,
+                price: params.price,
+                source: params.paymentSource || "unknown",
+                violationCode: violation,
+                context: {
+                    eventID: params.eventID,
+                    revenueCatOriginalTransactionId: params.revenueCatOriginalTransactionId,
+                    paymentMethod: params.paymentMethod,
+                },
+            });
+            return {
+                manualReview: true,
+                status: "needs_manual_review",
+                reason: violation,
+                tagObject,
+                expiresAt: tagObject.publicData?.expiresAt || null,
+            };
+        }
+        throw new Error(violation);
+    }
+
     const { metadata } = ZelfIdsPaymentModule.buildMetadata(params, tagObject, domainConfig);
 
     return persistZelfIdMetadata(params, tagObject, domainConfig, metadata);

@@ -228,6 +228,7 @@ class Domain {
 
         const length = splitTagName[0].length;
         const plan = options && typeof options === "object" ? options.plan : undefined;
+        const zelfIdQuote = Boolean(options && typeof options === "object" && options.zelfIdQuote);
         const fallbackTable = this.tags?.payment?.pricingTable || {};
         const isPlan = plan === "premium" || plan === "unlimited";
         let price;
@@ -271,14 +272,14 @@ class Domain {
                 discountType = "amount";
                 price = price - discount;
             }
-        } else if (referralTagName && !isPlan) {
+        } else if (referralTagName && !isPlan && !zelfIdQuote) {
             // Legacy Tags default when the license has no whitelist entry for this referrer.
-            // Zelf ID plan checkout uses whitelist coupons only (no hardcoded referral %).
+            // Zelf ID quotes use whitelist coupons only (no hardcoded referral %).
             price = price - price * 0.1;
         }
 
         const rewardPrice = this.tags?.payment?.rewardPrice;
-        const rewardBasis = isPlan ? priceWithoutDiscount : price;
+        const rewardBasis = isPlan || zelfIdQuote ? priceWithoutDiscount : price;
         const reward =
             typeof rewardPrice === "number" && rewardPrice > 0
                 ? Math.max(Math.round((rewardBasis / rewardPrice) * 100) / 100, 0)

@@ -220,7 +220,10 @@ const getZelfIdPrice = ({ tagName, duration = "1", referralTagName = "", domainC
 
     // An explicit paid plan is quoted as-is: getPrice throws 409 when the license does not price it.
     const quotePlan = requestedPlan && requestedPlan !== "free" ? requestedPlan : undefined;
-    const quote = domainConfig.getPrice(tagName, normalizePaymentDuration(duration), referralTagName, quotePlan ? { plan: quotePlan } : {});
+    const quote = domainConfig.getPrice(tagName, normalizePaymentDuration(duration), referralTagName, {
+        ...(quotePlan ? { plan: quotePlan } : {}),
+        zelfIdQuote: true,
+    });
     const allowedPlans = allowedPlansForName(tagName, domainConfig);
     const plan = quotePlan || "free";
 
@@ -536,21 +539,28 @@ const resolveV4PaymentStamp = ({ tagName, encryptVersion, durationYears, duratio
  * @param {string} [params.tagName]
  * @param {Object} [params.domainConfig]
  */
-const assertPurchaseKeepsPaidValue = ({ publicData = {}, requestedPlan, tagName, domainConfig } = {}) => {
-    if (!hasActivePaidLease(publicData)) return;
+const getPurchaseKeepsPaidValueViolation = ({ publicData = {}, requestedPlan, tagName, domainConfig } = {}) => {
+    if (!hasActivePaidLease(publicData)) return null;
     const name = tagName || publicData.tagName || publicData.zelfName;
     const offered = licensePaidPlansForName(name, domainConfig);
     const current = effectivePlan(publicData, domainConfig);
     const target = resolvePaidPlan({ tagName: name, requestedPlan, domainConfig });
     const currentRank = offered.indexOf(current);
     const targetRank = offered.indexOf(target);
-    if (currentRank < 0 || targetRank < 0) return;
-    if (targetRank < currentRank) throw new Error("409:plan_downgrade_not_allowed");
-    if (publicData.duration === "lifetime" && targetRank <= currentRank) throw new Error("409:lifetime_already_owned");
+    if (currentRank < 0 || targetRank < 0) return null;
+    if (targetRank < currentRank) return "409:plan_downgrade_not_allowed";
+    if (publicData.duration === "lifetime" && targetRank <= currentRank) return "409:lifetime_already_owned";
+    return null;
+};
+
+const assertPurchaseKeepsPaidValue = (params = {}) => {
+    const violation = getPurchaseKeepsPaidValueViolation(params);
+    if (violation) throw new Error(violation);
 };
 
 module.exports = {
     assertPurchaseKeepsPaidValue,
+    getPurchaseKeepsPaidValueViolation,
     ZELF_ID_RESERVATION_DURATION,
     ZELF_ID_RESERVATION_HOURS,
     getReservationExpiresAt,
