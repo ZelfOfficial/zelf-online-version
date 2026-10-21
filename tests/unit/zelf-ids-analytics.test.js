@@ -90,6 +90,14 @@ describe("zelf-ids analytics", () => {
         expect(deps.TagsIPFSModule.searchByDomain).toHaveBeenCalledTimes(2);
         expect(after.totals.total).toBe(4);
         expect(after.incomplete).toBeUndefined();
+        expect(after.stale).toBe(true);
+        expect(after.snapshotAgeSec).toBe(5);
+
+        clock = 12_000;
+        const aged = await getSummary({}, {}, deps);
+        expect(aged.snapshotAgeSec).toBe(12);
+        expect(aged.stale).toBe(true);
+        expect(aged.totals.total).toBe(4);
     });
 
     test("surfaces incomplete on summary when no prior snapshot exists", async () => {

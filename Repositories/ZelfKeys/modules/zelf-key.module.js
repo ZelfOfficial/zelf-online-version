@@ -880,11 +880,10 @@ const _ownsZelfKey = (publicData, fullTagName, domain = "zelf") => {
 
 const _listCategoryPrefixesForOwner = (identifier, domain) => {
     const canonical = TagsPartsModule.getFullTagName(identifier, domain);
-    const legacy = `${identifier}${domain ? `.${domain}` : ""}`;
+    const legacyConcat = `${identifier}${domain ? `.${domain}` : ""}`;
+    const legacyDoubleDomain = `${canonical}.${domain}`;
 
-    if (legacy === canonical) return [canonical];
-
-    return [canonical, legacy];
+    return [...new Set([canonical, legacyConcat, legacyDoubleDomain])];
 };
 
 /**

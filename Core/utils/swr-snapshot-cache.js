@@ -1,3 +1,13 @@
+const KEEP_PRIOR_SNAPSHOT = Symbol("KEEP_PRIOR_SNAPSHOT");
+
+const keepPriorSnapshotSignal = () => {
+	const error = new Error("swr_keep_prior_snapshot");
+	error[KEEP_PRIOR_SNAPSHOT] = true;
+	return error;
+};
+
+const isKeepPriorSnapshotSignal = (error) => Boolean(error && error[KEEP_PRIOR_SNAPSHOT]);
+
 /**
  * Small stale-while-revalidate cache for expensive per-key snapshots (e.g. "all tags of a domain").
  * - fresh for `ttlMs`: served from memory
@@ -45,7 +55,11 @@ const createSwrCache = ({
                 return value;
             })
             .catch((error) => {
-                const cur = entries.get(key);
+                const cur = entries.get(key) || {};
+                if (isKeepPriorSnapshotSignal(error)) {
+                    entries.set(key, { ...cur, inflight: null });
+                    if (cur.value !== undefined) return cur.value;
+                }
                 if (cur) cur.inflight = null;
                 throw error;
             });
@@ -72,4 +86,4 @@ const createSwrCache = ({
     return { get, clear: () => entries.clear(), _entries: entries };
 };
 
-module.exports = { createSwrCache };
+module.exports = { createSwrCache, keepPriorSnapshotSignal, isKeepPriorSnapshotSignal };

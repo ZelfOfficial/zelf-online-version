@@ -7,7 +7,7 @@
  *   - getSummary: aggregate counts + daily buckets + recent leases (small payload)
  *   - listRecords: filtered, paginated drill-down (page size 50, max 100)
  */
-const { createSwrCache } = require("../../../Core/utils/swr-snapshot-cache");
+const { createSwrCache, keepPriorSnapshotSignal } = require("../../../Core/utils/swr-snapshot-cache");
 
 const SNAPSHOT_CAP = 50000;
 const DAILY_WINDOW_DAYS = 60;
@@ -185,7 +185,7 @@ const _snapshotFor = async (query, jwt, deps) => {
         const snapshot = await loadSnapshot(domain, deps);
         if (snapshot.incomplete) {
             const prior = swr._entries.get(key)?.value;
-            if (prior && !prior.incomplete) return prior;
+            if (prior && !prior.incomplete) throw keepPriorSnapshotSignal();
         }
         return snapshot;
     };

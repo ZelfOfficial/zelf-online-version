@@ -53,4 +53,14 @@ describe("ZelfKeys list legacy category prefix", () => {
         expect(result.data[0].id).toBe("legacy-pin");
         expect(IPFS.filter).toHaveBeenCalledWith("category", "x.zelf.zelf_password");
     });
+
+    it("lists legacy categories for a bare-name session (x + domain zelf)", async () => {
+        const bareAuth = { tagName: "x", identifier: "x", domain: "zelf" };
+
+        const result = await ZelfKeyModule.listData({ category: "password" }, bareAuth);
+
+        expect(result.data).toHaveLength(1);
+        expect(result.data[0].id).toBe("legacy-pin");
+        expect(IPFS.filter).toHaveBeenCalledWith("category", "x.zelf.zelf_password");
+    });
 });
