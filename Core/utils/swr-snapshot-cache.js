@@ -80,10 +80,15 @@ const createSwrCache = ({
             return { value: entry.value, ageMs: age, stale: true };
         }
         const value = await _refresh(key, loader);
+        const entryAfter = entries.get(key);
+        if (entryAfter && entryAfter.at != null) {
+            const ageAfter = now() - entryAfter.at;
+            return { value, ageMs: ageAfter, stale: ageAfter >= ttlMs };
+        }
         return { value, ageMs: 0, stale: false };
     };
 
-    return { get, clear: () => entries.clear(), _entries: entries };
+    return { get, clear: () => entries.clear(), _entries: entries, ttlMs, maxStaleMs };
 };
 
 module.exports = { createSwrCache, keepPriorSnapshotSignal, isKeepPriorSnapshotSignal };

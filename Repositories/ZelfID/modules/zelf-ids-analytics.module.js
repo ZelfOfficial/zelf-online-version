@@ -13,9 +13,12 @@ const SNAPSHOT_CAP = 50000;
 const DAILY_WINDOW_DAYS = 60;
 const RECENT_N = 10;
 const ARWEAVE_TIMEOUT_MS = 15000;
+const ANALYTICS_SWR_TTL_MS = 5 * 60 * 1000;
+const ANALYTICS_SWR_MAX_STALE_MS = 24 * 60 * 60 * 1000;
+
 const cache = createSwrCache({
-    ttlMs: 5 * 60 * 1000,
-    maxStaleMs: 24 * 60 * 60 * 1000,
+    ttlMs: ANALYTICS_SWR_TTL_MS,
+    maxStaleMs: ANALYTICS_SWR_MAX_STALE_MS,
     warmIntervalMs: 4 * 60 * 1000,
     shouldPersist: (snapshot) => !snapshot?.incomplete,
 });
@@ -181,11 +184,17 @@ const _snapshotFor = async (query, jwt, deps) => {
     const swr = deps.cache || cache;
     const { domain } = await resolveAuthorizedDomain(jwt, query.domain);
     const key = `analytics:${domain}`;
+    const maxStaleMs = swr.maxStaleMs ?? ANALYTICS_SWR_MAX_STALE_MS;
     const loader = async () => {
         const snapshot = await loadSnapshot(domain, deps);
         if (snapshot.incomplete) {
-            const prior = swr._entries.get(key)?.value;
-            if (prior && !prior.incomplete) throw keepPriorSnapshotSignal();
+            const entry = swr._entries.get(key);
+            const prior = entry?.value;
+            const nowMs = deps.now ? deps.now() : Date.now();
+            const priorAgeMs = entry?.at != null ? nowMs - entry.at : Infinity;
+            if (prior && !prior.incomplete && priorAgeMs < maxStaleMs) {
+                throw keepPriorSnapshotSignal();
+            }
         }
         return snapshot;
     };

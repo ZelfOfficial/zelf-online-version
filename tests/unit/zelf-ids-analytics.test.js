@@ -100,6 +100,36 @@ describe("zelf-ids analytics", () => {
         expect(aged.totals.total).toBe(4);
     });
 
+    test("after max-stale, incomplete refresh returns partial data with incomplete flag", async () => {
+        const maxStaleMs = 60_000;
+        let clock = 0;
+        const deps = makeDeps();
+        deps.now = () => clock;
+        deps.cache = createSwrCache({
+            ttlMs: 1000,
+            maxStaleMs,
+            now: deps.now,
+            shouldPersist: (snapshot) => !snapshot?.incomplete,
+        });
+        deps.TagsArweaveModule.searchByDomain = jest.fn(async () => []);
+
+        await getSummary({}, {}, deps);
+
+        clock = maxStaleMs + 10_000;
+        deps.TagsIPFSModule.searchByDomain.mockImplementation(async () => ({
+            rows: [row("only.zelf", "mainnet", "2026-10-14 10:00:00", "2027-10-14 10:00:00")],
+            incomplete: true,
+        }));
+
+        const after = await getSummary({}, {}, deps);
+
+        expect(after.incomplete).toBe(true);
+        expect(after.totals.total).toBe(1);
+        expect(after.stale).toBe(true);
+        expect(after.snapshotAgeSec).toBe(70);
+        expect(after.snapshotAgeSec).not.toBe(0);
+    });
+
     test("surfaces incomplete on summary when no prior snapshot exists", async () => {
         const deps = makeDeps();
         deps.TagsArweaveModule.searchByDomain = jest.fn(async () => []);
