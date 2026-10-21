@@ -7,7 +7,7 @@ jest.mock("../../Repositories/Tags/modules/tags-parts.module", () => ({
     decryptPasswordParams: jest.fn(),
     decryptCreditCardParams: jest.fn(),
     decryptNotesParams: jest.fn(),
-    getFullTagName: jest.fn(),
+    getFullTagName: jest.fn((identifier, domain) => `${identifier}.${domain || "zelf"}`),
     urlToBase64: jest.fn(),
 }));
 
@@ -15,6 +15,7 @@ jest.mock("../../Core/ipfs", () => ({
     deleteFiles: jest.fn(async () => ({ success: true })),
     filter: jest.fn(async () => []),
     pinFile: jest.fn(),
+    getFileById: jest.fn(),
 }));
 
 jest.mock("../../Repositories/ZelfProof/modules/zelf-proof.module", () => ({
@@ -46,9 +47,9 @@ describe("Zelf Keys ownership + error codes", () => {
             resolveZelfIdPasswordForOwnership({
                 type: "password",
                 password: "site-secret",
-                masterPassword: "key-layer",
+                masterPassword: "zelf-id-layer",
             }),
-        ).toBeUndefined();
+        ).toBe("zelf-id-layer");
     });
 
     it("uses password for non-password store ownership", () => {
@@ -68,6 +69,23 @@ describe("Zelf Keys ownership + error codes", () => {
         expect(() => remapZelfKeyCaughtError(new Error("password is required"))).toThrow("409:ERR_PASSWORD_REQUIRED");
     });
 
+    it("accepts masterPassword for extension v4 ownership on delete", () => {
+        expect(
+            resolveZelfIdPasswordForOwnership({
+                masterPassword: "zelf-id-from-extension",
+            }),
+        ).toBe("zelf-id-from-extension");
+    });
+
+    it("prefers password over masterPassword when both are present (non-password store)", () => {
+        expect(
+            resolveZelfIdPasswordForOwnership({
+                password: "explicit-zelf-id",
+                masterPassword: "legacy-master",
+            }),
+        ).toBe("explicit-zelf-id");
+    });
+
     it("maps liveness failures to 422 without matching generic face text", () => {
         expect(() => remapZelfKeyCaughtError(new Error("face is not central"))).toThrow("422:ERR_LIVENESS_FAILED");
         expect(() => remapZelfKeyCaughtError(new Error("face metadata mismatch"))).toThrow("face metadata mismatch");
@@ -78,6 +96,11 @@ describe("deleteZelfKey ownership (_validateOwnership / decryptTag)", () => {
     beforeEach(() => {
         TagsModule.decryptTag.mockReset();
         IPFS.deleteFiles.mockClear();
+        IPFS.getFileById.mockReset();
+        IPFS.getFileById.mockResolvedValue({
+            id: "pin-1",
+            publicData: { keyOwner: "leaseuser.zelf", category: "leaseuser.zelf_password" },
+        });
     });
 
     it("allows face-only Zelf IDs without a password", async () => {
@@ -107,6 +130,30 @@ describe("deleteZelfKey ownership (_validateOwnership / decryptTag)", () => {
             expect.objectContaining({ password: "zelf-id-secret" }),
             authToken,
         );
+    });
+
+    it("accepts masterPassword for extension v4 on delete", async () => {
+        TagsModule.decryptTag.mockResolvedValue({});
+
+        await deleteZelfKey({ id: "pin-2", faceBase64: "face-data", masterPassword: "zelf-id-secret" }, authToken);
+
+        expect(TagsModule.decryptTag).toHaveBeenCalledWith(
+            expect.objectContaining({ password: "zelf-id-secret" }),
+            authToken,
+        );
+    });
+
+    it("rejects delete when the pin belongs to another Zelf ID", async () => {
+        IPFS.getFileById.mockResolvedValueOnce({
+            id: "pin-other",
+            publicData: { keyOwner: "otheruser.zelf", category: "otheruser.zelf_password" },
+        });
+
+        await expect(deleteZelfKey({ id: "pin-other", faceBase64: "face-data" }, authToken)).rejects.toThrow(
+            "403:Not authorized to delete this ZelfKey",
+        );
+        expect(TagsModule.decryptTag).not.toHaveBeenCalled();
+        expect(IPFS.deleteFiles).not.toHaveBeenCalled();
     });
 
     it("rejects delete when decryptTag reports a face mismatch", async () => {

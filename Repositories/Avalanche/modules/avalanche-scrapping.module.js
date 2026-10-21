@@ -44,18 +44,30 @@ const nativeBalance = async (address) => {
 };
 
 const getBalance = async (params) => {
-    const quote = await getTickerPrice({ symbol: "AVAX" }).catch(() => ({ price: "0" }));
-    const balance = await nativeBalance(params.id);
-    const tokenHoldings = await getTokens(params, { show: "200" }).catch((error) => {
-        console.warn("Avalanche token holdings unavailable:", error?.message || error);
-        return { balance: "0", total: 0, tokens: [] };
-    });
-    const history = await getTransactionsList({ id: params.id, page: "0", show: "100" })
-        .then((transactions) => ({ transactions, incomplete: false }))
-        .catch((error) => {
-            console.warn("Avalanche transactions unavailable:", error?.message || error);
-            return { transactions: [], incomplete: true };
-        });
+    const [quote, balance, tokenHoldingsResult, historyResult] = await Promise.all([
+        getTickerPrice({ symbol: "AVAX" }).catch(() => ({ price: "0" })),
+        nativeBalance(params.id),
+        getTokens(params, { show: "200" })
+            .then((value) => ({ ok: true, value }))
+            .catch((error) => {
+                console.warn("Avalanche token holdings unavailable:", error?.message || error);
+                return { ok: false, error };
+            }),
+        getTransactionsList({ id: params.id, page: "0", show: "100" })
+            .then((transactions) => ({ ok: true, value: { transactions, incomplete: false } }))
+            .catch((error) => {
+                console.warn("Avalanche transactions unavailable:", error?.message || error);
+                return { ok: false, error };
+            }),
+    ]);
+
+    const tokenHoldings = tokenHoldingsResult.ok
+        ? tokenHoldingsResult.value
+        : { balance: "0", total: 0, tokens: [] };
+    const history = historyResult.ok ? historyResult.value : { transactions: [], incomplete: true };
+    const tokensFailed = !tokenHoldingsResult.ok;
+    const transactionsFailed = !historyResult.ok;
+    const partial = tokensFailed || transactionsFailed;
 
     const price = String(quote.price);
     const fiatBalance = Number(balance) * Number(price);
@@ -78,7 +90,16 @@ const getBalance = async (params) => {
         account: { asset: "AVAX", fiatBalance: String(fiatBalance), price },
         tokenHoldings,
         transactions: history.transactions,
-        transactionsIncomplete: history.incomplete,
+        transactionsIncomplete: history.incomplete || transactionsFailed,
+        partial,
+        tokensFailed,
+        transactionsFailed,
+        ...(tokensFailed
+            ? { tokensError: tokenHoldingsResult.error?.message || "avalanche_tokens_unavailable" }
+            : {}),
+        ...(transactionsFailed
+            ? { transactionsError: historyResult.error?.message || "avalanche_transactions_unavailable" }
+            : {}),
     };
 };
 

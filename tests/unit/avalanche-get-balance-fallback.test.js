@@ -45,7 +45,7 @@ describe("avalanche getBalance upstream fallbacks", () => {
                 throw { response: { status: 403 } };
             }
             if (String(url).includes("erc20-holdings")) {
-                return { data: { items: [] } };
+                throw new Error("routescan_holdings_unavailable");
             }
             throw new Error(`unexpected url ${url}`);
         });
@@ -58,5 +58,9 @@ describe("avalanche getBalance upstream fallbacks", () => {
         expect(result.balance).toBe("1.0");
         expect(result.tokenHoldings.tokens[0].symbol).toBe("AVAX");
         expect(result.transactions).toEqual([]);
+        expect(result.partial).toBe(true);
+        expect(result.tokensFailed).toBe(true);
+        expect(result.transactionsFailed).toBe(false);
+        expect(result.tokensError).toBeTruthy();
     });
 });

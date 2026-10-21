@@ -221,6 +221,45 @@ const getSignatures = async (address, limit) => {
 	return Array.isArray(result) ? result : [];
 };
 
+/** Native SOL only (no SPL scan / tx history) for fast fallback when scrapers lie about zero balance. */
+const getNativeBalanceSummary = async (params) => {
+	const address = params.id;
+	const priceNum = await getTickerPrice({ symbol: "SOL" }).then(({ price }) => Number(price) || 0).catch(() => 0);
+	const balRes = await rpcCall("getBalance", [address, { commitment: "confirmed" }]);
+	const rawLamports = balRes != null && typeof balRes === "object" && "value" in balRes ? balRes.value : balRes;
+	const balanceSol = Number(rawLamports) / 1e9;
+	const fiatBalance = parseFloat((balanceSol * priceNum).toFixed(4));
+
+	return {
+		address,
+		balance: `${balanceSol}`,
+		fiatBalance,
+		type: "system_account",
+		account: {
+			asset: "SOL",
+			fiatBalance: fiatBalance.toFixed(5),
+			price: `${priceNum}`,
+		},
+		tokenHoldings: {
+			total: 1,
+			balance: fiatBalance,
+			fiatBalance,
+			tokens: [
+				{
+					tokenType: "SOL",
+					fiatBalance,
+					symbol: "SOL",
+					name: "Solana",
+					price: priceNum,
+					amount: balanceSol,
+					image: "https://arweave.net/rO-delUT2hN1oigbIYe5nvZBaDYTvUoA-zbk623ksVg",
+				},
+			],
+		},
+		transactions: [],
+	};
+};
+
 const getAddress = async (params) => {
 	const address = params.id;
 	const pricePromise = getTickerPrice({ symbol: "SOL" }).then(({ price }) => Number(price) || 0);
@@ -340,6 +379,7 @@ const getTransactions = async (params, query) => {
 module.exports = {
 	enrichTxRows,
 	solanaBookBase,
+	getNativeBalanceSummary,
 	getAddress,
 	getTokens,
 	getTransactions,

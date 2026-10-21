@@ -78,21 +78,27 @@ const remapZelfKeyCaughtError = (error) => {
     throw error;
 };
 
+const normalizeOptionalString = (value) => {
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    return trimmed || undefined;
+};
+
 /**
- * Zelf ID password for ownership checks (never the site password on password store rows).
+ * Zelf ID password for ownership (decryptTag). Extension v4 often sends `masterPassword`;
+ * site password on password-store rows stays in `password` and must not be used here.
  * @param {Object} data
  * @returns {string|undefined}
  */
 const resolveZelfIdPasswordForOwnership = (data) => {
     if (!data || typeof data !== "object") return undefined;
     if (data.zelfIdPassword) return data.zelfIdPassword;
-    if (data.type === "password") return undefined;
-    return data.password;
-};
 
-const normalizeOptionalString = (value) => {
-    const trimmed = typeof value === "string" ? value.trim() : "";
-    return trimmed || undefined;
+    const masterPassword = normalizeOptionalString(data.masterPassword);
+    const password = normalizeOptionalString(data.password);
+
+    if (data.type === "password") return masterPassword;
+
+    return password ?? masterPassword;
 };
 
 const compactPublicData = (publicData) => {
@@ -661,7 +667,7 @@ const retrieveData = async (data, authToken) => {
 
     if (protectionRequiresKeyPassword(protection)) {
         if (!decryptedParams.password) {
-            throwZelfKeyClientError("ERR_PASSWORD_REQUIRED");
+            throw new Error("400:ERR_MISSING_PASSWORD");
         }
     } else {
         decryptedParams.password = undefined;
@@ -995,11 +1001,34 @@ const listAllData = async (data, authToken) => {
     };
 };
 
+const _assertKeyRecordBelongsToCaller = async (id, authToken) => {
+    const identifier = authToken.tagName || authToken.identifier;
+    const domain = authToken.domain || "zelf";
+    const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
+
+    let item;
+
+    try {
+        item = await IPFS.getFileById(id);
+    } catch (error) {
+        throw new Error("404:ZelfKey not found");
+    }
+
+    const publicData = item.publicData || {};
+
+    if (!_ownsZelfKey(publicData, fullTagName)) {
+        throw new Error("403:Not authorized to delete this ZelfKey");
+    }
+
+    return item;
+};
+
 const deleteZelfKey = async (data, authToken) => {
     try {
-        const { id, faceBase64, password } = data;
+        const { id, faceBase64 } = data;
 
-        await _validateOwnership(faceBase64, password, authToken, data);
+        await _assertKeyRecordBelongsToCaller(id, authToken);
+        await _validateOwnership(faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
 
         const result = await IPFS.deleteFiles([id]);
 
@@ -1254,7 +1283,7 @@ const changeMasterPassword = async (data, authToken) => {
         throw new Error("409:new_master_password_must_differ");
     }
 
-    await _validateOwnership(faceBase64, data.password, authToken, data);
+    await _validateOwnership(faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
 
     const ownedItems = await _listOwnedKeyItems(authToken);
     const targets = ownedItems.filter(

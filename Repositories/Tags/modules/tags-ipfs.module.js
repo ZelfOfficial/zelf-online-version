@@ -560,12 +560,30 @@ const unPinFiles = async (ids = []) => {
 };
 
 const SEARCH_BY_DOMAIN_ALLOWED_LIMITS = [25, 50, 100, 250, 500];
-const SEARCH_BY_DOMAIN_MAX_SCAN = 5000;
+const SEARCH_BY_DOMAIN_MAX_SCAN = 50000;
+const SEARCH_BY_DOMAIN_CACHE_TTL_MS = 60 * 1000;
+/** @type {Map<string, { at: number, rows: Array }>} */
+const searchByDomainFilteredCache = new Map();
+
+const _searchByDomainCacheKey = (domainLower, property, filterValue, namePattern) =>
+	`${domainLower}|${property}|${filterValue}|${namePattern}`;
+
+const _getCachedFilteredRows = async (property, filterValue, domainLower, namePattern) => {
+	const key = _searchByDomainCacheKey(domainLower, property, filterValue, namePattern);
+	const hit = searchByDomainFilteredCache.get(key);
+	if (hit && Date.now() - hit.at < SEARCH_BY_DOMAIN_CACHE_TTL_MS) {
+		return hit.rows;
+	}
+
+	const rows = await _collectSearchByDomainRows(property, filterValue, domainLower, namePattern);
+	searchByDomainFilteredCache.set(key, { at: Date.now(), rows });
+	return rows;
+};
 
 const normalizeSearchByDomainLimit = (limit) => {
 	const parsed = parseInt(limit, 10);
 	if (SEARCH_BY_DOMAIN_ALLOWED_LIMITS.includes(parsed)) return parsed;
-	if (Number.isFinite(parsed) && parsed > 0) return Math.min(parsed, 500);
+	if (Number.isFinite(parsed) && parsed > 0) return Math.min(parsed, SEARCH_BY_DOMAIN_MAX_SCAN);
 	return 50;
 };
 
@@ -634,7 +652,7 @@ const searchByDomain = async (params, authUser) => {
 	const property = namePattern ? "name" : "domain";
 	const filterValue = namePattern || domain;
 
-	const allRows = await _collectSearchByDomainRows(property, filterValue, domainLower, namePattern);
+	const allRows = await _getCachedFilteredRows(property, filterValue, domainLower, namePattern);
 	const total = allRows.length;
 	const rows = allRows.slice(resolvedOffset, resolvedOffset + resolvedLimit);
 

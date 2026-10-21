@@ -20,6 +20,10 @@ jest.mock("../../Repositories/ZelfProof/modules/zelf-proof.module", () => ({
         if (layer === "WithoutPassword" || layer === "NoPassword") return false;
         return undefined;
     }),
+    ZELFPROOF_CLIENT_ERROR_STATUS: {
+        ERR_INVALID_PASSWORD: 401,
+        ERR_PASSWORD_REQUIRED: 409,
+    },
 }));
 
 jest.mock("../../Repositories/Tags/modules/qr-zelfproof-extractor.module", () => ({

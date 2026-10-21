@@ -131,7 +131,7 @@ function extractAddresses(publicData) {
 }
 
 async function fetchPinsForDomain(domain, namePattern, maxPins) {
-    const rows = await TagsIPFSModule.searchByDomain(
+    const result = await TagsIPFSModule.searchByDomain(
         {
             domain,
             limit: maxPins,
@@ -140,7 +140,8 @@ async function fetchPinsForDomain(domain, namePattern, maxPins) {
         },
         {},
     );
-    return Array.isArray(rows) ? rows : [];
+    if (Array.isArray(result)) return result;
+    return result?.rows || [];
 }
 
 async function runBatch(items, concurrency, fn) {
