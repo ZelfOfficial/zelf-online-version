@@ -78,13 +78,18 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token) => {
     const extension = await addDurationToTag(
         {
             tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
-            price: amountToPay,
+            price: tokenDecoded.prices?.[network]?.price ?? amountToPay,
+            billableUsdPrice: tokenDecoded.prices?.[network]?.price,
+            cryptoSymbol: network,
+            cryptoAmount: amountToPay,
             domain,
             duration: tokenDecoded.duration || 1,
             plan: tokenDecoded.plan,
             domainConfig,
             paymentCaptured: true,
             paymentSource: network,
+            paymentNetwork: network,
+            paymentInitiatedAt: tokenDecoded.initiatedAt,
         },
         tagObject
     );
@@ -94,6 +99,7 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token) => {
             tagObject: extension.tagObject || tagObject,
             confirmed: false,
             manualReview: true,
+            cache: Boolean(extension.manualReviewCache),
             status: extension.status,
             reason: extension.reason,
             expiresAt: extension.expiresAt || tagObject.publicData?.expiresAt || null,
@@ -248,22 +254,29 @@ const addDurationToTag = async (params, tagObject) => {
     if (violation) {
         if (params.paymentCaptured) {
             const { recordPurchaseManualReview } = require("./zelf-id-purchase-manual-review.module");
-            await recordPurchaseManualReview({
+            const { created } = await recordPurchaseManualReview({
                 tagName: bareName,
                 domain: domain || domainConfig.name,
                 plan: params.plan,
                 duration: params.duration,
                 price: params.price,
+                billableUsdPrice: params.billableUsdPrice,
+                cryptoSymbol: params.cryptoSymbol,
+                cryptoAmount: params.cryptoAmount,
                 source: params.paymentSource || "unknown",
                 violationCode: violation,
-                context: {
-                    eventID: params.eventID,
-                    revenueCatOriginalTransactionId: params.revenueCatOriginalTransactionId,
-                    paymentMethod: params.paymentMethod,
-                },
+                sessionId: params.sessionId,
+                txHash: params.txHash,
+                paymentNetwork: params.paymentNetwork || params.paymentSource,
+                eventID: params.eventID,
+                paymentInitiatedAt: params.paymentInitiatedAt,
+                params,
+                tagObject,
+                domainConfig,
             });
             return {
                 manualReview: true,
+                manualReviewCache: !created,
                 status: "needs_manual_review",
                 reason: violation,
                 tagObject,

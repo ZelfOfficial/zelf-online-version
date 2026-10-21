@@ -12,6 +12,8 @@ const zelfIdPurchaseManualReviewSchema = new mongoose.Schema({
     source: { type: String, required: true },
     violationCode: { type: String, required: true },
     status: { type: String, enum: ["needs_manual_review"], default: "needs_manual_review" },
+    /** Stripe session id, on-chain tx id, or RevenueCat event id — at most one review row per payment. */
+    paymentKey: { type: String, sparse: true, unique: true },
     context: { type: mongoose.Schema.Types.Mixed, default: {} },
 });
 

@@ -267,14 +267,6 @@ const confirmPaidStripeSession = async (session) => {
         };
     }
 
-    const { assertPurchaseKeepsPaidValue } = require("./zelf-id-plan.module");
-    assertPurchaseKeepsPaidValue({
-        publicData: tagObject.publicData,
-        requestedPlan: plan,
-        tagName,
-        domainConfig,
-    });
-
     const durationParam = duration === "lifetime" ? "lifetime" : parseInt(duration, 10);
     const price = Number(amountUsd) || (inspected.amountTotal ? inspected.amountTotal / 100 : 0);
     const result = await addDurationToTag(
@@ -288,6 +280,7 @@ const confirmPaidStripeSession = async (session) => {
             paymentCaptured: true,
             paymentSource: "stripe",
             sessionId: inspected.sessionId,
+            billableUsdPrice: price,
         },
         tagObject
     );
@@ -298,6 +291,7 @@ const confirmPaidStripeSession = async (session) => {
             action: "needs_manual_review",
             confirmed: false,
             manualReview: true,
+            cache: Boolean(result.manualReviewCache),
             reason: result.reason,
             tagName,
             domain,

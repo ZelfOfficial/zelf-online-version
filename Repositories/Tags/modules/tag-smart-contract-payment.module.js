@@ -586,7 +586,18 @@ async function verifyBlockdagChainOrFail({ normalizedHash, expectedContract, sc,
     });
 }
 
-async function extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject }) {
+const resolveSmartContractPaymentNetwork = (tokenDecoded = {}) => {
+    if (tokenDecoded.smartContractAVAX) return "AVAX";
+    if (tokenDecoded.smartContractBSC) return "BNB";
+    if (tokenDecoded.smartContractETH) return "ETH";
+    if (tokenDecoded.smartContractPOLYGON) return "POL";
+    if (tokenDecoded.smartContractBASE) return "BASE";
+    if (tokenDecoded.smartContractBDAG) return "BDAG";
+    return "smart_contract";
+};
+
+async function extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject, txHash, paymentNetwork }) {
+    const resolvedNetwork = paymentNetwork || resolveSmartContractPaymentNetwork(tokenDecoded);
     const { resolveEncryptVersion } = require("./tags-addresses.module");
     const encryptVersion = resolveEncryptVersion(tagObject.publicData);
     const isZelfId =
@@ -609,7 +620,13 @@ async function extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecod
             plan: tokenDecoded.plan,
             domainConfig,
             paymentCaptured: isZelfId,
-            paymentSource: isZelfId ? "smart_contract" : undefined,
+            paymentSource: isZelfId ? resolvedNetwork : undefined,
+            paymentNetwork: resolvedNetwork,
+            txHash: isZelfId ? txHash : undefined,
+            billableUsdPrice: tokenDecoded.prices?.[resolvedNetwork]?.price,
+            cryptoSymbol: resolvedNetwork,
+            cryptoAmount: amountToPay,
+            paymentInitiatedAt: tokenDecoded.initiatedAt,
         },
         tagObject,
     );
@@ -673,7 +690,7 @@ async function verifyAvalancheSmartContractPayment(tagName, domain, token, txHas
 
     const licenseExtension = computeScLicenseExtension(tagObject.publicData.expiresAt, tokenDecoded.duration);
 
-    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject });
+    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject, txHash: normalizedHash });
 
     const result = {
         tagObject,
@@ -743,7 +760,7 @@ async function verifyBscSmartContractPayment(tagName, domain, token, txHash) {
 
     const licenseExtension = computeScLicenseExtension(tagObject.publicData.expiresAt, tokenDecoded.duration);
 
-    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject });
+    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject, txHash: normalizedHash });
 
     const result = {
         tagObject,
@@ -813,7 +830,7 @@ async function verifyEthSmartContractPayment(tagName, domain, token, txHash) {
 
     const licenseExtension = computeScLicenseExtension(tagObject.publicData.expiresAt, tokenDecoded.duration);
 
-    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject });
+    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject, txHash: normalizedHash });
 
     const result = {
         tagObject,
@@ -883,7 +900,7 @@ async function verifyPolygonSmartContractPayment(tagName, domain, token, txHash)
 
     const licenseExtension = computeScLicenseExtension(tagObject.publicData.expiresAt, tokenDecoded.duration);
 
-    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject });
+    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject, txHash: normalizedHash });
 
     const result = {
         tagObject,
@@ -953,7 +970,7 @@ async function verifyBaseSmartContractPayment(tagName, domain, token, txHash) {
 
     const licenseExtension = computeScLicenseExtension(tagObject.publicData.expiresAt, tokenDecoded.duration);
 
-    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject });
+    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject, txHash: normalizedHash });
 
     const result = {
         tagObject,
@@ -1021,7 +1038,7 @@ async function verifyBlockdagSmartContractPayment(tagName, domain, token, txHash
 
     const licenseExtension = computeScLicenseExtension(tagObject.publicData.expiresAt, tokenDecoded.duration);
 
-    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject });
+    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject, txHash: normalizedHash });
 
     const result = {
         tagObject,

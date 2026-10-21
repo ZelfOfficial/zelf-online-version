@@ -398,6 +398,8 @@ const applyRevenueCatPurchase = async (inspected) => {
             revenueCatOriginalTransactionId: originalTransactionId || tagObject.publicData.revenueCatOriginalTransactionId,
             paymentCaptured: true,
             paymentSource: "revenuecat",
+            eventID: eventId,
+            billableUsdPrice: price,
         },
         tagObject
     );
@@ -410,6 +412,7 @@ const applyRevenueCatPurchase = async (inspected) => {
             action: "needs_manual_review",
             confirmed: false,
             manualReview: true,
+            cache: Boolean(result.manualReviewCache),
             reason: result.reason,
             tagName,
             domain,

@@ -19,9 +19,22 @@ jest.mock("jsonwebtoken", () => ({
     verify: jest.fn(),
 }));
 
-jest.mock("../../Repositories/ZelfID/modules/zelf-id-purchase-manual-review.module", () => ({
-    recordPurchaseManualReview: jest.fn().mockResolvedValue({ _id: "review-1" }),
-}));
+const manualReviewStore = new Map();
+jest.mock("../../Repositories/ZelfID/modules/zelf-id-purchase-manual-review.module", () => {
+    const actual = jest.requireActual("../../Repositories/ZelfID/modules/zelf-id-purchase-manual-review.module");
+    return {
+        ...actual,
+        recordPurchaseManualReview: jest.fn(async (input) => {
+            const key = actual.resolvePaymentKey(input);
+            if (key && manualReviewStore.has(key)) {
+                return { record: manualReviewStore.get(key), created: false };
+            }
+            const record = { _id: "review-1", paymentKey: key };
+            if (key) manualReviewStore.set(key, record);
+            return { record, created: true };
+        }),
+    };
+});
 
 const moment = require("moment");
 const { verifyPaymentConfirmation } = require("../../Repositories/ZelfID/modules/my-zelf-id.module");
@@ -77,6 +90,7 @@ describe("Zelf ID purchase guards", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        manualReviewStore.clear();
         getDomainConfig.mockReturnValue({
             ...domainConfig,
             isIPFSEnabled: () => false,
@@ -141,6 +155,52 @@ describe("Zelf ID purchase guards", () => {
         expect(result.confirmed).toBe(true);
     });
 
+    test("confirmPaidStripeSession returns needs_manual_review without throwing when post-payment guard blocks stamp", async () => {
+        const created = moment().subtract(1, "hour").unix();
+        ZelfIdModule.searchTag.mockResolvedValue({
+            available: false,
+            tagObject: {
+                publicData: {
+                    tagName: "jimqatest.zelf",
+                    type: "mainnet",
+                    plan: "unlimited",
+                    duration: "1",
+                    expiresAt: moment().add(1, "year").format("YYYY-MM-DD HH:mm:ss"),
+                    renewedAt: moment().subtract(2, "hours").format("YYYY-MM-DD HH:mm:ss"),
+                    registeredAt: "2020-01-01 00:00:00",
+                    v: "4",
+                },
+            },
+        });
+
+        const session = {
+            metadata: buildLeaseStripeMetadata({
+                tagName: "jimqatest",
+                domain: "zelf",
+                duration: "1",
+                plan: "premium",
+                amountUsd: 29,
+            }),
+            payment_status: "paid",
+            created,
+            amount_total: 2900,
+            id: "cs_test_manual_review",
+        };
+
+        const first = await confirmPaidStripeSession(session);
+        expect(first.status).toBe("success");
+        expect(first.action).toBe("needs_manual_review");
+        expect(first.manualReview).toBe(true);
+        expect(first.confirmed).toBe(false);
+        expect(recordPurchaseManualReview).toHaveBeenCalledTimes(1);
+
+        const second = await confirmPaidStripeSession(session);
+        expect(second.action).toBe("needs_manual_review");
+        expect(second.cache).toBe(true);
+        expect(recordPurchaseManualReview).toHaveBeenCalledTimes(2);
+        expect(manualReviewStore.size).toBe(1);
+    });
+
     test("addDurationToTag after captured payment records manual review instead of stamping", async () => {
         const tagObject = {
             publicData: {
@@ -172,6 +232,8 @@ describe("Zelf ID purchase guards", () => {
                 },
                 paymentCaptured: true,
                 paymentSource: "stripe",
+                sessionId: "cs_test_add_duration",
+                billableUsdPrice: 29,
             },
             tagObject
         );
