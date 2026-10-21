@@ -280,14 +280,17 @@ describe("Zelf IDs payment API", () => {
 		expect(response.status).toBe(401);
 	});
 
-	it("GET /zelf-ids/stripe-session — 409 without sessionId", async () => {
+	it("GET /zelf-ids/stripe-session — 400 without sessionId", async () => {
 		const response = await request(API_BASE_URL)
 			.get(`${ZELF_IDS_PATH}/stripe-session`)
 			.set("Origin", ORIGIN)
 			.set("Authorization", `Bearer ${authToken}`);
 
-		expect(response.status).toBe(409);
-		expect(response.body).toHaveProperty("validationError");
+		expect(response.status).toBe(400);
+		expect(response.body).toEqual({
+			message: "Checkout session id is required",
+			code: "invalid_session_id",
+		});
 	});
 
 	it("POST /zelf-ids/payment-confirmation — unpaid unique address stays unconfirmed", async () => {

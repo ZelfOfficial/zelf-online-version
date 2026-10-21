@@ -180,8 +180,8 @@ const _verifyWithProvider = async (sessionIdOrCode) => {
     let isPaid = false;
 
     if (sessionIdOrCode.startsWith("cs_")) {
-        // Stripe
-        const session = await stripe.checkout.sessions.retrieve(sessionIdOrCode);
+        const { retrieveCheckoutSession } = require("../../Stripe/modules/stripe-checkout-session.module");
+        const session = await retrieveCheckoutSession(stripe, sessionIdOrCode);
         isPaid = session.payment_status === "paid";
 
         details = {

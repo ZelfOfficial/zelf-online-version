@@ -1,5 +1,6 @@
 const Stripe = require("stripe");
 const config = require("../../../Core/config");
+const { retrieveCheckoutSession } = require("../../Stripe/modules/stripe-checkout-session.module");
 const { getMyLicense } = require("../../License/modules/license.module");
 const IpfsLookupCache = require("../../../Core/ipfs-lookup-cache");
 
@@ -300,7 +301,7 @@ const verifySession = async (sessionId, authToken) => {
     if (!myLicense) throw new Error("404:license_not_found");
 
     // 1. Retrieve the session
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    const session = await retrieveCheckoutSession(stripe, sessionId);
 
     if (!session) throw new Error("404:session_not_found");
 
