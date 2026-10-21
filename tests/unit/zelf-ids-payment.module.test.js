@@ -260,6 +260,24 @@ describe("zelf-ids-payment.module", () => {
 		expect(moment(v36Extra.expiresAt).diff(moment(stored, "YYYY-MM-DD HH:mm:ss"), "year", true)).toBeGreaterThanOrEqual(0.9);
 	});
 
+	test("buildMetadata refuses unlimited -> premium downgrade on an active paid lease", () => {
+		const tagObject = {
+			publicData: {
+				origin: "online",
+				type: "mainnet",
+				plan: "unlimited",
+				duration: "1",
+				hasPassword: "true",
+				v: "4",
+				expiresAt: moment().add(1, "year").format("YYYY-MM-DD HH:mm:ss"),
+			},
+		};
+
+		expect(() =>
+			buildMetadata({ tagName: "zid12345", domain: "zelf", duration: 1, price: 29, plan: "premium" }, tagObject, domainConfig)
+		).toThrow("409:plan_downgrade_not_allowed");
+	});
+
 	test("buildMetadata keeps v=3 on a legacy Tags proof while still stamping plan", () => {
 		const tagObject = {
 			publicData: {

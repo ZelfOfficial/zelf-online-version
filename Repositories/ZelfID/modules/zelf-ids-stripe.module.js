@@ -232,6 +232,13 @@ const confirmPaidStripeSession = async (session) => {
     }
 
     const tagObject = tagData.tagObject;
+    const { assertPurchaseKeepsPaidValue } = require("./zelf-id-plan.module");
+    assertPurchaseKeepsPaidValue({
+        publicData: tagObject.publicData,
+        requestedPlan: plan,
+        tagName,
+        domainConfig,
+    });
     const initiatedAt = inspected.created ? moment.unix(inspected.created) : null;
     const renewedAtCondition = Boolean(
         tagObject.publicData.renewedAt && initiatedAt && moment(tagObject.publicData.renewedAt).isAfter(initiatedAt)

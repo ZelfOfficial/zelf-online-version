@@ -111,6 +111,13 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig) 
     if (tagData.available) throwPaymentConfirmationTagNotFound(tagName, domain);
 
     const tagObject = tagData.tagObject;
+    const { assertPurchaseKeepsPaidValue } = require("./zelf-id-plan.module");
+    assertPurchaseKeepsPaidValue({
+        publicData: tagObject.publicData,
+        requestedPlan: tokenDecoded.plan,
+        tagName,
+        domainConfig,
+    });
     const initiatedAt = tokenDecoded.initiatedAt ? moment.unix(tokenDecoded.initiatedAt) : null;
     const renewedAt = tagObject.publicData.renewedAt || tagObject.publicData.registeredAt;
 

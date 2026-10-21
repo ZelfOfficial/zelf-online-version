@@ -271,17 +271,25 @@ class Domain {
                 discountType = "amount";
                 price = price - discount;
             }
-        } else if (referralTagName) {
-            // default discount 10 %
+        } else if (referralTagName && !isPlan) {
+            // Legacy Tags default when the license has no whitelist entry for this referrer.
+            // Zelf ID plan checkout uses whitelist coupons only (no hardcoded referral %).
             price = price - price * 0.1;
         }
+
+        const rewardPrice = this.tags?.payment?.rewardPrice;
+        const rewardBasis = isPlan ? priceWithoutDiscount : price;
+        const reward =
+            typeof rewardPrice === "number" && rewardPrice > 0
+                ? Math.max(Math.round((rewardBasis / rewardPrice) * 100) / 100, 0)
+                : 0;
 
         // Round to 2 decimal places (nearest cent)
         return {
             duration,
             price: Math.max(Math.round(price * 100) / 100, 0),
             currency: "USD",
-            reward: Math.max(Math.round((price / this.tags?.payment.rewardPrice) * 100) / 100, 0),
+            reward,
             discount,
             priceWithoutDiscount,
             discountType,
