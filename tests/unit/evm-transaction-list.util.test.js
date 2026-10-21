@@ -237,6 +237,29 @@ describe("evm-transaction-list.util", () => {
 		expect(httpGet).toHaveBeenCalledTimes(1);
 	});
 
+	it("fetchTransactionsFromBlockscout returns incomplete when a hop times out mid-walk", async () => {
+		const httpGet = jest
+			.fn()
+			.mockResolvedValueOnce({
+				data: {
+					items: [{ hash: "0x1", from: { hash: "0xa" }, to: { hash: "0xb" }, value: "0", timestamp: "2024-01-01T00:00:00.000000Z" }],
+					next_page_params: { block_number: 10, index: 1 },
+				},
+			})
+			.mockRejectedValueOnce({ code: "ECONNABORTED", message: "timeout of 4000ms exceeded" });
+
+		const result = await fetchTransactionsFromBlockscout(httpGet, {
+			baseUrl: "https://explorer.optimism.io",
+			address: TEST_ADDRESS,
+			limit: 1,
+			page: 2,
+			deadlineMs: 12000,
+		});
+
+		expect(result.incomplete).toBe(true);
+		expect(result.hasMore).toBe(true);
+	});
+
 	it("fetchTransactionsFromBlockscout walks pages without cursor (page 2)", async () => {
 		const httpGet = jest
 			.fn()
@@ -306,6 +329,22 @@ describe("evm-transaction-list.util", () => {
 		]);
 
 		expect(result).toMatchObject({ incomplete: true, hasMore: true });
+	});
+
+	it("runTransactionProviderLadder passes remaining list deadline to providers", async () => {
+		const result = await runTransactionProviderLadder(
+			[
+				async (hopTimeout, walkDeadlineMs) => ({
+					hopTimeout,
+					walkDeadlineMs,
+					transactions: [{ hash: "0xprobe" }],
+				}),
+			],
+			{ deadlineMs: 12000 }
+		);
+
+		expect(result.hopTimeout).toBeLessThanOrEqual(4000);
+		expect(result.walkDeadlineMs).toBeGreaterThan(11000);
 	});
 
 	it("runTransactionProviderLadder prefers rows over incomplete markers", async () => {

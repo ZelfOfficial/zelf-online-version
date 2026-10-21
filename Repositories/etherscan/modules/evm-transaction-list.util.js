@@ -350,13 +350,17 @@ const fetchTransactionsFromRouteScan = async (
 			return buildWalkBudgetIncomplete({ nextToken: pageResult?.nextToken ?? null });
 		}
 
-		pageResult = await fetchRouteScanPage(httpGet, {
-			chainId,
-			address,
-			limit,
-			nextToken: walkCursor,
-			timeout: Math.min(timeout, remaining),
-		});
+		try {
+			pageResult = await fetchRouteScanPage(httpGet, {
+				chainId,
+				address,
+				limit,
+				nextToken: walkCursor,
+				timeout: Math.min(timeout, remaining),
+			});
+		} catch (err) {
+			return buildWalkBudgetIncomplete({ nextToken: pageResult?.nextToken ?? null });
+		}
 
 		if (current === targetPage) {
 			return pageResult;
@@ -448,12 +452,19 @@ const fetchTransactionsFromBlockscout = async (
 			};
 		}
 
-		pageResult = await fetchBlockscoutPage(httpGet, {
-			baseUrl,
-			address,
-			cursor: walkCursor,
-			timeout: Math.min(timeout, remaining),
-		});
+		try {
+			pageResult = await fetchBlockscoutPage(httpGet, {
+				baseUrl,
+				address,
+				cursor: walkCursor,
+				timeout: Math.min(timeout, remaining),
+			});
+		} catch (err) {
+			return {
+				...buildWalkBudgetIncomplete({ nextToken: null }),
+				nextPageParams: pageResult?.nextPageParams ?? null,
+			};
+		}
 
 		if (current === targetPage) {
 			return finalizeBlockscoutPage(pageResult);
@@ -514,7 +525,7 @@ const runTransactionProviderLadder = async (providers, options = {}) => {
 
 		try {
 			const attemptTimeout = resolveProviderTimeout(providerIndex, remaining, options);
-			const result = await provider(attemptTimeout);
+			const result = await provider(attemptTimeout, remaining);
 			if (result?.transactions?.length) {
 				return result;
 			}
@@ -541,6 +552,9 @@ const runTransactionProviderRace = async (providers, options = {}) => {
 	if (!Array.isArray(providers) || providers.length === 0) {
 		return null;
 	}
+
+	const startedAt = Date.now();
+	const remainingMs = () => Math.max(0, deadlineMs - (Date.now() - startedAt));
 
 	return new Promise((resolve) => {
 		let settled = false;
@@ -579,7 +593,7 @@ const runTransactionProviderRace = async (providers, options = {}) => {
 			}
 
 			Promise.resolve()
-				.then(() => provider(timeout))
+				.then(() => provider(timeout, remainingMs()))
 				.then((result) => settle(result))
 				.catch((err) => {
 					if (!isTimeoutError(err)) {

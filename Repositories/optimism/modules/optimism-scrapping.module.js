@@ -21,6 +21,7 @@ const {
 	TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS,
 	DEFAULT_TX_TIMEOUT_MS,
 	formatUtcIsoDate,
+	isTimeoutError,
 } = require("../../etherscan/modules/evm-transaction-list.util");
 
 const OPTIMISM_CHAIN_ID = 10;
@@ -284,42 +285,48 @@ const getTransactionsList = async (query) => {
 		}
 
 		const pageNumber = normalizePage(page === "0" ? 1 : page);
+		const blockscoutCursor = pickBlockscoutCursor(query);
 		let ladderResult = null;
 
 		if (pageNumber === 1) {
 			ladderResult = await runTransactionProviderRace(
 				[
-					async (timeout) => getOKLinkTransactions(address, page, show, price, timeout),
-					async (timeout) => getOptimismBlockscoutTransactions(address, query, show, price, timeout),
+					async (hopTimeout, walkDeadlineMs) =>
+						getOKLinkTransactions(address, page, show, price, hopTimeout),
+					async (hopTimeout, walkDeadlineMs) =>
+						getOptimismBlockscoutTransactions(address, query, show, price, hopTimeout, walkDeadlineMs),
 				],
 				{ deadlineMs, perProviderTimeoutMs: TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS }
 			);
 		}
 
 		if (!ladderResult?.transactions?.length) {
-			ladderResult = await runTransactionProviderLadder(
-				[
-					...(pageNumber === 1
-						? []
-						: [async (timeout) => getOKLinkTransactions(address, page, show, price, timeout)]),
-					async (timeout) => getOptimismScanTransactions(address, page, show, price, timeout),
-					...(pageNumber === 1
-						? []
-						: [async (timeout) => getOptimismBlockscoutTransactions(address, query, show, price, timeout)]),
-				],
-				{
-					deadlineMs,
-					primaryProviderTimeoutMs:
-						pageNumber === 1 ? undefined : TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS,
-				}
-			);
+			const blockscoutProvider = async (hopTimeout, walkDeadlineMs) =>
+				getOptimismBlockscoutTransactions(address, query, show, price, hopTimeout, walkDeadlineMs);
+			const oklinkProvider = async (hopTimeout) => getOKLinkTransactions(address, page, show, price, hopTimeout);
+			const optimismScanProvider = async (hopTimeout) =>
+				getOptimismScanTransactions(address, page, show, price, hopTimeout);
+
+			const ladderProviders =
+				pageNumber > 1 && !blockscoutCursor
+					? [blockscoutProvider, optimismScanProvider, oklinkProvider]
+					: [
+							...(pageNumber === 1 ? [] : [oklinkProvider]),
+							optimismScanProvider,
+							...(pageNumber === 1 ? [] : [blockscoutProvider]),
+						];
+
+			ladderResult = await runTransactionProviderLadder(ladderProviders, {
+				deadlineMs,
+				primaryProviderTimeoutMs: pageNumber === 1 ? undefined : TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS,
+			});
 		}
 
-		if (ladderResult?.transactions?.length) {
+		if (ladderResult) {
 			return ladderResult;
 		}
 
-		return { pagination: { records: "0", pages: "0", page: "0" }, transactions: [] };
+		return { pagination: { records: "0", pages: "0", page: String(pageNumber) }, transactions: [] };
 	} catch (error) {
 		console.error("Error getting Optimism transactions:", error.message || "Unknown error");
 		return { pagination: { records: "0", pages: "0", page: "0" }, transactions: [] };
@@ -428,18 +435,28 @@ const getOptimismScanTransactions = async (address, page, show, price, timeout =
 	}
 };
 
-const getOptimismBlockscoutTransactions = async (address, query, show, price, timeout = DEFAULT_TX_TIMEOUT_MS) => {
+const getOptimismBlockscoutTransactions = async (
+	address,
+	query,
+	show,
+	price,
+	hopTimeout = DEFAULT_TX_TIMEOUT_MS,
+	walkDeadlineMs
+) => {
+	const limit = parseInt(show, 10) || 25;
+	const pageNumber = normalizePage(query.page === "0" ? 1 : query.page);
+	const walkBudgetMs =
+		typeof walkDeadlineMs === "number" && walkDeadlineMs > 0 ? walkDeadlineMs : hopTimeout;
+
 	try {
-		const limit = parseInt(show, 10) || 25;
-		const pageNumber = normalizePage(query.page === "0" ? 1 : query.page);
 		const blockscoutPage = await fetchTransactionsFromBlockscout((url, options) => instance.get(url, options), {
 			baseUrl: OPTIMISM_BLOCKSCOUT_BASE,
 			address,
 			limit,
 			page: pageNumber,
 			cursor: pickBlockscoutCursor(query),
-			timeout,
-			deadlineMs: timeout,
+			timeout: hopTimeout,
+			deadlineMs: walkBudgetMs,
 		});
 
 		if (blockscoutPage.incomplete) {
@@ -467,6 +484,19 @@ const getOptimismBlockscoutTransactions = async (address, query, show, price, ti
 			source: "blockscout",
 		};
 	} catch (error) {
+		if (isTimeoutError(error)) {
+			return {
+				...buildListResponse([], {
+					page: pageNumber,
+					show: limit,
+					incomplete: true,
+					hasMore: true,
+					pagingNote:
+						"Transaction list pagination exceeded the time budget before reaching the requested page.",
+				}),
+				source: "blockscout",
+			};
+		}
 		console.log("Optimism Blockscout transactions failed:", error.message);
 		return null;
 	}

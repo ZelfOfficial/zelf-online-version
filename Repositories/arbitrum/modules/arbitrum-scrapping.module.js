@@ -19,6 +19,7 @@ const {
 	TX_LIST_DEADLINE_MS,
 	DEFAULT_TX_TIMEOUT_MS,
 	formatUtcIsoDate,
+	isTimeoutError,
 } = require("../../etherscan/modules/evm-transaction-list.util");
 
 const ARBITRUM_CHAIN_ID = 42161;
@@ -281,20 +282,25 @@ const getTransactionsList = async (query) => {
 			console.log("Price fetch failed, using default:", priceError.message);
 		}
 
-		const ladderResult = await runTransactionProviderLadder(
-			[
-				async (timeout) => getOKLinkTransactions(address, page, show, price, timeout),
-				async (timeout) => getArbiscanTransactions(address, page, show, price, timeout),
-				async (timeout) => getArbitrumBlockscoutTransactions(address, query, show, price, timeout),
-			],
-			{ deadlineMs }
-		);
+		const pageNumber = normalizePage(page === "0" ? 1 : page);
+		const blockscoutCursor = pickBlockscoutCursor(query);
+		const blockscoutProvider = async (hopTimeout, walkDeadlineMs) =>
+			getArbitrumBlockscoutTransactions(address, query, show, price, hopTimeout, walkDeadlineMs);
+		const oklinkProvider = async (hopTimeout) => getOKLinkTransactions(address, page, show, price, hopTimeout);
+		const arbiscanProvider = async (hopTimeout) => getArbiscanTransactions(address, page, show, price, hopTimeout);
 
-		if (ladderResult?.transactions?.length) {
+		const ladderProviders =
+			pageNumber > 1 && !blockscoutCursor
+				? [blockscoutProvider, oklinkProvider, arbiscanProvider]
+				: [oklinkProvider, arbiscanProvider, blockscoutProvider];
+
+		const ladderResult = await runTransactionProviderLadder(ladderProviders, { deadlineMs });
+
+		if (ladderResult) {
 			return ladderResult;
 		}
 
-		return { pagination: { records: "0", pages: "0", page: "0" }, transactions: [] };
+		return { pagination: { records: "0", pages: "0", page: String(pageNumber) }, transactions: [] };
 	} catch (error) {
 		console.error("Error getting Arbitrum transactions:", error.message || "Unknown error");
 		return { pagination: { records: "0", pages: "0", page: "0" }, transactions: [] };
@@ -403,18 +409,28 @@ const getArbiscanTransactions = async (address, page, show, price, timeout = DEF
 	}
 };
 
-const getArbitrumBlockscoutTransactions = async (address, query, show, price, timeout = DEFAULT_TX_TIMEOUT_MS) => {
+const getArbitrumBlockscoutTransactions = async (
+	address,
+	query,
+	show,
+	price,
+	hopTimeout = DEFAULT_TX_TIMEOUT_MS,
+	walkDeadlineMs
+) => {
+	const limit = parseInt(show, 10) || 25;
+	const pageNumber = normalizePage(query.page === "0" ? 1 : query.page);
+	const walkBudgetMs =
+		typeof walkDeadlineMs === "number" && walkDeadlineMs > 0 ? walkDeadlineMs : hopTimeout;
+
 	try {
-		const limit = parseInt(show, 10) || 25;
-		const pageNumber = normalizePage(query.page === "0" ? 1 : query.page);
 		const blockscoutPage = await fetchTransactionsFromBlockscout((url, options) => instance.get(url, options), {
 			baseUrl: ARBITRUM_BLOCKSCOUT_BASE,
 			address,
 			limit,
 			page: pageNumber,
 			cursor: pickBlockscoutCursor(query),
-			timeout,
-			deadlineMs: timeout,
+			timeout: hopTimeout,
+			deadlineMs: walkBudgetMs,
 		});
 
 		if (blockscoutPage.incomplete) {
@@ -442,6 +458,19 @@ const getArbitrumBlockscoutTransactions = async (address, query, show, price, ti
 			source: "blockscout",
 		};
 	} catch (error) {
+		if (isTimeoutError(error)) {
+			return {
+				...buildListResponse([], {
+					page: pageNumber,
+					show: limit,
+					incomplete: true,
+					hasMore: true,
+					pagingNote:
+						"Transaction list pagination exceeded the time budget before reaching the requested page.",
+				}),
+				source: "blockscout",
+			};
+		}
 		console.log("Arbitrum Blockscout transactions failed:", error.message);
 		return null;
 	}

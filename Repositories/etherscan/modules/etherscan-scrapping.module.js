@@ -342,15 +342,15 @@ const getTransactionsList = async (params) => {
 
     const ladderResult = await runTransactionProviderLadder(
         [
-            async (timeout) => {
+            async (hopTimeout, walkDeadlineMs) => {
                 const routeScanPage = await fetchTransactionsFromRouteScan(httpGet, {
                     chainId: ETH_MAINNET_CHAIN_ID,
                     address,
                     limit: show,
                     page,
                     nextToken: routeScanNext,
-                    timeout,
-                    deadlineMs: timeout,
+                    timeout: hopTimeout,
+                    deadlineMs: walkDeadlineMs ?? hopTimeout,
                 });
 
                 if (routeScanPage.incomplete) {
