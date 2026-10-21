@@ -1,4 +1,5 @@
 const { string, validate } = require("../../../Core/JoiUtils");
+const { checkoutSessionIdJoi } = require("../../Stripe/modules/stripe-checkout-session.module");
 
 const schemas = {
 	getById: {
@@ -9,7 +10,7 @@ const schemas = {
 		priceId: string().required(),
 	},
 	verifySession: {
-		sessionId: string().required(),
+		sessionId: checkoutSessionIdJoi(),
 	},
 };
 
@@ -52,16 +53,24 @@ const createPortalSessionValidation = async (ctx, next) => {
 };
 
 const verifySessionValidation = async (ctx, next) => {
-	const { sessionId } = ctx.request.body;
+	const raw = ctx.request.body?.sessionId;
+	const trimmed = typeof raw === "string" ? raw.trim() : raw;
 
-	const valid = validate(schemas.verifySession, { sessionId });
-
-	if (valid.error) {
+	if (raw === undefined || raw === null || trimmed === "") {
 		ctx.status = 409;
-		ctx.body = { validationError: valid.error.message };
+		ctx.body = { validationError: "missing sessionId\n" };
 		return;
 	}
 
+	const valid = validate(schemas.verifySession, { sessionId: trimmed });
+
+	if (valid.error) {
+		ctx.status = 400;
+		ctx.body = { message: "Checkout session id format is invalid", code: "invalid_session_id" };
+		return;
+	}
+
+	ctx.request.body = { ...ctx.request.body, sessionId: trimmed };
 	await next();
 };
 

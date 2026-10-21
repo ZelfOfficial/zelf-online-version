@@ -1,4 +1,5 @@
 const { string, number, boolean, validate, stringEnum, object } = require("../../../Core/JoiUtils");
+const { checkoutSessionIdJoi } = require("../../Stripe/modules/stripe-checkout-session.module");
 const jwt = require("jsonwebtoken");
 const moment = require("moment");
 const config = require("../../../Core/config");
@@ -122,7 +123,7 @@ const paymentSchemas = {
         email: string(),
     },
     stripeSession: {
-        sessionId: string().required(),
+        sessionId: checkoutSessionIdJoi(),
     },
     revenueCatEvent: {
         type: string().required(),
@@ -290,14 +291,24 @@ const stripeCheckoutValidation = async (ctx, next) => {
 };
 
 const stripeSessionValidation = async (ctx, next) => {
-    const valid = validate(paymentSchemas.stripeSession, ctx.request.query);
+    const raw = ctx.request.query?.sessionId;
+    const trimmed = typeof raw === "string" ? raw.trim() : raw;
 
-    if (valid.error) {
-        ctx.status = 409;
-        ctx.body = { validationError: valid.error.message };
+    if (raw === undefined || raw === null || trimmed === "") {
+        ctx.status = 400;
+        ctx.body = { message: "Checkout session id is required", code: "invalid_session_id" };
         return;
     }
 
+    const valid = validate(paymentSchemas.stripeSession, { ...ctx.request.query, sessionId: trimmed });
+
+    if (valid.error) {
+        ctx.status = 400;
+        ctx.body = { message: "Checkout session id format is invalid", code: "invalid_session_id" };
+        return;
+    }
+
+    ctx.request.query = { ...ctx.request.query, sessionId: trimmed };
     await next();
 };
 

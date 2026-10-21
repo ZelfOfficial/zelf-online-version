@@ -355,7 +355,7 @@ const _loadMyLicenseForAccount = async (jwt, withJSON, ownershipCredentials) => 
 
     if (!client) throw new Error("404:client_not_found");
 
-    const metadata = client.publicData;
+    const metadata = client.publicData || {};
 
     let accountZelfProof = null;
 
@@ -379,7 +379,7 @@ const _loadMyLicenseForAccount = async (jwt, withJSON, ownershipCredentials) => 
 
     let myRecords = [];
     // Owner clients index on accountEmail. Staff clients do not — use the org owner.
-    const licenseOwnerEmail = metadata.accountEmail || metadata.staffOwnerEmail || jwt.ownerEmail;
+    const licenseOwnerEmail = metadata?.accountEmail || metadata?.staffOwnerEmail || jwt.ownerEmail;
     if (licenseOwnerEmail) {
         myRecords = await IPFS.get({ key: "licenseOwner", value: licenseOwnerEmail });
     }

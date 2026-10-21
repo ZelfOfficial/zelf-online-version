@@ -15,6 +15,8 @@ const TYPE = "zelf_id_lease";
 const isPlanSlug = (plan) => /^[a-z0-9_-]+$/i.test(String(plan || ""));
 const isDurationStamp = (duration) => duration === "lifetime" || /^\d+$/.test(String(duration || ""));
 
+const { retrieveCheckoutSession } = require("../../Stripe/modules/stripe-checkout-session.module");
+
 const getStripeClient = () => Stripe(config.stripe.secretKey);
 
 const durationStamp = (duration) => {
@@ -320,15 +322,11 @@ const confirmFromCheckoutEvent = async (event) => confirmPaidStripeSession(event
 const confirmFromSessionId = async (sessionId) => {
     const id = String(sessionId || "").trim();
 
-    if (!id.startsWith("cs_")) {
-        throw new Error("409:invalid_session_id");
-    }
-
     if (!config.stripe?.secretKey) {
         throw new Error("500:stripe_not_configured");
     }
 
-    const session = await getStripeClient().checkout.sessions.retrieve(id);
+    const session = await retrieveCheckoutSession(getStripeClient(), id);
 
     return confirmPaidStripeSession(session);
 };
