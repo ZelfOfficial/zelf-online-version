@@ -47,6 +47,12 @@ describe("evm-transaction-list.util", () => {
 		expect(formatDecimalString(weiToEthDecimalString("10000000000000"))).not.toMatch(/e/i);
 	});
 
+	it("preserves provider decimal strings without float noise", () => {
+		expect(formatDecimalString("0.39985")).toBe("0.39985");
+		expect(formatDecimalString(0.39985)).toBe("0.39985");
+		expect(formatDecimalString("0.39985")).not.toBe("0.399849999999999983");
+	});
+
 	it("maps Etherscan V2 rows with price and timestamp", () => {
 		const row = mapEtherscanV2Transaction(
 			{

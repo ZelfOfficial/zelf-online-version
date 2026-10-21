@@ -1,3 +1,7 @@
+jest.mock("dotenv", () => ({
+	config: jest.fn(),
+}));
+
 const mockInstanceGet = jest.fn();
 const mockAxiosGet = jest.fn();
 const mockGetTickerPrice = jest.fn();
@@ -102,12 +106,39 @@ describe("etherscan-scrapping.module getTransactionsList", () => {
 	it("falls back to Bogota microservice when public providers are empty", async () => {
 		process.env.MICROSERVICES_BOGOTA_URL = "https://bogota.test";
 		process.env.MICROSERVICES_BOGOTA_TOKEN = "token";
+		delete process.env.ETHERSCAN_API_KEY;
 
 		const { getTransactionsList } = loadEtherscanModule();
 
-		mockInstanceGet.mockRejectedValueOnce(new Error("routescan down")).mockResolvedValueOnce({
-			data: [{ hash: "0xbogota", amount: "1" }],
-		});
+		mockInstanceGet
+			.mockRejectedValueOnce(new Error("routescan down"))
+			.mockResolvedValueOnce({
+				data: [{ hash: "0xbogota", amount: "1" }],
+			});
+
+		mockAxiosGet.mockResolvedValueOnce({ data: { code: "1", data: { hits: [] } } });
+
+		const result = await getTransactionsList({ address: TEST_ADDRESS, show: "5", deadlineMs: 12000 });
+
+		expect(result.source).toBe("bogota");
+		expect(result.transactions[0].hash).toBe("0xbogota");
+	});
+
+	it("falls back to Bogota when ETHERSCAN_API_KEY is present in the environment", async () => {
+		process.env.MICROSERVICES_BOGOTA_URL = "https://bogota.test";
+		process.env.MICROSERVICES_BOGOTA_TOKEN = "token";
+		process.env.ETHERSCAN_API_KEY = "test-etherscan-key-from-env";
+
+		const { getTransactionsList } = loadEtherscanModule();
+
+		mockInstanceGet
+			.mockRejectedValueOnce(new Error("routescan down"))
+			.mockResolvedValueOnce({
+				data: { status: "0", message: "NOTOK", result: "No transactions found" },
+			})
+			.mockResolvedValueOnce({
+				data: [{ hash: "0xbogota", amount: "1" }],
+			});
 
 		mockAxiosGet.mockResolvedValueOnce({ data: { code: "1", data: { hits: [] } } });
 

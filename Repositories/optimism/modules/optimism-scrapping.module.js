@@ -16,7 +16,9 @@ const {
 	fetchTransactionsFromBlockscout,
 	pickBlockscoutCursor,
 	runTransactionProviderLadder,
+	runTransactionProviderRace,
 	TX_LIST_DEADLINE_MS,
+	TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS,
 	DEFAULT_TX_TIMEOUT_MS,
 } = require("../../etherscan/modules/evm-transaction-list.util");
 
@@ -280,14 +282,37 @@ const getTransactionsList = async (query) => {
 			console.log("Price fetch failed, using default:", priceError.message);
 		}
 
-		const ladderResult = await runTransactionProviderLadder(
-			[
-				async (timeout) => getOKLinkTransactions(address, page, show, price, timeout),
-				async (timeout) => getOptimismScanTransactions(address, page, show, price, timeout),
-				async (timeout) => getOptimismBlockscoutTransactions(address, query, show, price, timeout),
-			],
-			{ deadlineMs }
-		);
+		const pageNumber = normalizePage(page === "0" ? 1 : page);
+		let ladderResult = null;
+
+		if (pageNumber === 1) {
+			ladderResult = await runTransactionProviderRace(
+				[
+					async (timeout) => getOKLinkTransactions(address, page, show, price, timeout),
+					async (timeout) => getOptimismBlockscoutTransactions(address, query, show, price, timeout),
+				],
+				{ deadlineMs, perProviderTimeoutMs: TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS }
+			);
+		}
+
+		if (!ladderResult?.transactions?.length) {
+			ladderResult = await runTransactionProviderLadder(
+				[
+					...(pageNumber === 1
+						? []
+						: [async (timeout) => getOKLinkTransactions(address, page, show, price, timeout)]),
+					async (timeout) => getOptimismScanTransactions(address, page, show, price, timeout),
+					...(pageNumber === 1
+						? []
+						: [async (timeout) => getOptimismBlockscoutTransactions(address, query, show, price, timeout)]),
+				],
+				{
+					deadlineMs,
+					primaryProviderTimeoutMs:
+						pageNumber === 1 ? undefined : TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS,
+				}
+			);
+		}
 
 		if (ladderResult?.transactions?.length) {
 			return ladderResult;

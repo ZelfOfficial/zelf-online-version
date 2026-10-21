@@ -6,6 +6,7 @@ const ETHERSCAN_V2_API = process.env.ETHERSCAN_V2_API || "https://api.etherscan.
 const DEFAULT_TX_TIMEOUT_MS = Number(process.env.EVM_TX_FETCH_TIMEOUT_MS) || 4000;
 const TX_LIST_DEADLINE_MS = Number(process.env.EVM_TX_LIST_DEADLINE_MS) || 12000;
 const TX_LIST_PROVIDER_TIMEOUT_MS = Number(process.env.EVM_TX_PROVIDER_TIMEOUT_MS) || 4000;
+const TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS = Number(process.env.EVM_TX_PRIMARY_PROVIDER_TIMEOUT_MS) || 7000;
 const ETH_ADDRESS_OVERVIEW_TX_CAP_MS = Number(process.env.ETH_ADDRESS_OVERVIEW_TX_CAP_MS) || 3500;
 
 const normalizeTransactionLimit = (show, defaultLimit = 25) =>
@@ -35,16 +36,46 @@ const weiToEthDecimalString = (wei) => {
 	}
 };
 
+const trimTrailingZeros = (decimal) => {
+	if (!decimal.includes(".")) {
+		const normalized = decimal.replace(/^\+/, "");
+		return normalized || "0";
+	}
+
+	const trimmed = decimal.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+	if (!trimmed || trimmed === "-" || trimmed === "+") return "0";
+	return trimmed.replace(/^\+/, "");
+};
+
 const formatDecimalString = (value, maxFractionDigits = 18) => {
 	if (value === null || value === undefined) return "0";
+	if (typeof value === "bigint") return formatDecimalString(value.toString(), maxFractionDigits);
+
 	const raw = typeof value === "string" ? value.trim() : String(value);
 	if (!raw || raw === "0") return "0";
-	if (/^[-+]?\d+$/.test(raw)) return raw;
-	const num = Number(raw);
-	if (!Number.isFinite(num)) return "0";
-	if (num === 0) return "0";
-	const fixed = num.toFixed(maxFractionDigits);
-	return fixed.replace(/\.?0+$/, "") || "0";
+
+	if (/^[-+]?\d+$/.test(raw)) {
+		return raw.replace(/^\+/, "");
+	}
+
+	if (/^[-+]?(\d+)\.(\d+)$/.test(raw) && !/[eE]/.test(raw)) {
+		const match = raw.match(/^([-+]?)(\d+)\.(\d+)$/);
+		if (!match) return "0";
+		const sign = match[1] === "-" ? "-" : "";
+		const whole = match[2];
+		const fraction = match[3].slice(0, maxFractionDigits);
+		return trimTrailingZeros(`${sign}${whole}.${fraction}`);
+	}
+
+	if (/[eE]/.test(raw)) {
+		try {
+			return formatDecimalString(weiToEthDecimalString(BigInt(raw)), maxFractionDigits);
+		} catch {
+			return "0";
+		}
+	}
+
+	return "0";
 };
 
 const computeFeeEthDecimal = (gasUsed, gasPrice) => {
@@ -353,15 +384,29 @@ const pickBlockscoutCursor = (query = {}) => {
 /**
  * Run transaction providers sequentially until one returns rows or the deadline passes.
  */
-const runTransactionProviderLadder = async (providers, { deadlineMs = TX_LIST_DEADLINE_MS } = {}) => {
+const resolveProviderTimeout = (providerIndex, remaining, options = {}) => {
+	if (typeof options.getProviderTimeout === "function") {
+		return Math.min(options.getProviderTimeout(providerIndex, remaining), remaining);
+	}
+
+	if (providerIndex === 0 && options.primaryProviderTimeoutMs) {
+		return Math.min(options.primaryProviderTimeoutMs, remaining);
+	}
+
+	return Math.min(TX_LIST_PROVIDER_TIMEOUT_MS, remaining);
+};
+
+const runTransactionProviderLadder = async (providers, options = {}) => {
+	const deadlineMs = options.deadlineMs || TX_LIST_DEADLINE_MS;
 	const startedAt = Date.now();
 
-	for (const provider of providers) {
+	for (let providerIndex = 0; providerIndex < providers.length; providerIndex++) {
+		const provider = providers[providerIndex];
 		const remaining = deadlineMs - (Date.now() - startedAt);
 		if (remaining <= 0) break;
 
 		try {
-			const attemptTimeout = Math.min(TX_LIST_PROVIDER_TIMEOUT_MS, remaining);
+			const attemptTimeout = resolveProviderTimeout(providerIndex, remaining, options);
 			const result = await provider(attemptTimeout);
 			if (result?.transactions?.length) {
 				return result;
@@ -374,6 +419,34 @@ const runTransactionProviderLadder = async (providers, { deadlineMs = TX_LIST_DE
 	}
 
 	return null;
+};
+
+/**
+ * Run providers in parallel and return the first non-empty result (page-1 resilience).
+ */
+const runTransactionProviderRace = async (providers, options = {}) => {
+	const deadlineMs = options.deadlineMs || TX_LIST_DEADLINE_MS;
+	const perProviderTimeoutMs = options.perProviderTimeoutMs || TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS;
+	const startedAt = Date.now();
+	const remainingMs = () => Math.max(0, deadlineMs - (Date.now() - startedAt));
+
+	const attempts = providers.map((provider) =>
+		(async () => {
+			const timeout = Math.min(perProviderTimeoutMs, remainingMs());
+			if (timeout <= 0) return null;
+			try {
+				return await provider(timeout);
+			} catch (err) {
+				if (!isTimeoutError(err)) {
+					console.error({ evmTxProviderRaceError: err?.message || err });
+				}
+				return null;
+			}
+		})()
+	);
+
+	const results = await Promise.all(attempts);
+	return results.find((result) => result?.transactions?.length) || null;
 };
 
 const withTxListDeadline = async (promise, deadlineMs = TX_LIST_DEADLINE_MS) => {
@@ -394,6 +467,7 @@ module.exports = {
 	DEFAULT_TX_TIMEOUT_MS,
 	TX_LIST_DEADLINE_MS,
 	TX_LIST_PROVIDER_TIMEOUT_MS,
+	TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS,
 	ETH_ADDRESS_OVERVIEW_TX_CAP_MS,
 	ETHERSCAN_V2_API,
 	normalizeTransactionLimit,
@@ -415,6 +489,7 @@ module.exports = {
 	fetchBlockscoutPage,
 	pickBlockscoutCursor,
 	runTransactionProviderLadder,
+	runTransactionProviderRace,
 	withTxListDeadline,
 	weiToEthDecimalString,
 };

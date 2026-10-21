@@ -51,7 +51,7 @@ const CHAIN_ID_BY_ENV = {
     development: 11155111, // Sepolia
 };
 
-const etherscanKeyForGas = () => process.env.ETHERSCAN_API_KEY || config.etherscan.apiKey;
+const etherscanKeyForGas = () => String(process.env.ETHERSCAN_API_KEY || "").trim();
 
 const infuraProjectId = () => process.env.INFURA_APIKEY || config.etherscan.apiKey;
 
