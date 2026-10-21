@@ -1,4 +1,6 @@
-const { string, validate, boolean, stringEnum, object, array } = require("../../../Core/JoiUtils");
+const { string, validate, boolean, stringEnum, object, array, stringOrNumber } = require("../../../Core/JoiUtils");
+const ZelfKeyZotpModule = require("../modules/zelf-key-zotp.module");
+const { ZOTP_ALGORITHMS } = ZelfKeyZotpModule;
 
 /**
  * ZelfKey Middleware - Business logic validation for password manager operations
@@ -57,6 +59,9 @@ const schemas = {
 		username: string().required(),
 		setupKey: string().required(),
 		issuer: string().required(),
+		algorithm: string().optional(),
+		digits: stringOrNumber().optional(),
+		period: stringOrNumber().optional(),
 		folder: string().optional().allow(""),
 		insideFolder: boolean().optional().allow(false),
 		faceBase64: string().required(),
@@ -185,6 +190,31 @@ const storeZOTPValidation = async (ctx, next) => {
 		ctx.body = { validationError: valid.error.message };
 		return;
 	}
+
+	const setupKeyResult = ZelfKeyZotpModule.normalizeSetupKey(ctx.request.body.setupKey);
+	if (!setupKeyResult.normalized) {
+		ctx.status = 409;
+		ctx.body = {
+			code: setupKeyResult.code,
+			validationError: setupKeyResult.message,
+		};
+		return;
+	}
+
+	const totpParams = ZelfKeyZotpModule.resolveZotpTotpParams(ctx.request.body);
+	if (totpParams.error) {
+		ctx.status = 409;
+		ctx.body = {
+			code: totpParams.error.code,
+			validationError: totpParams.error.message,
+		};
+		return;
+	}
+
+	ctx.request.body.setupKey = setupKeyResult.normalized;
+	ctx.request.body.algorithm = totpParams.algorithm;
+	ctx.request.body.digits = totpParams.digits;
+	ctx.request.body.period = totpParams.period;
 
 	await next();
 };
@@ -409,6 +439,7 @@ const deleteZelfKeyValidation = async (ctx, next) => {
 };
 
 module.exports = {
+	ZOTP_ALGORITHMS,
 	SUPPORTED_CATEGORIES,
 	PROTECTION_MODES,
 	PROTECTION_FACE,

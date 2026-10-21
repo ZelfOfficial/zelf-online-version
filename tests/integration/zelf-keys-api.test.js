@@ -95,6 +95,23 @@ describe("ZelfKeys API Integration Tests", () => {
             expect(response.body).toHaveProperty("validationError");
         });
 
+        it("POST /zelf-keys/store/zotp — should return 409 for invalid setupKey", async () => {
+            const response = await request(API_BASE_URL)
+                .post(`${ZELF_KEYS_PATH}/store/zotp`)
+                .set("Origin", "https://test.example.com")
+                .set("Authorization", `Bearer ${authToken}`)
+                .send({
+                    username: "user@zelf.world",
+                    setupKey: "!!!not-base32!!!",
+                    issuer: "GitHub",
+                    faceBase64,
+                });
+
+            expect(response.status).toBe(409);
+            expect(response.body.code).toBe("ERR_INVALID_SETUP_KEY");
+            expect(response.body.validationError).toMatch(/Base32/i);
+        });
+
         it("POST /zelf-keys/store/notes — should return 409 when required fields are missing", async () => {
             const response = await request(API_BASE_URL)
                 .post(`${ZELF_KEYS_PATH}/store/notes`)
@@ -242,8 +259,11 @@ describe("ZelfKeys API Integration Tests", () => {
                 .set("Authorization", `Bearer ${authToken}`)
                 .send({
                     username: "user@zelf.world",
-                    setupKey: "JBSWY3DPEHPK3PXP",
+                    setupKey: "jbsw-y3dp ehpk3pxp=",
                     issuer: "GitHub",
+                    algorithm: "SHA256",
+                    digits: 8,
+                    period: 60,
                     faceBase64,
                     masterPassword: TEST_PASSWORD,
                     removePGP: true,
@@ -254,6 +274,11 @@ describe("ZelfKeys API Integration Tests", () => {
             expect(response.body.data).toHaveProperty("type", "zotp");
             expect(response.body.data).toHaveProperty("zelfProof");
             expect(response.body.data.ipfs?.publicData?.v).toBe("4");
+            expect(response.body.data.ipfs?.publicData).toMatchObject({
+                algorithm: "SHA256",
+                digits: 8,
+                period: 60,
+            });
 
             storedZotpZelfProof = response.body.data.zelfProof;
             console.log("✅ ZOTP stored successfully");
@@ -374,6 +399,14 @@ describe("ZelfKeys API Integration Tests", () => {
 
             expect(response.status).toBe(200);
             expect(response.body.data).toHaveProperty("category", "zotp");
+            const stored = (response.body.data.data || []).find((item) => item.publicData?.issuer === "GitHub");
+            if (stored) {
+                expect(stored.publicData).toMatchObject({
+                    algorithm: "SHA256",
+                    digits: 8,
+                    period: 60,
+                });
+            }
             console.log(`✅ Listed ${response.body.data.totalCount} zotp records`);
         });
 

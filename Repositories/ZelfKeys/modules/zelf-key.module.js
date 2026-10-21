@@ -27,6 +27,7 @@ const {
     PROTECTION_FACE_PASSWORD,
     passwordCredentialSchema,
 } = require("../middlewares/zelf-key.middleware");
+const { withZotpTotpDefaults } = require("./zelf-key-zotp.module");
 
 const TYPES_REQUIRING_TRANSPORT_ENCRYPTION = new Set(["password", "notes", "note", "credit_card", "payment-card"]);
 const SUPPORTED_CATEGORIES = ["password", "notes", "credit_card", "contact", "zotp"];
@@ -187,6 +188,9 @@ const createMetadataAndPublicData = async (type, data, authToken) => {
                     protection,
                     type,
                     username: `${data.username}`,
+                    algorithm: data.algorithm,
+                    digits: data.digits,
+                    period: data.period,
                 },
                 normalizeOptionalString(data.folder),
             );
@@ -670,6 +674,10 @@ const retrieveData = async (data, authToken) => {
         }
     }
 
+    if (zelfKey?.publicData) {
+        zelfKey.publicData = withZotpTotpDefaults(zelfKey.publicData);
+    }
+
     return {
         ...zelfKey,
         pgp,
@@ -848,7 +856,7 @@ const listData = async (data, authToken) => {
                         id: item.id || item.cid,
                         cid: item.cid,
                         url: item.url,
-                        publicData,
+                        publicData: withZotpTotpDefaults(publicData),
                         createdAt: item.created_at || item.createdAt,
                         updatedAt: item.updated_at || item.updatedAt,
                     };
