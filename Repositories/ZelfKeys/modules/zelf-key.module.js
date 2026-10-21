@@ -27,7 +27,7 @@ const {
     PROTECTION_FACE_PASSWORD,
     passwordCredentialSchema,
 } = require("../middlewares/zelf-key.middleware");
-const { withZotpTotpDefaults } = require("./zelf-key-zotp.module");
+const { withZotpTotpDefaults, resolveZotpTotpPublicDataFields } = require("./zelf-key-zotp.module");
 
 const TYPES_REQUIRING_TRANSPORT_ENCRYPTION = new Set(["password", "notes", "note", "credit_card", "payment-card"]);
 const SUPPORTED_CATEGORIES = ["password", "notes", "credit_card", "contact", "zotp"];
@@ -174,7 +174,12 @@ const createMetadataAndPublicData = async (type, data, authToken) => {
     };
 
     switch (type) {
-        case "zotp":
+        case "zotp": {
+            const totpPublic = resolveZotpTotpPublicDataFields(data);
+            if (totpPublic.error) {
+                throw new Error(`409:${totpPublic.error.code}:${totpPublic.error.message}`);
+            }
+
             typePayload.metadata = {
                 setupKey: `${data.setupKey}`,
                 username: `${data.username}`,
@@ -188,14 +193,13 @@ const createMetadataAndPublicData = async (type, data, authToken) => {
                     protection,
                     type,
                     username: `${data.username}`,
-                    algorithm: data.algorithm,
-                    digits: data.digits,
-                    period: data.period,
+                    ...totpPublic.publicFields,
                 },
                 normalizeOptionalString(data.folder),
             );
 
             break;
+        }
         case "password":
             typePayload.metadata = {
                 password: `${data.password}`,
@@ -1340,6 +1344,7 @@ const summarizeData = async (_data, authToken) => {
 };
 
 module.exports = {
+    createMetadataAndPublicData,
     storeData,
     storePasswordsBulk,
     retrieveData,

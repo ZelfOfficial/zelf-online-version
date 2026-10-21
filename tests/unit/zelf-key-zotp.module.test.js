@@ -2,6 +2,7 @@ const {
     normalizeSetupKey,
     resolveZotpTotpParams,
     withZotpTotpDefaults,
+    formatZotpTotpPublicDataFields,
     ZOTP_DEFAULT_ALGORITHM,
     ZOTP_DEFAULT_DIGITS,
     ZOTP_DEFAULT_PERIOD,
@@ -61,7 +62,38 @@ describe("ZelfKey ZOTP module", () => {
         });
     });
 
+    describe("formatZotpTotpPublicDataFields", () => {
+        it("stringifies digits and period for ZelfProof storage", () => {
+            expect(
+                formatZotpTotpPublicDataFields({
+                    algorithm: "SHA256",
+                    digits: 8,
+                    period: 60,
+                })
+            ).toEqual({
+                algorithm: "SHA256",
+                digits: "8",
+                period: "60",
+            });
+        });
+    });
+
     describe("withZotpTotpDefaults", () => {
+        it("parses string digits/period from stored publicData", () => {
+            expect(
+                withZotpTotpDefaults({
+                    type: "zotp",
+                    algorithm: "SHA512",
+                    digits: "7",
+                    period: "45",
+                })
+            ).toMatchObject({
+                algorithm: "SHA512",
+                digits: 7,
+                period: 45,
+            });
+        });
+
         it("fills defaults for zotp publicData only", () => {
             expect(withZotpTotpDefaults({ type: "password" })).toEqual({ type: "password" });
             expect(withZotpTotpDefaults({ type: "zotp", issuer: "GitHub" })).toEqual({

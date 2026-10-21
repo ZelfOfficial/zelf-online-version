@@ -121,6 +121,16 @@ const resolveZotpTotpParams = (data) => {
 };
 
 /**
+ * TOTP fields as stored on ZelfProof publicData (cleartext values must be strings).
+ * @param {{ algorithm: string, digits: number, period: number }} resolved
+ */
+const formatZotpTotpPublicDataFields = (resolved) => ({
+    algorithm: `${resolved.algorithm}`,
+    digits: `${resolved.digits}`,
+    period: `${resolved.period}`,
+});
+
+/**
  * Apply default TOTP public fields for list/retrieve (legacy records may omit them).
  * @param {Object} publicData
  * @returns {Object}
@@ -147,6 +157,22 @@ const withZotpTotpDefaults = (publicData) => {
     };
 };
 
+/**
+ * Build resolved TOTP params and string publicData fields for zOTP store.
+ * @param {Object} data store request body (after middleware normalization)
+ */
+const resolveZotpTotpPublicDataFields = (data) => {
+    const resolved = resolveZotpTotpParams(data);
+    if (resolved.error) {
+        return resolved;
+    }
+
+    return {
+        resolved,
+        publicFields: formatZotpTotpPublicDataFields(resolved),
+    };
+};
+
 module.exports = {
     ZOTP_ALGORITHMS,
     ZOTP_DEFAULT_ALGORITHM,
@@ -155,5 +181,7 @@ module.exports = {
     ZOTP_MAX_PERIOD,
     normalizeSetupKey,
     resolveZotpTotpParams,
+    formatZotpTotpPublicDataFields,
+    resolveZotpTotpPublicDataFields,
     withZotpTotpDefaults,
 };
