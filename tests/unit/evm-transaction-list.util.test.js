@@ -10,6 +10,7 @@ const {
 	fetchTransactionsFromEtherscanV2,
 	fetchTransactionsFromRouteScan,
 	fetchTransactionsFromBlockscout,
+	runTransactionProviderRace,
 	normalizeTransactionLimit,
 	normalizeUnixTimestampSeconds,
 	formatDecimalString,
@@ -140,57 +141,84 @@ describe("evm-transaction-list.util", () => {
 		expect(resolveEtherscanApiKey()).toBe("");
 	});
 
-	it("fetchTransactionsFromRouteScan walks pages with next tokens", async () => {
-		const httpGet = jest
-			.fn()
-			.mockResolvedValueOnce({
-				data: {
-					items: [{ id: "0xpage1", from: "0xa", to: "0xb", value: "0", timestamp: "2024-01-01T00:00:00.000Z" }],
-					link: { nextToken: "token-2" },
-				},
-			})
-			.mockResolvedValueOnce({
-				data: {
-					items: [{ id: "0xpage2", from: "0xc", to: "0xd", value: "0", timestamp: "2024-01-02T00:00:00.000Z" }],
-					link: { nextToken: "token-3" },
-				},
-			});
-
-		const page2 = await fetchTransactionsFromRouteScan(httpGet, {
+	it("fetchTransactionsFromRouteScan requires cursor for deep pages", async () => {
+		const httpGet = jest.fn();
+		const deep = await fetchTransactionsFromRouteScan(httpGet, {
 			chainId: 1,
 			address: TEST_ADDRESS,
 			limit: 1,
-			page: 2,
+			page: 9,
 		});
 
-		expect(page2.items[0].id).toBe("0xpage2");
-		expect(httpGet).toHaveBeenCalledTimes(2);
+		expect(deep.incomplete).toBe(true);
+		expect(deep.hasMore).toBe(true);
+		expect(httpGet).not.toHaveBeenCalled();
 	});
 
-	it("fetchTransactionsFromBlockscout walks next_page_params", async () => {
-		const httpGet = jest
-			.fn()
-			.mockResolvedValueOnce({
-				data: {
-					items: [{ hash: "0x1", from: { hash: "0xa" }, to: { hash: "0xb" }, value: "0", timestamp: "2024-01-01T00:00:00.000000Z" }],
-					next_page_params: { block_number: 10, index: 1 },
-				},
-			})
-			.mockResolvedValueOnce({
-				data: {
-					items: [{ hash: "0x2", from: { hash: "0xc" }, to: { hash: "0xd" }, value: "0", timestamp: "2024-01-02T00:00:00.000000Z" }],
-					next_page_params: null,
-				},
-			});
+	it("fetchTransactionsFromRouteScan fetches directly when nextToken is provided", async () => {
+		const httpGet = jest.fn().mockResolvedValueOnce({
+			data: {
+				items: [{ id: "0xpage2", from: "0xc", to: "0xd", value: "0", timestamp: "2024-01-02T00:00:00.000Z" }],
+				link: { nextToken: "token-3" },
+			},
+		});
 
-		const page2 = await fetchTransactionsFromBlockscout(httpGet, {
+		const page = await fetchTransactionsFromRouteScan(httpGet, {
+			chainId: 1,
+			address: TEST_ADDRESS,
+			limit: 1,
+			page: 9,
+			nextToken: "token-2",
+		});
+
+		expect(page.items[0].id).toBe("0xpage2");
+		expect(httpGet).toHaveBeenCalledTimes(1);
+	});
+
+	it("fetchTransactionsFromBlockscout requires cursor for deep pages", async () => {
+		const httpGet = jest.fn();
+		const deep = await fetchTransactionsFromBlockscout(httpGet, {
+			baseUrl: "https://explorer.optimism.io",
+			address: TEST_ADDRESS,
+			limit: 1,
+			page: 9,
+		});
+
+		expect(deep.incomplete).toBe(true);
+		expect(httpGet).not.toHaveBeenCalled();
+	});
+
+	it("fetchTransactionsFromBlockscout uses cursor directly for the next page", async () => {
+		const httpGet = jest.fn().mockResolvedValueOnce({
+			data: {
+				items: [{ hash: "0x2", from: { hash: "0xc" }, to: { hash: "0xd" }, value: "0", timestamp: "2024-01-02T00:00:00.000000Z" }],
+				next_page_params: null,
+			},
+		});
+
+		const page = await fetchTransactionsFromBlockscout(httpGet, {
 			baseUrl: "https://explorer.optimism.io",
 			address: TEST_ADDRESS,
 			limit: 1,
 			page: 2,
+			cursor: { block_number: 10, index: 1 },
 		});
 
-		expect(page2.items[0].hash).toBe("0x2");
-		expect(httpGet.mock.calls[1][1].params).toMatchObject({ block_number: 10, index: 1 });
+		expect(page.items[0].hash).toBe("0x2");
+		expect(httpGet.mock.calls[0][1].params).toMatchObject({ block_number: 10, index: 1 });
+	});
+
+	it("runTransactionProviderRace resolves on the first successful provider", async () => {
+		const slow = jest.fn(() => new Promise(() => {}));
+		const fast = jest.fn(() => Promise.resolve({ transactions: [{ hash: "0xfast" }] }));
+
+		const started = Date.now();
+		const result = await runTransactionProviderRace([slow, fast], {
+			deadlineMs: 12000,
+			perProviderTimeoutMs: 7000,
+		});
+
+		expect(result.transactions[0].hash).toBe("0xfast");
+		expect(Date.now() - started).toBeLessThan(500);
 	});
 });

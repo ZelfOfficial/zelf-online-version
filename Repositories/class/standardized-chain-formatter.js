@@ -269,8 +269,7 @@ class StandardizedChainFormatter {
 		if (!unixTs) return "N/A";
 
 		try {
-			const date = new Date(unixTs * 1000);
-			return date.toISOString().replace("T", " ").substring(0, 19);
+			return new Date(unixTs * 1000).toISOString();
 		} catch (error) {
 			return "N/A";
 		}

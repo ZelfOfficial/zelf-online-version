@@ -20,6 +20,7 @@ const {
 	TX_LIST_DEADLINE_MS,
 	TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS,
 	DEFAULT_TX_TIMEOUT_MS,
+	formatUtcIsoDate,
 } = require("../../etherscan/modules/evm-transaction-list.util");
 
 const OPTIMISM_CHAIN_ID = 10;
@@ -378,7 +379,7 @@ const getOKLinkTransactions = async (address, page, show, price, timeout = DEFAU
 					status: tx.status === "0x1" ? "Success" : "Failed",
 					image: "https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png",
 					age: ts ? moment(ts * 1000).fromNow() : "N/A",
-					date: ts ? moment(ts * 1000).format("YYYY-MM-DD HH:mm:ss") : "",
+					date: formatUtcIsoDate(ts),
 					txnFee: tx.fee ? formatDecimalString(tx.fee, 8) : "0",
 					asset: "ETH",
 					confirmations: "1",
@@ -439,6 +440,19 @@ const getOptimismBlockscoutTransactions = async (address, query, show, price, ti
 			cursor: pickBlockscoutCursor(query),
 			timeout,
 		});
+
+		if (blockscoutPage.incomplete) {
+			return {
+				...buildListResponse([], {
+					page: pageNumber,
+					show: limit,
+					incomplete: true,
+					hasMore: blockscoutPage.hasMore,
+					pagingNote: blockscoutPage.pagingNote,
+				}),
+				source: "blockscout",
+			};
+		}
 
 		const rawTransactions = blockscoutPage.items.map((tx) => mapBlockscoutTransaction(tx, address, { asset: "ETH", price }));
 		const transactions = optimismFormatter.formatTransactions(rawTransactions);

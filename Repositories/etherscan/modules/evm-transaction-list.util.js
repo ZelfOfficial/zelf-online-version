@@ -227,16 +227,36 @@ const mapBlockscoutTransaction = (tx, address, { asset = "ETH", price = 0 } = {}
 	});
 };
 
-const buildListResponse = (transactions, { page, show, total, nextCursor, nextPageParams } = {}) => ({
+const buildListResponse = (
+	transactions,
+	{ page, show, total, nextCursor, nextPageParams, incomplete, hasMore, pagingNote } = {}
+) => ({
 	pagination: {
 		records: String(total ?? transactions.length),
 		pages: String(Math.max(1, Math.ceil((total ?? transactions.length) / (show || 1)))),
 		page: String(page ?? 1),
 		...(nextCursor ? { nextCursor: String(nextCursor) } : {}),
 		...(nextPageParams ? { nextPageParams } : {}),
+		...(incomplete ? { incomplete: true } : {}),
+		...(hasMore ? { hasMore: true } : {}),
+		...(pagingNote ? { pagingNote } : {}),
 	},
+	...(incomplete ? { incomplete: true } : {}),
+	...(hasMore ? { hasMore: true } : {}),
+	...(pagingNote ? { pagingNote } : {}),
 	transactions,
 });
+
+const deepPageNeedsCursor = (page, cursor) => normalizePage(page) > 1 && !cursor;
+
+const formatUtcIsoDate = (unixSeconds) => {
+	if (!unixSeconds) return "";
+	try {
+		return new Date(unixSeconds * 1000).toISOString();
+	} catch {
+		return "";
+	}
+};
 
 const fetchTransactionsFromEtherscanV2 = async (
 	httpGet,
@@ -283,29 +303,25 @@ const fetchTransactionsFromRouteScan = async (
 	{ chainId, address, limit = 25, page = 1, nextToken, timeout = DEFAULT_TX_TIMEOUT_MS }
 ) => {
 	const targetPage = normalizePage(page);
-	let cursor = nextToken || null;
-	let pageResult = null;
+	const cursor = nextToken || null;
 
-	for (let current = 1; current <= targetPage; current++) {
-		pageResult = await fetchRouteScanPage(httpGet, {
-			chainId,
-			address,
-			limit,
-			nextToken: cursor,
-			timeout,
-		});
-
-		if (current === targetPage) {
-			return pageResult;
-		}
-
-		cursor = pageResult.nextToken;
-		if (!cursor) {
-			throw new Error("routescan_page_unavailable");
-		}
+	if (deepPageNeedsCursor(targetPage, cursor)) {
+		return {
+			items: [],
+			nextToken: null,
+			incomplete: true,
+			hasMore: true,
+			pagingNote: "Pass pagination.nextCursor (RouteScan next token) from the previous response instead of a high page number.",
+		};
 	}
 
-	return pageResult;
+	return fetchRouteScanPage(httpGet, {
+		chainId,
+		address,
+		limit,
+		nextToken: cursor,
+		timeout,
+	});
 };
 
 const BLOCKSCOUT_USER_AGENT =
@@ -335,32 +351,30 @@ const fetchTransactionsFromBlockscout = async (
 	{ baseUrl, address, limit = 25, page = 1, cursor, timeout = DEFAULT_TX_TIMEOUT_MS }
 ) => {
 	const targetPage = normalizePage(page);
-	let pageCursor = cursor || null;
-	let pageResult = null;
+	const pageCursor = cursor || null;
 
-	for (let current = 1; current <= targetPage; current++) {
-		pageResult = await fetchBlockscoutPage(httpGet, {
-			baseUrl,
-			address,
-			cursor: pageCursor,
-			timeout,
-		});
-
-		if (current === targetPage) {
-			return {
-				items: pageResult.items.slice(0, limit),
-				nextPageParams: pageResult.nextPageParams,
-			};
-		}
-
-		if (!pageResult.nextPageParams) {
-			throw new Error("blockscout_page_unavailable");
-		}
-
-		pageCursor = pageResult.nextPageParams;
+	if (deepPageNeedsCursor(targetPage, pageCursor)) {
+		return {
+			items: [],
+			nextPageParams: null,
+			incomplete: true,
+			hasMore: true,
+			pagingNote:
+				"Pass pagination.nextPageParams (or blockscout cursor fields) from the previous response instead of a high page number.",
+		};
 	}
 
-	return pageResult;
+	const pageResult = await fetchBlockscoutPage(httpGet, {
+		baseUrl,
+		address,
+		cursor: pageCursor,
+		timeout,
+	});
+
+	return {
+		items: pageResult.items.slice(0, limit),
+		nextPageParams: pageResult.nextPageParams,
+	};
 };
 
 const pickBlockscoutCursor = (query = {}) => {
@@ -422,31 +436,63 @@ const runTransactionProviderLadder = async (providers, options = {}) => {
 };
 
 /**
- * Run providers in parallel and return the first non-empty result (page-1 resilience).
+ * Run providers in parallel; resolve on the first non-empty result (do not wait for slower peers).
  */
 const runTransactionProviderRace = async (providers, options = {}) => {
 	const deadlineMs = options.deadlineMs || TX_LIST_DEADLINE_MS;
 	const perProviderTimeoutMs = options.perProviderTimeoutMs || TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS;
-	const startedAt = Date.now();
-	const remainingMs = () => Math.max(0, deadlineMs - (Date.now() - startedAt));
 
-	const attempts = providers.map((provider) =>
-		(async () => {
-			const timeout = Math.min(perProviderTimeoutMs, remainingMs());
-			if (timeout <= 0) return null;
-			try {
-				return await provider(timeout);
-			} catch (err) {
-				if (!isTimeoutError(err)) {
-					console.error({ evmTxProviderRaceError: err?.message || err });
-				}
-				return null;
+	if (!Array.isArray(providers) || providers.length === 0) {
+		return null;
+	}
+
+	return new Promise((resolve) => {
+		let settled = false;
+		let finished = 0;
+		const total = providers.length;
+
+		const settle = (result) => {
+			if (settled) return;
+			if (result?.transactions?.length) {
+				settled = true;
+				clearTimeout(deadlineTimer);
+				resolve(result);
+				return;
 			}
-		})()
-	);
 
-	const results = await Promise.all(attempts);
-	return results.find((result) => result?.transactions?.length) || null;
+			finished++;
+			if (finished >= total) {
+				settled = true;
+				clearTimeout(deadlineTimer);
+				resolve(null);
+			}
+		};
+
+		const deadlineTimer = setTimeout(() => {
+			if (!settled) {
+				settled = true;
+				resolve(null);
+			}
+		}, deadlineMs);
+
+		providers.forEach((provider) => {
+			const timeout = Math.min(perProviderTimeoutMs, deadlineMs);
+			if (timeout <= 0) {
+				settle(null);
+				return;
+			}
+
+			Promise.resolve()
+				.then(() => provider(timeout))
+				.then((result) => settle(result))
+				.catch((err) => {
+					if (!isTimeoutError(err)) {
+						console.error({ evmTxProviderRaceError: err?.message || err });
+					}
+					settle(null);
+				});
+		});
+	});
 };
 
 const withTxListDeadline = async (promise, deadlineMs = TX_LIST_DEADLINE_MS) => {
@@ -474,6 +520,7 @@ module.exports = {
 	normalizePage,
 	normalizeUnixTimestampSeconds,
 	formatDecimalString,
+	formatUtcIsoDate,
 	resolveEtherscanApiKey,
 	isTimeoutError,
 	inferTraffic,

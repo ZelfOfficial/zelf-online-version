@@ -36,6 +36,7 @@ const {
     DEFAULT_TX_TIMEOUT_MS,
     TX_LIST_DEADLINE_MS,
     ETH_ADDRESS_OVERVIEW_TX_CAP_MS,
+    formatUtcIsoDate,
 } = require("./evm-transaction-list.util");
 const ETH_MAINNET_CHAIN_ID = 1;
 
@@ -308,7 +309,7 @@ const getEthereumTransactionsFromOkLink = async (address, page, show, price, tim
                 timestamp: ts,
                 blocktime: ts,
                 age: ts ? moment(ts * 1000).fromNow() : "",
-                date: ts ? moment(ts * 1000).format("YYYY-MM-DD HH:mm:ss") : "",
+                date: formatUtcIsoDate(ts),
                 asset: "ETH",
             };
         });
@@ -350,6 +351,20 @@ const getTransactionsList = async (params) => {
                     nextToken: routeScanNext,
                     timeout,
                 });
+
+                if (routeScanPage.incomplete) {
+                    return {
+                        ...buildListResponse([], {
+                            page,
+                            show,
+                            incomplete: true,
+                            hasMore: routeScanPage.hasMore,
+                            pagingNote: routeScanPage.pagingNote,
+                        }),
+                        source: "routescan",
+                    };
+                }
+
                 const transactions = routeScanPage.items.map((tx) =>
                     mapRouteScanTransaction(tx, address, { asset: "ETH", price })
                 );

@@ -16,7 +16,7 @@ describe("standardized-chain-formatter transaction timestamps", () => {
 			},
 		]);
 
-		expect(tx.date).toBe("2024-06-01 12:00:00");
+		expect(tx.date).toBe("2024-06-01T12:00:00.000Z");
 		expect(tx.timestamp).toBeGreaterThan(0);
 		expect(tx.fiatAmount).toBe("0.03");
 	});
