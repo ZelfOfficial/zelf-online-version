@@ -414,6 +414,7 @@ const getArbitrumBlockscoutTransactions = async (address, query, show, price, ti
 			page: pageNumber,
 			cursor: pickBlockscoutCursor(query),
 			timeout,
+			deadlineMs: timeout,
 		});
 
 		if (blockscoutPage.incomplete) {

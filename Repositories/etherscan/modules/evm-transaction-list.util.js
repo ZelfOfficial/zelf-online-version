@@ -247,8 +247,6 @@ const buildListResponse = (
 	transactions,
 });
 
-const deepPageNeedsCursor = (page, cursor) => normalizePage(page) > 1 && !cursor;
-
 const formatUtcIsoDate = (unixSeconds) => {
 	if (!unixSeconds) return "";
 	try {
@@ -298,30 +296,79 @@ const fetchRouteScanPage = async (httpGet, { chainId, address, limit, nextToken,
 	};
 };
 
+const buildWalkBudgetIncomplete = (partial = {}) => ({
+	items: [],
+	nextToken: partial.nextToken ?? null,
+	incomplete: true,
+	hasMore: true,
+	pagingNote:
+		"Transaction list pagination exceeded the time budget before reaching the requested page. Retry or pass pagination.nextCursor from the previous response.",
+});
+
 const fetchTransactionsFromRouteScan = async (
 	httpGet,
-	{ chainId, address, limit = 25, page = 1, nextToken, timeout = DEFAULT_TX_TIMEOUT_MS }
+	{
+		chainId,
+		address,
+		limit = 25,
+		page = 1,
+		nextToken,
+		timeout = DEFAULT_TX_TIMEOUT_MS,
+		deadlineMs = TX_LIST_DEADLINE_MS,
+	}
 ) => {
 	const targetPage = normalizePage(page);
 	const cursor = nextToken || null;
+	const startedAt = Date.now();
 
-	if (deepPageNeedsCursor(targetPage, cursor)) {
-		return {
-			items: [],
-			nextToken: null,
-			incomplete: true,
-			hasMore: true,
-			pagingNote: "Pass pagination.nextCursor (RouteScan next token) from the previous response instead of a high page number.",
-		};
+	if (cursor) {
+		return fetchRouteScanPage(httpGet, {
+			chainId,
+			address,
+			limit,
+			nextToken: cursor,
+			timeout,
+		});
 	}
 
-	return fetchRouteScanPage(httpGet, {
-		chainId,
-		address,
-		limit,
-		nextToken: cursor,
-		timeout,
-	});
+	if (targetPage === 1) {
+		return fetchRouteScanPage(httpGet, {
+			chainId,
+			address,
+			limit,
+			nextToken: null,
+			timeout,
+		});
+	}
+
+	let walkCursor = null;
+	let pageResult = null;
+
+	for (let current = 1; current <= targetPage; current++) {
+		const remaining = deadlineMs - (Date.now() - startedAt);
+		if (remaining <= 0) {
+			return buildWalkBudgetIncomplete({ nextToken: pageResult?.nextToken ?? null });
+		}
+
+		pageResult = await fetchRouteScanPage(httpGet, {
+			chainId,
+			address,
+			limit,
+			nextToken: walkCursor,
+			timeout: Math.min(timeout, remaining),
+		});
+
+		if (current === targetPage) {
+			return pageResult;
+		}
+
+		walkCursor = pageResult.nextToken;
+		if (!walkCursor) {
+			throw new Error("routescan_page_unavailable");
+		}
+	}
+
+	return pageResult;
 };
 
 const BLOCKSCOUT_USER_AGENT =
@@ -348,33 +395,78 @@ const fetchBlockscoutPage = async (httpGet, { baseUrl, address, cursor, timeout 
 
 const fetchTransactionsFromBlockscout = async (
 	httpGet,
-	{ baseUrl, address, limit = 25, page = 1, cursor, timeout = DEFAULT_TX_TIMEOUT_MS }
+	{
+		baseUrl,
+		address,
+		limit = 25,
+		page = 1,
+		cursor,
+		timeout = DEFAULT_TX_TIMEOUT_MS,
+		deadlineMs = TX_LIST_DEADLINE_MS,
+	}
 ) => {
 	const targetPage = normalizePage(page);
 	const pageCursor = cursor || null;
+	const startedAt = Date.now();
 
-	if (deepPageNeedsCursor(targetPage, pageCursor)) {
-		return {
-			items: [],
-			nextPageParams: null,
-			incomplete: true,
-			hasMore: true,
-			pagingNote:
-				"Pass pagination.nextPageParams (or blockscout cursor fields) from the previous response instead of a high page number.",
-		};
-	}
-
-	const pageResult = await fetchBlockscoutPage(httpGet, {
-		baseUrl,
-		address,
-		cursor: pageCursor,
-		timeout,
+	const finalizeBlockscoutPage = (result) => ({
+		items: result.items.slice(0, limit),
+		nextPageParams: result.nextPageParams,
 	});
 
-	return {
-		items: pageResult.items.slice(0, limit),
-		nextPageParams: pageResult.nextPageParams,
-	};
+	if (pageCursor) {
+		return finalizeBlockscoutPage(
+			await fetchBlockscoutPage(httpGet, {
+				baseUrl,
+				address,
+				cursor: pageCursor,
+				timeout,
+			})
+		);
+	}
+
+	if (targetPage === 1) {
+		return finalizeBlockscoutPage(
+			await fetchBlockscoutPage(httpGet, {
+				baseUrl,
+				address,
+				cursor: null,
+				timeout,
+			})
+		);
+	}
+
+	let walkCursor = null;
+	let pageResult = null;
+
+	for (let current = 1; current <= targetPage; current++) {
+		const remaining = deadlineMs - (Date.now() - startedAt);
+		if (remaining <= 0) {
+			return {
+				...buildWalkBudgetIncomplete({ nextToken: null }),
+				nextPageParams: pageResult?.nextPageParams ?? null,
+			};
+		}
+
+		pageResult = await fetchBlockscoutPage(httpGet, {
+			baseUrl,
+			address,
+			cursor: walkCursor,
+			timeout: Math.min(timeout, remaining),
+		});
+
+		if (current === targetPage) {
+			return finalizeBlockscoutPage(pageResult);
+		}
+
+		if (!pageResult.nextPageParams) {
+			throw new Error("blockscout_page_unavailable");
+		}
+
+		walkCursor = pageResult.nextPageParams;
+	}
+
+	return finalizeBlockscoutPage(pageResult);
 };
 
 const pickBlockscoutCursor = (query = {}) => {
@@ -413,6 +505,7 @@ const resolveProviderTimeout = (providerIndex, remaining, options = {}) => {
 const runTransactionProviderLadder = async (providers, options = {}) => {
 	const deadlineMs = options.deadlineMs || TX_LIST_DEADLINE_MS;
 	const startedAt = Date.now();
+	let incompleteFallback = null;
 
 	for (let providerIndex = 0; providerIndex < providers.length; providerIndex++) {
 		const provider = providers[providerIndex];
@@ -425,6 +518,9 @@ const runTransactionProviderLadder = async (providers, options = {}) => {
 			if (result?.transactions?.length) {
 				return result;
 			}
+			if (result?.incomplete && !incompleteFallback) {
+				incompleteFallback = result;
+			}
 		} catch (err) {
 			if (!isTimeoutError(err)) {
 				console.error({ evmTxProviderError: err?.message || err });
@@ -432,7 +528,7 @@ const runTransactionProviderLadder = async (providers, options = {}) => {
 		}
 	}
 
-	return null;
+	return incompleteFallback;
 };
 
 /**

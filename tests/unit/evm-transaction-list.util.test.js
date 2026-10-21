@@ -11,6 +11,7 @@ const {
 	fetchTransactionsFromRouteScan,
 	fetchTransactionsFromBlockscout,
 	runTransactionProviderRace,
+	runTransactionProviderLadder,
 	normalizeTransactionLimit,
 	normalizeUnixTimestampSeconds,
 	formatDecimalString,
@@ -141,13 +142,74 @@ describe("evm-transaction-list.util", () => {
 		expect(resolveEtherscanApiKey()).toBe("");
 	});
 
-	it("fetchTransactionsFromRouteScan requires cursor for deep pages", async () => {
+	it("fetchTransactionsFromRouteScan walks pages without cursor (page 2)", async () => {
+		const httpGet = jest
+			.fn()
+			.mockResolvedValueOnce({
+				data: {
+					items: [{ id: "0xpage1", from: "0xa", to: "0xb", value: "0", timestamp: "2024-01-01T00:00:00.000Z" }],
+					link: { nextToken: "token-2" },
+				},
+			})
+			.mockResolvedValueOnce({
+				data: {
+					items: [{ id: "0xpage2", from: "0xc", to: "0xd", value: "0", timestamp: "2024-01-02T00:00:00.000Z" }],
+					link: { nextToken: "token-3" },
+				},
+			});
+
+		const page2 = await fetchTransactionsFromRouteScan(httpGet, {
+			chainId: 1,
+			address: TEST_ADDRESS,
+			limit: 1,
+			page: 2,
+		});
+
+		expect(page2.items[0].id).toBe("0xpage2");
+		expect(httpGet).toHaveBeenCalledTimes(2);
+	});
+
+	it("fetchTransactionsFromRouteScan walks pages without cursor (page 3)", async () => {
+		const httpGet = jest
+			.fn()
+			.mockResolvedValueOnce({
+				data: {
+					items: [{ id: "0xpage1", from: "0xa", to: "0xb", value: "0", timestamp: "2024-01-01T00:00:00.000Z" }],
+					link: { nextToken: "token-2" },
+				},
+			})
+			.mockResolvedValueOnce({
+				data: {
+					items: [{ id: "0xpage2", from: "0xc", to: "0xd", value: "0", timestamp: "2024-01-02T00:00:00.000Z" }],
+					link: { nextToken: "token-3" },
+				},
+			})
+			.mockResolvedValueOnce({
+				data: {
+					items: [{ id: "0xpage3", from: "0xe", to: "0xf", value: "0", timestamp: "2024-01-03T00:00:00.000Z" }],
+					link: { nextToken: "token-4" },
+				},
+			});
+
+		const page3 = await fetchTransactionsFromRouteScan(httpGet, {
+			chainId: 1,
+			address: TEST_ADDRESS,
+			limit: 1,
+			page: 3,
+		});
+
+		expect(page3.items[0].id).toBe("0xpage3");
+		expect(httpGet).toHaveBeenCalledTimes(3);
+	});
+
+	it("fetchTransactionsFromRouteScan returns incomplete when walk budget is exhausted", async () => {
 		const httpGet = jest.fn();
 		const deep = await fetchTransactionsFromRouteScan(httpGet, {
 			chainId: 1,
 			address: TEST_ADDRESS,
 			limit: 1,
-			page: 9,
+			page: 2,
+			deadlineMs: 0,
 		});
 
 		expect(deep.incomplete).toBe(true);
@@ -175,17 +237,31 @@ describe("evm-transaction-list.util", () => {
 		expect(httpGet).toHaveBeenCalledTimes(1);
 	});
 
-	it("fetchTransactionsFromBlockscout requires cursor for deep pages", async () => {
-		const httpGet = jest.fn();
-		const deep = await fetchTransactionsFromBlockscout(httpGet, {
+	it("fetchTransactionsFromBlockscout walks pages without cursor (page 2)", async () => {
+		const httpGet = jest
+			.fn()
+			.mockResolvedValueOnce({
+				data: {
+					items: [{ hash: "0x1", from: { hash: "0xa" }, to: { hash: "0xb" }, value: "0", timestamp: "2024-01-01T00:00:00.000000Z" }],
+					next_page_params: { block_number: 10, index: 1 },
+				},
+			})
+			.mockResolvedValueOnce({
+				data: {
+					items: [{ hash: "0x2", from: { hash: "0xc" }, to: { hash: "0xd" }, value: "0", timestamp: "2024-01-02T00:00:00.000000Z" }],
+					next_page_params: null,
+				},
+			});
+
+		const page2 = await fetchTransactionsFromBlockscout(httpGet, {
 			baseUrl: "https://explorer.optimism.io",
 			address: TEST_ADDRESS,
 			limit: 1,
-			page: 9,
+			page: 2,
 		});
 
-		expect(deep.incomplete).toBe(true);
-		expect(httpGet).not.toHaveBeenCalled();
+		expect(page2.items[0].hash).toBe("0x2");
+		expect(httpGet).toHaveBeenCalledTimes(2);
 	});
 
 	it("fetchTransactionsFromBlockscout uses cursor directly for the next page", async () => {
@@ -220,5 +296,24 @@ describe("evm-transaction-list.util", () => {
 
 		expect(result.transactions[0].hash).toBe("0xfast");
 		expect(Date.now() - started).toBeLessThan(500);
+	});
+
+	it("runTransactionProviderLadder propagates incomplete when no provider returns rows", async () => {
+		const incomplete = { transactions: [], incomplete: true, hasMore: true, pagingNote: "budget" };
+		const result = await runTransactionProviderLadder([
+			async () => incomplete,
+			async () => null,
+		]);
+
+		expect(result).toMatchObject({ incomplete: true, hasMore: true });
+	});
+
+	it("runTransactionProviderLadder prefers rows over incomplete markers", async () => {
+		const result = await runTransactionProviderLadder([
+			async () => ({ transactions: [], incomplete: true, hasMore: true }),
+			async () => ({ transactions: [{ hash: "0x1" }] }),
+		]);
+
+		expect(result.transactions).toHaveLength(1);
 	});
 });

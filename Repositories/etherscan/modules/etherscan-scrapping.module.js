@@ -350,6 +350,7 @@ const getTransactionsList = async (params) => {
                     page,
                     nextToken: routeScanNext,
                     timeout,
+                    deadlineMs: timeout,
                 });
 
                 if (routeScanPage.incomplete) {
