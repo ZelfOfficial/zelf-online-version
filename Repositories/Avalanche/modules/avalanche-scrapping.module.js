@@ -44,20 +44,63 @@ const nativeBalance = async (address) => {
 };
 
 const getBalance = async (params) => {
-    const [balance, tokenHoldings, history, quote] = await Promise.all([
-        nativeBalance(params.id), getTokens(params, { show: "200" }),
-        getTransactionsList({ id: params.id, page: "0", show: "100" })
-            .then((transactions) => ({ transactions, incomplete: false }))
-            .catch(() => ({ transactions: [], incomplete: true })),
+    const [quote, balance, tokenHoldingsResult, historyResult] = await Promise.all([
         getTickerPrice({ symbol: "AVAX" }).catch(() => ({ price: "0" })),
+        nativeBalance(params.id),
+        getTokens(params, { show: "200" })
+            .then((value) => ({ ok: true, value }))
+            .catch((error) => {
+                console.warn("Avalanche token holdings unavailable:", error?.message || error);
+                return { ok: false, error };
+            }),
+        getTransactionsList({ id: params.id, page: "0", show: "100" })
+            .then((transactions) => ({ ok: true, value: { transactions, incomplete: false } }))
+            .catch((error) => {
+                console.warn("Avalanche transactions unavailable:", error?.message || error);
+                return { ok: false, error };
+            }),
     ]);
+
+    const tokenHoldings = tokenHoldingsResult.ok
+        ? tokenHoldingsResult.value
+        : { balance: "0", total: 0, tokens: [] };
+    const history = historyResult.ok ? historyResult.value : { transactions: [], incomplete: true };
+    const tokensFailed = !tokenHoldingsResult.ok;
+    const transactionsFailed = !historyResult.ok;
+    const partial = tokensFailed || transactionsFailed;
+
     const price = String(quote.price);
     const fiatBalance = Number(balance) * Number(price);
-    tokenHoldings.tokens.unshift({ amount: balance, decimals: 18, fiatBalance,
-        image: "https://cdn.zelf.world/icons/ic_avax.png", name: "Avalanche", price, symbol: "AVAX", tokenType: "AVAX" });
-    return { _balance: Number(balance), address: params.id, balance, decimals: 18, fiatBalance,
-        account: { asset: "AVAX", fiatBalance: String(fiatBalance), price }, tokenHoldings,
-        transactions: history.transactions, transactionsIncomplete: history.incomplete };
+    tokenHoldings.tokens.unshift({
+        amount: balance,
+        decimals: 18,
+        fiatBalance,
+        image: "https://cdn.zelf.world/icons/ic_avax.png",
+        name: "Avalanche",
+        price,
+        symbol: "AVAX",
+        tokenType: "AVAX",
+    });
+    return {
+        _balance: Number(balance),
+        address: params.id,
+        balance,
+        decimals: 18,
+        fiatBalance,
+        account: { asset: "AVAX", fiatBalance: String(fiatBalance), price },
+        tokenHoldings,
+        transactions: history.transactions,
+        transactionsIncomplete: history.incomplete || transactionsFailed,
+        partial,
+        tokensFailed,
+        transactionsFailed,
+        ...(tokensFailed
+            ? { tokensError: tokenHoldingsResult.error?.message || "avalanche_tokens_unavailable" }
+            : {}),
+        ...(transactionsFailed
+            ? { transactionsError: historyResult.error?.message || "avalanche_transactions_unavailable" }
+            : {}),
+    };
 };
 
 const getTokensFromRouteScan = async (address) => {
@@ -86,10 +129,17 @@ const getTokens = async (params, query) => {
  */
 const getTokensFromGlacier = async (params, query) => {
 	// Obtener tokens ERC20
-	const { data } = await instance.get(
-		`https://glacier-api.avax.network/v1/chains/43114/addresses/${params.id}/balances:listErc20?pageSize=100&filterSpamTokens=true`,
-		{ headers: { "user-agent": generateRandomUserAgent() }, timeout: 5000 }
-	);
+	let data;
+	try {
+		const response = await instance.get(
+			`https://glacier-api.avax.network/v1/chains/43114/addresses/${params.id}/balances:listErc20?pageSize=100&filterSpamTokens=true`,
+			{ headers: { "user-agent": generateRandomUserAgent() }, timeout: 8000 },
+		);
+		data = response.data;
+	} catch (error) {
+		const status = error?.response?.status;
+		throw new Error(status ? `glacier_holdings_${status}` : "glacier_holdings_unavailable");
+	}
 
 	// Obtener conteo total de tokens (RouteScan is optional - fall back to Glacier count if unavailable)
 	let erc20Count = data.erc20TokenBalances.length;

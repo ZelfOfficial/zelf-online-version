@@ -15,6 +15,47 @@ const { getTickerPrice } = require("../../binance/modules/binance.module");
 const looksEmpty = (response) =>
 	!response || (!parseFloat(response.balance) && !(response.tokenHoldings?.tokens || []).some((token) => parseFloat(token.amount)));
 
+const resolveDefaultSourceAddress = async (params) => {
+	let sourceAResult = null;
+
+	try {
+		sourceAResult = await solanaSourceA.getAddress(params);
+		if (!looksEmpty(sourceAResult)) {
+			return { response: sourceAResult, source: "sourceA" };
+		}
+	} catch (e) {
+		console.error("solana sourceA getAddress:", e?.message || e);
+	}
+
+	const solscanResponse = await solscan.getAddress(params);
+	if (!looksEmpty(solscanResponse)) {
+		return { response: solscanResponse, source: "solscan" };
+	}
+
+	const oklinkResponse = await oklink.getAddress(params);
+	if (!looksEmpty(oklinkResponse)) {
+		return { response: oklinkResponse, source: "oklink" };
+	}
+
+	if (!looksEmpty(sourceAResult)) {
+		return { response: sourceAResult, source: "sourceA" };
+	}
+
+	try {
+		const nativeOnly = await solanaSourceA.getNativeBalanceSummary(params);
+		if (!looksEmpty(nativeOnly)) {
+			return {
+				response: { ...nativeOnly, tokensIncomplete: true },
+				source: "sourceA_native",
+			};
+		}
+	} catch (e) {
+		console.error("solana sourceA getNativeBalanceSummary:", e?.message || e);
+	}
+
+	return { response: null, source: null };
+};
+
 /**
  * @param {*} params
  */
@@ -52,24 +93,18 @@ const getAddress = async (params) => {
 				}
 			}
 			break;
-		default:
-			try {
-				const saResult = await solanaSourceA.getAddress(params);
-				if (!looksEmpty(saResult)) {
-					response = saResult;
-					source = "sourceA";
-					break;
-				}
-			} catch (e) {
-				console.error("solana sourceA getAddress:", e?.message || e);
-			}
-			const solscanResponse = await solscan.getAddress(params);
-			const oklinkResponse = await oklink.getAddress(params);
-
-			response = solscanResponse || oklinkResponse;
-			source = solscanResponse ? "solscan" : oklinkResponse ? "oklink" : null;
-
+		default: {
+			const picked = await resolveDefaultSourceAddress(params);
+			response = picked.response;
+			source = picked.source;
 			break;
+		}
+	}
+
+	if (!response) {
+		const error = new Error("solana_balance_unavailable");
+		error.status = 502;
+		throw error;
 	}
 
 	// Add source to response if response exists

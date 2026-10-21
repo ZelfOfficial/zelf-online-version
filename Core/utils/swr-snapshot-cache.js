@@ -1,3 +1,13 @@
+const KEEP_PRIOR_SNAPSHOT = Symbol("KEEP_PRIOR_SNAPSHOT");
+
+const keepPriorSnapshotSignal = () => {
+	const error = new Error("swr_keep_prior_snapshot");
+	error[KEEP_PRIOR_SNAPSHOT] = true;
+	return error;
+};
+
+const isKeepPriorSnapshotSignal = (error) => Boolean(error && error[KEEP_PRIOR_SNAPSHOT]);
+
 /**
  * Small stale-while-revalidate cache for expensive per-key snapshots (e.g. "all tags of a domain").
  * - fresh for `ttlMs`: served from memory
@@ -10,6 +20,7 @@ const createSwrCache = ({
     now = () => Date.now(),
     warmIntervalMs = 0, // >0: refresh recently used keys in the background so readers never wait for a cold load
     warmIdleMs = 24 * 60 * 60 * 1000, // stop warming keys nobody asked for in this long
+    shouldPersist = () => true,
 } = {}) => {
     const entries = new Map();
     const loaders = new Map(); // key -> { loader, lastAccess }
@@ -35,11 +46,20 @@ const createSwrCache = ({
         const inflight = Promise.resolve()
             .then(loader)
             .then((value) => {
+                const cur = entries.get(key) || {};
+                if (!shouldPersist(value)) {
+                    entries.set(key, { ...cur, inflight: null });
+                    return value;
+                }
                 entries.set(key, { value, at: now(), inflight: null });
                 return value;
             })
             .catch((error) => {
-                const cur = entries.get(key);
+                const cur = entries.get(key) || {};
+                if (isKeepPriorSnapshotSignal(error)) {
+                    entries.set(key, { ...cur, inflight: null });
+                    if (cur.value !== undefined) return cur.value;
+                }
                 if (cur) cur.inflight = null;
                 throw error;
             });
@@ -60,10 +80,15 @@ const createSwrCache = ({
             return { value: entry.value, ageMs: age, stale: true };
         }
         const value = await _refresh(key, loader);
+        const entryAfter = entries.get(key);
+        if (entryAfter && entryAfter.at != null) {
+            const ageAfter = now() - entryAfter.at;
+            return { value, ageMs: ageAfter, stale: ageAfter >= ttlMs };
+        }
         return { value, ageMs: 0, stale: false };
     };
 
-    return { get, clear: () => entries.clear(), _entries: entries };
+    return { get, clear: () => entries.clear(), _entries: entries, ttlMs, maxStaleMs };
 };
 
-module.exports = { createSwrCache };
+module.exports = { createSwrCache, keepPriorSnapshotSignal, isKeepPriorSnapshotSignal };

@@ -468,7 +468,8 @@ const updateItemTokenId = async (ipfsFileId, tokenId, txHash) => {
  */
 const filterPaged = async (property, value, options = {}) => {
     const PAGE_SIZE = Math.min(options.pageSize || 100, 100);
-    try {
+
+    const fetchPage = async () => {
         let query;
         if (property === "name") query = web3Instance.files.public.list().name(value);
         else if (property === "cid") query = web3Instance.files.public.list().cid(value);
@@ -483,9 +484,18 @@ const filterPaged = async (property, value, options = {}) => {
         const files = response.files || [];
         const nextPageToken = response.next_page_token || null;
         return { files: _normalizeFiles(files), nextPageToken };
-    } catch (error) {
-        console.error("Error in filterPaged:", error);
-        return { files: [], nextPageToken: null };
+    };
+
+    try {
+        return await fetchPage();
+    } catch (firstError) {
+        console.error("Error in filterPaged (retrying):", firstError);
+        try {
+            return await fetchPage();
+        } catch (secondError) {
+            console.error("Error in filterPaged:", secondError);
+            throw secondError;
+        }
     }
 };
 

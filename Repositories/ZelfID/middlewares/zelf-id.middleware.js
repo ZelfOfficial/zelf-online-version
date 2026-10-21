@@ -369,4 +369,6 @@ module.exports = {
     stripeCheckoutValidation,
     stripeSessionValidation,
     smartContractPaymentConfirmationValidation: TagsMyMiddleware.smartContractPaymentConfirmationValidation,
+    receiptEmailValidation: TagsMyMiddleware.receiptEmailValidation,
+    extendLicenseForOwnerValidation: TagsMyMiddleware.extendLicenseForOwnerValidation,
 };

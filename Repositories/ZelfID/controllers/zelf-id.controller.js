@@ -2,7 +2,7 @@ const ZaiIdentity = require("../../ZAI/modules/zai-identity.module");
 const Module = require("../modules/zelf-id.module");
 const RevenueCatModule = require("../../Tags/modules/revenue-cat.module");
 const RewardRoutesController = require("../../Tags/controllers/reward-routes.controller");
-const { updateOldTagObject } = require("../../Tags/modules/my-tags.module");
+const { updateOldTagObject, sendEmailReceipt, extendLicenseForOwner } = require("../../Tags/modules/my-tags.module");
 const ZelfIdRecoveryModule = require("../modules/zelf-id-recovery.module");
 const TagsSearchModule = require("../../Tags/modules/tags-search.module");
 const { getAllSupportedDomains } = require("../../Tags/modules/domain-registry.module");
@@ -98,12 +98,14 @@ const searchTagsByDomain = async (ctx) => {
     try {
         const { domain, storage, limit, pageOffset, name } = ctx.request.query;
 
-        let data = await TagsSearchModule.searchByDomain({ domain, storage, limit, pageOffset, name }, ctx.state.user);
+        const result = await TagsSearchModule.searchByDomain({ domain, storage, limit, pageOffset, name }, ctx.state.user);
 
         ctx.body = {
-            data,
-            limit,
-            total: data.length,
+            data: result.rows,
+            limit: result.limit,
+            pageOffset: result.pageOffset,
+            total: result.total,
+            ...(result.incomplete ? { incomplete: true } : {}),
         };
     } catch (error) {
         const _exception = errorHandler(error, ctx);
@@ -515,6 +517,34 @@ const stripeSession = async (ctx) => {
     }
 };
 
+const receiptEmail = async (ctx) => {
+    try {
+        const { tagName, domain, network, email, token } = ctx.request.body;
+        const data = await sendEmailReceipt(tagName, domain, network, email, token);
+
+        ctx.body = { data, payload: { tagName, domain, network, token } };
+    } catch (error) {
+        const _exception = errorHandler(error, ctx);
+
+        ctx.status = _exception.status;
+        ctx.body = { message: _exception.message, code: _exception.code };
+    }
+};
+
+const extendLicenseForOwnerHandler = async (ctx) => {
+    try {
+        const { tagName, domain, duration, faceBase64, password } = ctx.request.body;
+        const data = await extendLicenseForOwner(tagName, domain, duration, { faceBase64, password }, ctx.state.user);
+
+        ctx.body = { data };
+    } catch (error) {
+        const _exception = errorHandler(error, ctx);
+
+        ctx.status = _exception.status;
+        ctx.body = { message: _exception.message, code: _exception.code };
+    }
+};
+
 module.exports = {
     searchTag,
     searchTagsByDomain,
@@ -539,4 +569,6 @@ module.exports = {
     smartContractPaymentConfirmation,
     stripeCheckout,
     stripeSession,
+    receiptEmail,
+    extendLicenseForOwner: extendLicenseForOwnerHandler,
 };

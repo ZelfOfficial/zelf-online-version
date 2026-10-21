@@ -4,6 +4,7 @@ const Controller = require("../controllers/zelf-id.controller");
 
 const Middleware = require("../middlewares/zelf-id.middleware");
 const FaceMiddleware = require("../../Face/middlewares/face.middleware");
+const RbacMiddleware = require("../../Tags/middlewares/rbac.middleware");
 
 const base = "/zelf-ids";
 //v4
@@ -60,4 +61,14 @@ module.exports = (server) => {
     server.post(`${PATH}/purchase-rewards`, Middleware.referralRewardsValidation, Controller.purchaseRewards);
 
     server.post(`${PATH}/referral-rewards`, Middleware.referralRewardsValidation, Controller.referralRewards);
+
+    server.post(`${PATH}/email-receipt`, Middleware.receiptEmailValidation, Controller.receiptEmail);
+
+    server.post(
+        `${PATH}/custom-extend`,
+        Middleware.extendLicenseForOwnerValidation,
+        FaceMiddleware.gate("my-tags-extend"),
+        RbacMiddleware.requireWrite,
+        Controller.extendLicenseForOwner,
+    );
 };

@@ -92,6 +92,7 @@ const schemas = {
 		faceBase64: string().required(),
 		oldMasterPassword: string().required(),
 		newMasterPassword: string().required(),
+		password: string().optional().allow(""),
 		removePGP: boolean().optional(),
 	},
 	retrieve: {
@@ -140,6 +141,7 @@ const schemas = {
 	delete: {
 		id: string().required(),
 		faceBase64: string().required(),
+		password: string().optional().allow(""),
 		masterPassword: string().optional().allow(""),
 	},
 };
@@ -396,6 +398,7 @@ const deleteZelfKeyValidation = async (ctx, next) => {
 	const valid = validate(schemas.delete, {
 		id: ctx.request.params.id,
 		faceBase64: ctx.request.body.faceBase64 || "",
+		password: ctx.request.body.password || "",
 		masterPassword: ctx.request.body.masterPassword || "",
 	});
 

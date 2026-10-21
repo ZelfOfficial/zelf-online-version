@@ -4,6 +4,11 @@ jest.mock("../../Repositories/Tags/modules/tags-parts.module", () => ({
     decryptCreditCardParams: jest.fn(),
     decryptNotesParams: jest.fn(),
     urlToBase64: jest.fn(),
+    getFullTagName: jest.fn((tagName, domain) => {
+        const resolvedDomain = domain || "zelf";
+        if (tagName && tagName.includes(`.${resolvedDomain}`)) return tagName;
+        return `${tagName}.${resolvedDomain}`;
+    }),
 }));
 
 jest.mock("../../Repositories/Tags/modules/tags.module", () => ({
@@ -20,6 +25,10 @@ jest.mock("../../Repositories/ZelfProof/modules/zelf-proof.module", () => ({
         if (layer === "WithoutPassword" || layer === "NoPassword") return false;
         return undefined;
     }),
+    ZELFPROOF_CLIENT_ERROR_STATUS: {
+        ERR_INVALID_PASSWORD: 401,
+        ERR_PASSWORD_REQUIRED: 409,
+    },
 }));
 
 jest.mock("../../Repositories/Tags/modules/qr-zelfproof-extractor.module", () => ({
@@ -131,7 +140,7 @@ describe("ZelfKeys retrieve protection gating", () => {
                 },
                 authToken,
             ),
-        ).rejects.toThrow(/ERR_MISSING_PASSWORD/);
+        ).rejects.toThrow(/ERR_PASSWORD_REQUIRED/);
 
         expect(ZelfProofModule.decrypt).not.toHaveBeenCalled();
     });
