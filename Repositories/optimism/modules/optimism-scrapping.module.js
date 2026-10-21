@@ -8,11 +8,15 @@ const { getTokenPrice } = require("../utils/token-pricing");
 const { getETHPrice } = require("../utils/eth-price");
 const {
 	normalizePage,
+	formatDecimalString,
 	mapEtherscanV2Transaction,
 	mapBlockscoutTransaction,
 	buildListResponse,
 	fetchTransactionsFromEtherscanV2,
 	fetchTransactionsFromBlockscout,
+	pickBlockscoutCursor,
+	runTransactionProviderLadder,
+	TX_LIST_DEADLINE_MS,
 	DEFAULT_TX_TIMEOUT_MS,
 } = require("../../etherscan/modules/evm-transaction-list.util");
 
@@ -266,8 +270,8 @@ const getTokens = async (params, query) => {
 const getTransactionsList = async (query) => {
 	try {
 		const { address, page = "0", show = "100" } = query;
+		const deadlineMs = query.deadlineMs || TX_LIST_DEADLINE_MS;
 
-		// Get ETH price for transaction formatting
 		let price = "3000.00000000";
 		try {
 			const priceData = await getTickerPrice({ symbol: "ETH" });
@@ -276,60 +280,19 @@ const getTransactionsList = async (query) => {
 			console.log("Price fetch failed, using default:", priceError.message);
 		}
 
-		// Try OKLink API first
-		let response;
-		let source;
+		const ladderResult = await runTransactionProviderLadder(
+			[
+				async (timeout) => getOKLinkTransactions(address, page, show, price, timeout),
+				async (timeout) => getOptimismScanTransactions(address, page, show, price, timeout),
+				async (timeout) => getOptimismBlockscoutTransactions(address, query, show, price, timeout),
+			],
+			{ deadlineMs }
+		);
 
-		try {
-			console.log("Trying OKLink API...");
-			const oklinkResponse = await getOKLinkTransactions(address, page, show, price);
-			if (oklinkResponse && oklinkResponse.transactions && oklinkResponse.transactions.length > 0) {
-				response = oklinkResponse;
-				source = "oklink";
-				console.log(`Found ${oklinkResponse.transactions.length} transactions via OKLink`);
-			}
-		} catch (oklinkError) {
-			console.log("OKLink failed:", oklinkError.message);
+		if (ladderResult?.transactions?.length) {
+			return ladderResult;
 		}
 
-		// Try Etherscan API V2 (unified multi-chain) as fallback
-		if (!response) {
-			try {
-				console.log("Trying Etherscan API V2 for Optimism...");
-				const optimismScanResponse = await getOptimismScanTransactions(address, page, show, price);
-				if (optimismScanResponse && optimismScanResponse.transactions && optimismScanResponse.transactions.length > 0) {
-					response = optimismScanResponse;
-					source = "etherscan_v2";
-					console.log(`Found ${optimismScanResponse.transactions.length} transactions via Etherscan V2`);
-				}
-			} catch (optimismScanError) {
-				console.log("Etherscan V2 Optimism failed:", optimismScanError.message);
-			}
-		}
-
-		// Public Blockscout indexer (no API key)
-		if (!response) {
-			try {
-				console.log("Trying Optimism Blockscout API...");
-				const blockscoutResponse = await getOptimismBlockscoutTransactions(address, page, show, price);
-				if (blockscoutResponse?.transactions?.length) {
-					response = blockscoutResponse;
-					source = "blockscout";
-					console.log(`Found ${blockscoutResponse.transactions.length} transactions via Blockscout`);
-				}
-			} catch (blockscoutError) {
-				console.log("Optimism Blockscout failed:", blockscoutError.message);
-			}
-		}
-
-		// Add source to response if response exists
-		if (response) {
-			response.source = source;
-			return response;
-		}
-
-		// If no transactions found from external APIs, return empty result
-		console.log("No transactions found from external APIs");
 		return { pagination: { records: "0", pages: "0", page: "0" }, transactions: [] };
 	} catch (error) {
 		console.error("Error getting Optimism transactions:", error.message || "Unknown error");
@@ -340,7 +303,7 @@ const getTransactionsList = async (query) => {
 /**
  * Get OKLink transactions for OP Mainnet
  */
-const getOKLinkTransactions = async (address, page, show, price) => {
+const getOKLinkTransactions = async (address, page, show, price, timeout = DEFAULT_TX_TIMEOUT_MS) => {
 	try {
 		const t = Date.now();
 
@@ -348,7 +311,7 @@ const getOKLinkTransactions = async (address, page, show, price) => {
 
 		const { data } = await axios.get(url, {
 			httpsAgent: agent,
-			timeout: 10000,
+			timeout,
 			validateStatus: function (status) {
 				return status < 500;
 			},
@@ -362,34 +325,43 @@ const getOKLinkTransactions = async (address, page, show, price) => {
 			console.log(`✅ OKLink API success! Found ${data.data.hits.length} transactions out of ${data.data.total} total`);
 
 			const rawTransactions = data.data.hits.map((tx) => {
-				const value = parseFloat(tx.value);
-				const fiatValue = value * parseFloat(price);
+				const value = formatDecimalString(tx.value);
+				const priceNum = parseFloat(price);
+				const fiatValue = Number(value) * priceNum;
 				const traffic = tx.from.toLowerCase() === address.toLowerCase() ? "OUT" : "IN";
+				const ts = Number(tx.blocktime) || 0;
 
 				return {
 					hash: tx.hash,
 					block: tx.blockHeight.toString(),
 					from: tx.from,
 					to: tx.to,
-					value: value.toString(),
+					value,
+					amount: value,
+					price: priceNum,
+					assetPrice: priceNum,
 					fiatValue: fiatValue.toFixed(2),
+					fiatAmount: fiatValue.toFixed(2),
 					gas: "0",
 					gasPrice: "0",
 					nonce: "0",
 					input: "0x",
-					blocktime: tx.blocktime,
-					timestamp: tx.blocktime,
+					blocktime: ts,
+					timestamp: ts,
 					traffic: traffic,
 					method: tx.method || "ETH transfer",
 					status: tx.status === "0x1" ? "Success" : "Failed",
 					image: "https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png",
-					age: tx.blocktime ? moment(tx.blocktime * 1000).fromNow() : "N/A",
-					txnFee: tx.fee ? parseFloat(tx.fee).toFixed(8) : "0",
+					age: ts ? moment(ts * 1000).fromNow() : "N/A",
+					date: ts ? moment(ts * 1000).format("YYYY-MM-DD HH:mm:ss") : "",
+					txnFee: tx.fee ? formatDecimalString(tx.fee, 8) : "0",
+					asset: "ETH",
 					confirmations: "1",
 				};
 			});
 
 			return {
+				source: "oklink",
 				pagination: {
 					records: data.data.total.toString(),
 					pages: Math.ceil(data.data.total / parseInt(show)).toString(),
@@ -409,7 +381,7 @@ const getOKLinkTransactions = async (address, page, show, price) => {
 /**
  * Get Optimism Etherscan transactions
  */
-const getOptimismScanTransactions = async (address, page, show, price) => {
+const getOptimismScanTransactions = async (address, page, show, price, timeout = DEFAULT_TX_TIMEOUT_MS) => {
 	try {
 		const etherscanPage = normalizePage(page === "0" ? 1 : page);
 		const items = await fetchTransactionsFromEtherscanV2((url, options) => instance.get(url, options), {
@@ -417,33 +389,43 @@ const getOptimismScanTransactions = async (address, page, show, price) => {
 			address,
 			page: etherscanPage,
 			offset: parseInt(show, 10) || 25,
-			timeout: DEFAULT_TX_TIMEOUT_MS,
+			timeout,
 		});
 
 		const rawTransactions = items.map((tx) => mapEtherscanV2Transaction(tx, address, { asset: "ETH", price }));
 		const transactions = optimismFormatter.formatTransactions(rawTransactions);
 
-		return buildListResponse(transactions, { page: etherscanPage, show: parseInt(show, 10) || 25 });
+		return { ...buildListResponse(transactions, { page: etherscanPage, show: parseInt(show, 10) || 25 }), source: "etherscan_v2" };
 	} catch (error) {
 		console.log("Optimism Etherscan V2 transactions failed:", error.message);
 		return null;
 	}
 };
 
-const getOptimismBlockscoutTransactions = async (address, page, show, price) => {
+const getOptimismBlockscoutTransactions = async (address, query, show, price, timeout = DEFAULT_TX_TIMEOUT_MS) => {
 	try {
 		const limit = parseInt(show, 10) || 25;
-		const items = await fetchTransactionsFromBlockscout((url, options) => instance.get(url, options), {
+		const pageNumber = normalizePage(query.page === "0" ? 1 : query.page);
+		const blockscoutPage = await fetchTransactionsFromBlockscout((url, options) => instance.get(url, options), {
 			baseUrl: OPTIMISM_BLOCKSCOUT_BASE,
 			address,
 			limit,
-			timeout: DEFAULT_TX_TIMEOUT_MS,
+			page: pageNumber,
+			cursor: pickBlockscoutCursor(query),
+			timeout,
 		});
 
-		const rawTransactions = items.map((tx) => mapBlockscoutTransaction(tx, address, { asset: "ETH", price }));
+		const rawTransactions = blockscoutPage.items.map((tx) => mapBlockscoutTransaction(tx, address, { asset: "ETH", price }));
 		const transactions = optimismFormatter.formatTransactions(rawTransactions);
 
-		return buildListResponse(transactions, { page: normalizePage(page === "0" ? 1 : page), show: limit });
+		return {
+			...buildListResponse(transactions, {
+				page: pageNumber,
+				show: limit,
+				nextPageParams: blockscoutPage.nextPageParams,
+			}),
+			source: "blockscout",
+		};
 	} catch (error) {
 		console.log("Optimism Blockscout transactions failed:", error.message);
 		return null;

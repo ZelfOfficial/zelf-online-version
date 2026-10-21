@@ -1,10 +1,12 @@
 const moment = require("moment");
 const { formatEther } = require("ethers");
-const config = require("../../../Core/config");
 const { generateRandomUserAgent } = require("../../../Core/helpers");
 
 const ETHERSCAN_V2_API = process.env.ETHERSCAN_V2_API || "https://api.etherscan.io/v2/api";
-const DEFAULT_TX_TIMEOUT_MS = Number(process.env.EVM_TX_FETCH_TIMEOUT_MS) || 8000;
+const DEFAULT_TX_TIMEOUT_MS = Number(process.env.EVM_TX_FETCH_TIMEOUT_MS) || 4000;
+const TX_LIST_DEADLINE_MS = Number(process.env.EVM_TX_LIST_DEADLINE_MS) || 12000;
+const TX_LIST_PROVIDER_TIMEOUT_MS = Number(process.env.EVM_TX_PROVIDER_TIMEOUT_MS) || 4000;
+const ETH_ADDRESS_OVERVIEW_TX_CAP_MS = Number(process.env.ETH_ADDRESS_OVERVIEW_TX_CAP_MS) || 3500;
 
 const normalizeTransactionLimit = (show, defaultLimit = 25) =>
 	Math.min(100, Math.max(1, parseInt(String(show), 10) || defaultLimit));
@@ -14,26 +16,70 @@ const normalizePage = (page) => {
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 };
 
-const resolveEtherscanApiKey = () => process.env.ETHERSCAN_API_KEY || config?.etherscan?.apiKey || "";
+/** Etherscan V2 only — never fall back to Infura or other keys from Core/config. */
+const resolveEtherscanApiKey = () => String(process.env.ETHERSCAN_API_KEY || "").trim();
+
+const isTimeoutError = (err) =>
+	err?.code === "ECONNABORTED" ||
+	err?.code === "ETIMEDOUT" ||
+	/timeout/i.test(String(err?.message || ""));
 
 const inferTraffic = (from, to, address) =>
 	String(from || "").toLowerCase() === String(address || "").toLowerCase() ? "OUT" : "IN";
 
-const weiToEthAmount = (wei) => {
+const weiToEthDecimalString = (wei) => {
 	try {
-		return Number(formatEther(BigInt(String(wei || "0"))));
+		return formatEther(BigInt(String(wei || "0")));
 	} catch {
-		return 0;
+		return "0";
 	}
 };
 
-const computeFeeEth = (gasUsed, gasPrice) => {
+const formatDecimalString = (value, maxFractionDigits = 18) => {
+	if (value === null || value === undefined) return "0";
+	const raw = typeof value === "string" ? value.trim() : String(value);
+	if (!raw || raw === "0") return "0";
+	if (/^[-+]?\d+$/.test(raw)) return raw;
+	const num = Number(raw);
+	if (!Number.isFinite(num)) return "0";
+	if (num === 0) return "0";
+	const fixed = num.toFixed(maxFractionDigits);
+	return fixed.replace(/\.?0+$/, "") || "0";
+};
+
+const computeFeeEthDecimal = (gasUsed, gasPrice) => {
 	try {
 		const fee = BigInt(String(gasUsed || "0")) * BigInt(String(gasPrice || "0"));
-		return Number(formatEther(fee));
+		return weiToEthDecimalString(fee);
 	} catch {
+		return "0";
+	}
+};
+
+const normalizeUnixTimestampSeconds = (value) => {
+	if (value === null || value === undefined || value === "") return 0;
+
+	if (typeof value === "number" && Number.isFinite(value)) {
+		if (value > 1e12) return Math.floor(value / 1000);
+		if (value > 1e9) return Math.floor(value);
 		return 0;
 	}
+
+	const str = String(value).trim();
+	if (!str) return 0;
+
+	if (/^\d+$/.test(str)) {
+		const n = Number(str);
+		if (!Number.isFinite(n)) return 0;
+		if (n > 1e12) return Math.floor(n / 1000);
+		if (n > 1e9) return Math.floor(n);
+		return 0;
+	}
+
+	const parsed = Date.parse(str);
+	if (!Number.isNaN(parsed)) return Math.floor(parsed / 1000);
+
+	return 0;
 };
 
 const resolveBlockscoutAddress = (field) => {
@@ -56,41 +102,44 @@ const buildStandardRow = ({
 	timestamp,
 	price,
 }) => {
-	const fiatAmount = Number(amount || 0) * Number(price || 0);
-	const ts = Number(timestamp) || 0;
+	const ts = normalizeUnixTimestampSeconds(timestamp);
+	const amountStr = formatDecimalString(amount);
+	const priceNum = Number(price || 0);
+	const fiatAmount = (Number(amountStr) * priceNum).toFixed(2);
 
 	return {
 		hash,
 		block: String(block ?? ""),
 		from,
 		to,
-		value: String(amount ?? 0),
-		amount: String(amount ?? 0),
-		fiatValue: fiatAmount.toFixed(2),
-		fiatAmount: fiatAmount.toFixed(2),
+		value: amountStr,
+		amount: amountStr,
+		price: priceNum,
+		assetPrice: priceNum,
+		fiatValue: fiatAmount,
+		fiatAmount,
 		asset,
 		method: method || "Transfer",
 		traffic,
-		txnFee: typeof txnFee === "number" ? txnFee.toFixed(8) : String(txnFee ?? "0"),
+		txnFee: formatDecimalString(txnFee, 8),
 		timestamp: ts,
 		blocktime: ts,
-		date: ts ? moment(ts * 1000).format("YYYY-MM-DD HH:mm:ss") : "",
 		age: ts ? moment(ts * 1000).fromNow() : "N/A",
 		status: "Success",
 	};
 };
 
 const mapEtherscanV2Transaction = (tx, address, { asset = "ETH", price = 0 } = {}) => {
-	const value = weiToEthAmount(tx.value);
-	const timestamp = parseInt(tx.timeStamp, 10) || 0;
-	const txnFee = computeFeeEth(tx.gasUsed, tx.gasPrice);
+	const amount = weiToEthDecimalString(tx.value);
+	const timestamp = normalizeUnixTimestampSeconds(tx.timeStamp);
+	const txnFee = computeFeeEthDecimal(tx.gasUsed, tx.gasPrice);
 
 	return buildStandardRow({
 		hash: tx.hash,
 		block: tx.blockNumber,
 		from: tx.from,
 		to: tx.to,
-		amount: value,
+		amount,
 		asset,
 		method: tx.methodId ? "Contract Interaction" : "ETH transfer",
 		traffic: inferTraffic(tx.from, tx.to, address),
@@ -101,37 +150,19 @@ const mapEtherscanV2Transaction = (tx, address, { asset = "ETH", price = 0 } = {
 };
 
 const mapRouteScanTransaction = (tx, address, { asset = "ETH", price = 0 } = {}) => {
-	const timestamp = Math.floor(new Date(tx.timestamp).getTime() / 1000);
-	const value = weiToEthAmount(tx.value);
+	const timestamp = normalizeUnixTimestampSeconds(tx.timestamp);
+	const amount = weiToEthDecimalString(tx.value);
 
 	return buildStandardRow({
 		hash: tx.id,
 		block: tx.blockNumber,
 		from: tx.from,
 		to: tx.to,
-		amount: value,
+		amount,
 		asset,
-		method: value > 0 ? "Transfer" : "Contract Call",
+		method: BigInt(tx.value || "0") > 0n ? "Transfer" : "Contract Call",
 		traffic: inferTraffic(tx.from, tx.to, address),
-		txnFee: computeFeeEth(tx.gasUsed, tx.gasPrice),
-		timestamp,
-		price,
-	});
-};
-
-const mapRpcTransaction = (tx, address, { asset = "ETH", price = 0 } = {}) => {
-	const timestamp = tx.timestamp ? parseInt(tx.timestamp, 16) : 0;
-
-	return buildStandardRow({
-		hash: tx.hash,
-		block: tx.blockNumber ? parseInt(tx.blockNumber, 16) : "",
-		from: tx.from,
-		to: tx.to,
-		amount: weiToEthAmount(tx.value),
-		asset,
-		method: tx.input && tx.input !== "0x" ? "Contract Interaction" : "Transfer",
-		traffic: inferTraffic(tx.from, tx.to, address),
-		txnFee: computeFeeEth(parseInt(tx.gas || "0", 16), parseInt(tx.gasPrice || "0", 16)),
+		txnFee: computeFeeEthDecimal(tx.gasUsed, tx.gasPrice),
 		timestamp,
 		price,
 	});
@@ -140,13 +171,14 @@ const mapRpcTransaction = (tx, address, { asset = "ETH", price = 0 } = {}) => {
 const mapBlockscoutTransaction = (tx, address, { asset = "ETH", price = 0 } = {}) => {
 	const from = resolveBlockscoutAddress(tx.from);
 	const to = resolveBlockscoutAddress(tx.to);
-	const value = weiToEthAmount(tx.value);
-	const timestamp = tx.timestamp ? Math.floor(new Date(tx.timestamp).getTime() / 1000) : 0;
-	let txnFee = 0;
+	const amount = weiToEthDecimalString(tx.value);
+	const timestamp = normalizeUnixTimestampSeconds(tx.timestamp);
+	let txnFee = "0";
+
 	if (tx.fee?.value != null) {
-		txnFee = weiToEthAmount(tx.fee.value);
+		txnFee = weiToEthDecimalString(tx.fee.value);
 	} else if (tx.gas_used && tx.gas_price) {
-		txnFee = computeFeeEth(tx.gas_used, tx.gas_price);
+		txnFee = computeFeeEthDecimal(tx.gas_used, tx.gas_price);
 	}
 
 	return buildStandardRow({
@@ -154,7 +186,7 @@ const mapBlockscoutTransaction = (tx, address, { asset = "ETH", price = 0 } = {}
 		block: tx.block ?? tx.block_number,
 		from,
 		to,
-		amount: value,
+		amount,
 		asset,
 		method: tx.method || (tx.raw_input && tx.raw_input !== "0x" ? "Contract Interaction" : "Transfer"),
 		traffic: inferTraffic(from, to, address),
@@ -164,11 +196,13 @@ const mapBlockscoutTransaction = (tx, address, { asset = "ETH", price = 0 } = {}
 	});
 };
 
-const buildListResponse = (transactions, { page, show, total }) => ({
+const buildListResponse = (transactions, { page, show, total, nextCursor, nextPageParams } = {}) => ({
 	pagination: {
 		records: String(total ?? transactions.length),
-		pages: String(Math.max(1, Math.ceil((total ?? transactions.length) / show))),
-		page: String(page),
+		pages: String(Math.max(1, Math.ceil((total ?? transactions.length) / (show || 1)))),
+		page: String(page ?? 1),
+		...(nextCursor ? { nextCursor: String(nextCursor) } : {}),
+		...(nextPageParams ? { nextPageParams } : {}),
 	},
 	transactions,
 });
@@ -196,138 +230,191 @@ const fetchTransactionsFromEtherscanV2 = async (
 	return data.result;
 };
 
-const fetchTransactionsFromRouteScan = async (
-	httpGet,
-	{ chainId, address, limit = 25, timeout = DEFAULT_TX_TIMEOUT_MS }
-) => {
+const fetchRouteScanPage = async (httpGet, { chainId, address, limit, nextToken, timeout }) => {
 	const url = `https://api.routescan.io/v2/network/mainnet/evm/${chainId}/address/${address}/transactions`;
-	const { data } = await httpGet(url, { params: { limit }, timeout });
+	const params = { limit };
+	if (nextToken) params.next = nextToken;
+
+	const { data } = await httpGet(url, { params, timeout });
 
 	if (!Array.isArray(data?.items) || data.items.length === 0) {
 		throw new Error("routescan_tx_empty");
 	}
 
-	return data.items;
+	return {
+		items: data.items,
+		nextToken: data?.link?.nextToken || data?.link?.next || null,
+	};
+};
+
+const fetchTransactionsFromRouteScan = async (
+	httpGet,
+	{ chainId, address, limit = 25, page = 1, nextToken, timeout = DEFAULT_TX_TIMEOUT_MS }
+) => {
+	const targetPage = normalizePage(page);
+	let cursor = nextToken || null;
+	let pageResult = null;
+
+	for (let current = 1; current <= targetPage; current++) {
+		pageResult = await fetchRouteScanPage(httpGet, {
+			chainId,
+			address,
+			limit,
+			nextToken: cursor,
+			timeout,
+		});
+
+		if (current === targetPage) {
+			return pageResult;
+		}
+
+		cursor = pageResult.nextToken;
+		if (!cursor) {
+			throw new Error("routescan_page_unavailable");
+		}
+	}
+
+	return pageResult;
 };
 
 const BLOCKSCOUT_USER_AGENT =
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const fetchBlockscoutPage = async (httpGet, { baseUrl, address, cursor, timeout }) => {
+	const normalizedBase = String(baseUrl || "").replace(/\/$/, "");
+	const url = `${normalizedBase}/api/v2/addresses/${address}/transactions`;
+	const params = cursor && typeof cursor === "object" ? { ...cursor } : {};
+
+	const { data } = await httpGet(url, {
+		params,
+		timeout,
+		headers: { Accept: "application/json", "User-Agent": BLOCKSCOUT_USER_AGENT },
+		validateStatus: (status) => status < 500,
+	});
+
+	if (!Array.isArray(data?.items) || data.items.length === 0) {
+		throw new Error("blockscout_tx_empty");
+	}
+
+	return { items: data.items, nextPageParams: data.next_page_params || null };
+};
 
 const fetchTransactionsFromBlockscout = async (
 	httpGet,
-	{ baseUrl, address, limit = 25, timeout = DEFAULT_TX_TIMEOUT_MS, retries = 2 }
+	{ baseUrl, address, limit = 25, page = 1, cursor, timeout = DEFAULT_TX_TIMEOUT_MS }
 ) => {
-	const normalizedBase = String(baseUrl || "").replace(/\/$/, "");
-	const url = `${normalizedBase}/api/v2/addresses/${address}/transactions`;
+	const targetPage = normalizePage(page);
+	let pageCursor = cursor || null;
+	let pageResult = null;
 
-	let lastError = new Error("blockscout_tx_empty");
+	for (let current = 1; current <= targetPage; current++) {
+		pageResult = await fetchBlockscoutPage(httpGet, {
+			baseUrl,
+			address,
+			cursor: pageCursor,
+			timeout,
+		});
 
-	for (let attempt = 0; attempt <= retries; attempt++) {
-		try {
-			const { data } = await httpGet(url, {
-				timeout,
-				headers: { Accept: "application/json", "User-Agent": BLOCKSCOUT_USER_AGENT },
-				validateStatus: (status) => status < 500,
-			});
-
-			if (!Array.isArray(data?.items) || data.items.length === 0) {
-				throw new Error("blockscout_tx_empty");
-			}
-
-			return data.items.slice(0, limit);
-		} catch (err) {
-			lastError = err;
-			if (attempt < retries) {
-				await sleep(250 * (attempt + 1));
-			}
+		if (current === targetPage) {
+			return {
+				items: pageResult.items.slice(0, limit),
+				nextPageParams: pageResult.nextPageParams,
+			};
 		}
+
+		if (!pageResult.nextPageParams) {
+			throw new Error("blockscout_page_unavailable");
+		}
+
+		pageCursor = pageResult.nextPageParams;
 	}
 
-	throw lastError;
+	return pageResult;
+};
+
+const pickBlockscoutCursor = (query = {}) => {
+	if (query.blockscoutCursor && typeof query.blockscoutCursor === "object") {
+		return query.blockscoutCursor;
+	}
+
+	const { block_number, index, hash, inserted_at, fee, items_count } = query;
+	if (block_number == null) return null;
+
+	return {
+		block_number,
+		index,
+		hash,
+		inserted_at,
+		fee,
+		items_count,
+	};
 };
 
 /**
- * Best-effort recent tx discovery via public JSON-RPC block scans (no indexer API).
- * Only suitable as a last resort for very recent activity.
+ * Run transaction providers sequentially until one returns rows or the deadline passes.
  */
-const fetchTransactionsFromRpcScan = async (
-	httpPost,
-	{ rpcUrl, address, limit = 10, maxBlocks = 30, timeout = DEFAULT_TX_TIMEOUT_MS }
-) => {
+const runTransactionProviderLadder = async (providers, { deadlineMs = TX_LIST_DEADLINE_MS } = {}) => {
 	const startedAt = Date.now();
-	const owner = String(address).toLowerCase();
-	const found = [];
 
-	const { data: headData } = await httpPost(
-		rpcUrl,
-		{ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] },
-		{ timeout: Math.min(timeout, 4000), headers: { "Content-Type": "application/json" } }
-	);
+	for (const provider of providers) {
+		const remaining = deadlineMs - (Date.now() - startedAt);
+		if (remaining <= 0) break;
 
-	if (!headData?.result) {
-		throw new Error("rpc_scan_head_unavailable");
-	}
-
-	let blockNumber = parseInt(headData.result, 16);
-
-	for (let scanned = 0; scanned < maxBlocks && found.length < limit; scanned++, blockNumber--) {
-		if (Date.now() - startedAt > timeout) {
-			break;
-		}
-
-		const blockHex = `0x${blockNumber.toString(16)}`;
-		const { data: blockData } = await httpPost(
-			rpcUrl,
-			{ jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: [blockHex, true] },
-			{ timeout: Math.min(timeout, 4000), headers: { "Content-Type": "application/json" } }
-		);
-
-		const transactions = blockData?.result?.transactions;
-		if (!Array.isArray(transactions)) continue;
-
-		const blockTimestamp = parseInt(blockData.result.timestamp, 16);
-
-		for (const tx of transactions) {
-			const from = String(tx.from || "").toLowerCase();
-			const to = String(tx.to || "").toLowerCase();
-
-			if (from !== owner && to !== owner) continue;
-
-			found.push(
-				mapRpcTransaction({ ...tx, timestamp: blockTimestamp }, address, {
-					asset: "ETH",
-				})
-			);
-
-			if (found.length >= limit) break;
+		try {
+			const attemptTimeout = Math.min(TX_LIST_PROVIDER_TIMEOUT_MS, remaining);
+			const result = await provider(attemptTimeout);
+			if (result?.transactions?.length) {
+				return result;
+			}
+		} catch (err) {
+			if (!isTimeoutError(err)) {
+				console.error({ evmTxProviderError: err?.message || err });
+			}
 		}
 	}
 
-	if (!found.length) {
-		throw new Error("rpc_scan_tx_empty");
-	}
+	return null;
+};
 
-	return found;
+const withTxListDeadline = async (promise, deadlineMs = TX_LIST_DEADLINE_MS) => {
+	let timer;
+	try {
+		return await Promise.race([
+			promise,
+			new Promise((resolve) => {
+				timer = setTimeout(() => resolve(null), deadlineMs);
+			}),
+		]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
 };
 
 module.exports = {
 	DEFAULT_TX_TIMEOUT_MS,
+	TX_LIST_DEADLINE_MS,
+	TX_LIST_PROVIDER_TIMEOUT_MS,
+	ETH_ADDRESS_OVERVIEW_TX_CAP_MS,
 	ETHERSCAN_V2_API,
 	normalizeTransactionLimit,
 	normalizePage,
+	normalizeUnixTimestampSeconds,
+	formatDecimalString,
 	resolveEtherscanApiKey,
+	isTimeoutError,
 	inferTraffic,
 	mapEtherscanV2Transaction,
 	mapRouteScanTransaction,
 	mapBlockscoutTransaction,
-	mapRpcTransaction,
 	buildListResponse,
 	buildStandardRow,
 	fetchTransactionsFromEtherscanV2,
 	fetchTransactionsFromRouteScan,
 	fetchTransactionsFromBlockscout,
-	fetchTransactionsFromRpcScan,
-	weiToEthAmount,
+	fetchRouteScanPage,
+	fetchBlockscoutPage,
+	pickBlockscoutCursor,
+	runTransactionProviderLadder,
+	withTxListDeadline,
+	weiToEthDecimalString,
 };

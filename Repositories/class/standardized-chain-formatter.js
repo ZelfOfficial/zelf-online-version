@@ -148,21 +148,54 @@ class StandardizedChainFormatter {
 		const traffic = this.determineTraffic(tx);
 		const method = this.determineMethod(tx);
 		const fiatAmount = this.calculateFiatAmount(tx);
+		const unixTs = this.resolveTransactionUnixTime(tx);
 
 		return {
 			hash: this.validateHash(tx.hash || tx.transactionHash || ""),
 			method: method,
 			block: tx.block || tx.blockNumber || tx.blockHeight || "N/A",
-			age: tx.age || this.calculateAge(tx.date || tx.timestamp || tx.blocktime),
-			date: this.formatDate(tx.date || tx.timestamp || tx.blocktime),
+			age: unixTs ? this.calculateAge(unixTs) : tx.age || "Unknown",
+			date: unixTs ? this.formatDate(unixTs) : "N/A",
+			timestamp: unixTs || 0,
+			blocktime: unixTs || 0,
 			from: this.validateAddress(tx.from || ""),
 			traffic: traffic,
 			to: this.validateAddress(tx.to || ""),
 			fiatAmount: fiatAmount.toFixed(2),
-			amount: this.formatAmount(tx.amount || tx.value || 0).toString(),
+			amount: this.formatAmountString(tx.amount || tx.value || 0),
 			asset: tx.asset || this.chainSymbol,
-			txnFee: this.formatAmount(tx.txnFee || tx.fee || tx.gasUsed || 0).toString(),
+			txnFee: this.formatAmountString(tx.txnFee || tx.fee || tx.gasUsed || 0),
 		};
+	}
+
+	resolveTransactionUnixTime(tx) {
+		const candidates = [tx.timestamp, tx.blocktime, tx.timeStamp, tx.date];
+		for (const candidate of candidates) {
+			const unix = this.normalizeUnixTimestampSeconds(candidate);
+			if (unix) return unix;
+		}
+		return 0;
+	}
+
+	normalizeUnixTimestampSeconds(value) {
+		if (value === null || value === undefined || value === "") return 0;
+		if (typeof value === "number" && Number.isFinite(value)) {
+			if (value > 1e12) return Math.floor(value / 1000);
+			if (value > 1e9) return Math.floor(value);
+			return 0;
+		}
+		const str = String(value).trim();
+		if (!str) return 0;
+		if (/^\d+$/.test(str)) {
+			const n = Number(str);
+			if (!Number.isFinite(n)) return 0;
+			if (n > 1e12) return Math.floor(n / 1000);
+			if (n > 1e9) return Math.floor(n);
+			return 0;
+		}
+		const parsed = Date.parse(str);
+		if (!Number.isNaN(parsed)) return Math.floor(parsed / 1000);
+		return 0;
 	}
 
 	/**
@@ -210,9 +243,10 @@ class StandardizedChainFormatter {
 	 * @returns {string} Age string
 	 */
 	calculateAge(timestamp) {
-		if (!timestamp) return "Unknown";
+		const unixTs = this.normalizeUnixTimestampSeconds(timestamp);
+		if (!unixTs) return "Unknown";
 
-		const date = new Date(timestamp * 1000);
+		const date = new Date(unixTs * 1000);
 		const now = new Date();
 		const diffMs = now - date;
 		const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
@@ -231,14 +265,29 @@ class StandardizedChainFormatter {
 	 * @returns {string} Formatted date
 	 */
 	formatDate(timestamp) {
-		if (!timestamp) return "N/A";
+		const unixTs = this.normalizeUnixTimestampSeconds(timestamp);
+		if (!unixTs) return "N/A";
 
 		try {
-			const date = new Date(timestamp * 1000);
+			const date = new Date(unixTs * 1000);
 			return date.toISOString().replace("T", " ").substring(0, 19);
 		} catch (error) {
 			return "N/A";
 		}
+	}
+
+	formatAmountString(amount) {
+		if (amount === null || amount === undefined) return "0";
+		const raw = typeof amount === "string" ? amount.trim() : String(amount);
+		if (!raw) return "0";
+		if (/^[-+]?\d+(\.\d+)?$/.test(raw) && !raw.includes("e") && !raw.includes("E")) {
+			return raw.replace(/\.?0+$/, "").replace(/\.$/, "") || "0";
+		}
+		const num = Number(raw);
+		if (!Number.isFinite(num)) return "0";
+		if (num === 0) return "0";
+		const fixed = num.toFixed(18);
+		return fixed.replace(/\.?0+$/, "") || "0";
 	}
 
 	/**
