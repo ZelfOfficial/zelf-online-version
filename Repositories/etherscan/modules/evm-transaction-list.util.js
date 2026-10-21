@@ -438,17 +438,35 @@ const fetchTransactionsFromRouteScan = async (
 const BLOCKSCOUT_USER_AGENT =
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
 
+const classifyBlockscoutHttpStatus = (status) => {
+	if (status == null || status < 400) return;
+
+	if (status === 429 || status >= 500) {
+		const err = new Error(`blockscout_upstream_${status}`);
+		err.response = { status };
+		throw err;
+	}
+
+	const err = new Error("blockscout_tx_empty");
+	err.response = { status };
+	throw err;
+};
+
 const fetchBlockscoutPage = async (httpGet, { baseUrl, address, cursor, timeout }) => {
 	const normalizedBase = String(baseUrl || "").replace(/\/$/, "");
 	const url = `${normalizedBase}/api/v2/addresses/${address}/transactions`;
 	const params = cursor && typeof cursor === "object" ? { ...cursor } : {};
 
-	const { data } = await httpGet(url, {
+	const response = await httpGet(url, {
 		params,
 		timeout,
 		headers: { Accept: "application/json", "User-Agent": BLOCKSCOUT_USER_AGENT },
 		validateStatus: (status) => status < 500,
 	});
+
+	const data = response?.data;
+	const status = response?.status;
+	classifyBlockscoutHttpStatus(status);
 
 	if (!Array.isArray(data?.items) || data.items.length === 0) {
 		throw new Error("blockscout_tx_empty");

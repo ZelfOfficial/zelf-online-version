@@ -317,12 +317,40 @@ describe("evm-transaction-list.util", () => {
 		const httpGet = jest
 			.fn()
 			.mockResolvedValueOnce({
+				status: 200,
 				data: {
 					items: [{ hash: "0x1", from: { hash: "0xa" }, to: { hash: "0xb" }, value: "0", timestamp: "2024-01-01T00:00:00.000000Z" }],
 					next_page_params: { block_number: 10, index: 1 },
 				},
 			})
 			.mockRejectedValueOnce({ response: { status: 429 }, message: "Too Many Requests" });
+
+		const result = await fetchTransactionsFromBlockscout(httpGet, {
+			baseUrl: "https://explorer.optimism.io",
+			address: TEST_ADDRESS,
+			limit: 1,
+			page: 2,
+			deadlineMs: 12000,
+		});
+
+		expect(result.incomplete).toBe(true);
+		expect(result.hasMore).toBe(true);
+	});
+
+	it("fetchTransactionsFromBlockscout classifies resolved HTTP 429 as incomplete (not end of list)", async () => {
+		const httpGet = jest
+			.fn()
+			.mockResolvedValueOnce({
+				status: 200,
+				data: {
+					items: [{ hash: "0x1", from: { hash: "0xa" }, to: { hash: "0xb" }, value: "0", timestamp: "2024-01-01T00:00:00.000000Z" }],
+					next_page_params: { block_number: 10, index: 1 },
+				},
+			})
+			.mockResolvedValueOnce({
+				status: 429,
+				data: { items: [] },
+			});
 
 		const result = await fetchTransactionsFromBlockscout(httpGet, {
 			baseUrl: "https://explorer.optimism.io",
