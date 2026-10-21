@@ -799,7 +799,7 @@ describe("ZelfKeys API Integration Tests", () => {
                 .set("Authorization", `Bearer ${authToken}`)
                 .send({
                     faceBase64,
-                    masterPassword: TEST_PASSWORD,
+                    password: TEST_PASSWORD,
                     removePGP: true,
                 });
 
@@ -821,7 +821,7 @@ describe("ZelfKeys API Integration Tests", () => {
                 .set("Origin", "https://test.example.com")
                 .send({
                     faceBase64,
-                    masterPassword: TEST_PASSWORD,
+                    password: TEST_PASSWORD,
                     removePGP: true,
                 });
 
