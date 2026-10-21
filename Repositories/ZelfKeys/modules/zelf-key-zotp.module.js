@@ -13,6 +13,19 @@ const PINATA_MAX_KEYVALUES_PER_PIN = 9;
 const BASE32_PATTERN = /^[A-Z2-7]+$/;
 
 /**
+ * Build an error that `Core/http-handler` maps to HTTP 409 with an `ERR_*` code.
+ * @param {string} code
+ * @param {string} message
+ * @returns {Error}
+ */
+const createZotpValidationError = (code, message) => {
+    const error = new Error(`409:${code}`);
+    error.clientCode = code;
+    error.clientMessage = message;
+    return error;
+};
+
+/**
  * Normalize a TOTP setup key for storage (uppercase Base32, no spaces, dashes, or padding).
  * @param {string} raw
  * @returns {{ normalized?: string, code: string, message: string }}
@@ -229,6 +242,7 @@ module.exports = {
     ZOTP_DEFAULT_PERIOD,
     ZOTP_MAX_PERIOD,
     PINATA_MAX_KEYVALUES_PER_PIN,
+    createZotpValidationError,
     normalizeSetupKey,
     resolveZotpTotpParams,
     formatZotpTotpMetadataFields,

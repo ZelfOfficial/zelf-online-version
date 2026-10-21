@@ -27,7 +27,12 @@ const {
     PROTECTION_FACE_PASSWORD,
     passwordCredentialSchema,
 } = require("../middlewares/zelf-key.middleware");
-const { resolveZotpTotpMetadataFields, resolveZotpTotpForRetrieve } = require("./zelf-key-zotp.module");
+const {
+    resolveZotpTotpMetadataFields,
+    resolveZotpTotpForRetrieve,
+    normalizeSetupKey,
+    createZotpValidationError,
+} = require("./zelf-key-zotp.module");
 
 const TYPES_REQUIRING_TRANSPORT_ENCRYPTION = new Set(["password", "notes", "note", "credit_card", "payment-card"]);
 const SUPPORTED_CATEGORIES = ["password", "notes", "credit_card", "contact", "zotp"];
@@ -175,13 +180,18 @@ const createMetadataAndPublicData = async (type, data, authToken) => {
 
     switch (type) {
         case "zotp": {
+            const setupKeyResult = normalizeSetupKey(data.setupKey);
+            if (!setupKeyResult.normalized) {
+                throw createZotpValidationError(setupKeyResult.code, setupKeyResult.message);
+            }
+
             const totpMeta = resolveZotpTotpMetadataFields(data);
             if (totpMeta.error) {
-                throw new Error(`409:${totpMeta.error.code}:${totpMeta.error.message}`);
+                throw createZotpValidationError(totpMeta.error.code, totpMeta.error.message);
             }
 
             typePayload.metadata = {
-                setupKey: `${data.setupKey}`,
+                setupKey: setupKeyResult.normalized,
                 username: `${data.username}`,
                 ...totpMeta.metadataFields,
             };
