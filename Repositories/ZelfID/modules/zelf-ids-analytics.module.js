@@ -13,7 +13,12 @@ const SNAPSHOT_CAP = 50000;
 const DAILY_WINDOW_DAYS = 60;
 const RECENT_N = 10;
 const ARWEAVE_TIMEOUT_MS = 15000;
-const cache = createSwrCache({ ttlMs: 5 * 60 * 1000, maxStaleMs: 24 * 60 * 60 * 1000, warmIntervalMs: 4 * 60 * 1000 });
+const cache = createSwrCache({
+    ttlMs: 5 * 60 * 1000,
+    maxStaleMs: 24 * 60 * 60 * 1000,
+    warmIntervalMs: 4 * 60 * 1000,
+    shouldPersist: (snapshot) => !snapshot?.incomplete,
+});
 
 const parseDate = (s) => {
     if (!s) return null;
@@ -57,6 +62,7 @@ const loadSnapshot = async (domain, deps) => {
 
     const ipfsSearch = await TagsIPFSModule.searchByDomain({ domain, limit: SNAPSHOT_CAP, pageOffset: 0 });
     const ipfsRows = Array.isArray(ipfsSearch) ? ipfsSearch : ipfsSearch?.rows || [];
+    const ipfsIncomplete = !Array.isArray(ipfsSearch) && Boolean(ipfsSearch?.incomplete);
     let arweaveRows = [];
     try {
         arweaveRows = (await withTimeout(TagsArweaveModule.searchByDomain({ domain }), ARWEAVE_TIMEOUT_MS)) || [];
@@ -78,7 +84,11 @@ const loadSnapshot = async (domain, deps) => {
     }
     const records = Array.from(seen.values());
     records.sort((a, b) => (parseDate(b.registeredAt) || 0) - (parseDate(a.registeredAt) || 0));
-    return { records, generatedAt: new Date().toISOString() };
+    return {
+        records,
+        generatedAt: new Date().toISOString(),
+        ...(ipfsIncomplete ? { incomplete: true } : {}),
+    };
 };
 
 const isPaid = (r) => r.type === "mainnet";
@@ -170,7 +180,16 @@ const _snapshotFor = async (query, jwt, deps) => {
         deps.resolveAuthorizedDomain || require("../../License/modules/license-domain-access.module").resolveAuthorizedDomain;
     const swr = deps.cache || cache;
     const { domain } = await resolveAuthorizedDomain(jwt, query.domain);
-    const { value, ageMs, stale } = await swr.get(`analytics:${domain}`, () => loadSnapshot(domain, deps));
+    const key = `analytics:${domain}`;
+    const loader = async () => {
+        const snapshot = await loadSnapshot(domain, deps);
+        if (snapshot.incomplete) {
+            const prior = swr._entries.get(key)?.value;
+            if (prior && !prior.incomplete) return prior;
+        }
+        return snapshot;
+    };
+    const { value, ageMs, stale } = await swr.get(key, loader);
     return { domain, snapshot: value, ageMs, stale };
 };
 
@@ -181,6 +200,7 @@ const getSummary = async (query = {}, jwt, deps = {}) => {
         generatedAt: snapshot.generatedAt,
         snapshotAgeSec: Math.round(ageMs / 1000),
         stale,
+        ...(snapshot.incomplete ? { incomplete: true } : {}),
     };
 };
 

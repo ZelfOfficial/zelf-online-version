@@ -111,6 +111,7 @@ const searchTagsByDomain = async (ctx) => {
             limit: result.limit,
             pageOffset: result.pageOffset,
             total: result.total,
+            ...(result.incomplete ? { incomplete: true } : {}),
         };
     } catch (error) {
         const _exception = errorHandler(error, ctx);

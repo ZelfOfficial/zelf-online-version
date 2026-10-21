@@ -66,6 +66,46 @@ describe("zelf-ids analytics", () => {
         expect(s.totals.total).toBe(3);
     });
 
+    test("does not replace a good snapshot when IPFS returns incomplete", async () => {
+        let clock = 0;
+        const deps = makeDeps();
+        deps.now = () => clock;
+        deps.cache = createSwrCache({
+            ttlMs: 1000,
+            maxStaleMs: 60_000,
+            now: deps.now,
+            shouldPersist: (snapshot) => !snapshot?.incomplete,
+        });
+
+        const good = await getSummary({}, {}, deps);
+        expect(good.totals.total).toBe(4);
+
+        clock = 5000;
+        deps.TagsIPFSModule.searchByDomain.mockImplementation(async () => ({
+            rows: [row("only.zelf", "mainnet", "2026-10-14 10:00:00", "2027-10-14 10:00:00")],
+            incomplete: true,
+        }));
+
+        const after = await getSummary({}, {}, deps);
+        expect(deps.TagsIPFSModule.searchByDomain).toHaveBeenCalledTimes(2);
+        expect(after.totals.total).toBe(4);
+        expect(after.incomplete).toBeUndefined();
+    });
+
+    test("surfaces incomplete on summary when no prior snapshot exists", async () => {
+        const deps = makeDeps();
+        deps.TagsArweaveModule.searchByDomain = jest.fn(async () => []);
+        deps.TagsIPFSModule.searchByDomain = jest.fn(async () => ({
+            rows: [row("partial.zelf", "mainnet", "2026-10-14 10:00:00", "2027-10-14 10:00:00")],
+            incomplete: true,
+        }));
+        deps.cache = createSwrCache({ shouldPersist: (snapshot) => !snapshot?.incomplete });
+
+        const s = await getSummary({}, {}, deps);
+        expect(s.totals.total).toBe(1);
+        expect(s.incomplete).toBe(true);
+    });
+
     test("buildSummary handles empty", () => {
         expect(buildSummary([], "zelf", NOW).totals.total).toBe(0);
     });

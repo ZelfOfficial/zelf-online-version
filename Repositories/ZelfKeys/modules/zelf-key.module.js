@@ -851,6 +851,42 @@ const createNFTReadyData = async (data, authToken) => {
     }
 };
 
+const canonicalZelfKeyOwnerRef = (value, domain = "zelf") => {
+    if (!value) return "";
+
+    const suffix = `.${domain}`;
+    const bare = value.endsWith(suffix) ? value.slice(0, -suffix.length) : value;
+
+    return TagsPartsModule.getFullTagName(bare, domain);
+};
+
+const _ownsZelfKey = (publicData, fullTagName, domain = "zelf") => {
+    const keyOwner = publicData?.keyOwner || "";
+    const category = publicData?.category || "";
+
+    const ownerCanon = canonicalZelfKeyOwnerRef(keyOwner, domain);
+    const userCanon = canonicalZelfKeyOwnerRef(fullTagName, domain);
+
+    if (ownerCanon === userCanon) return true;
+    if (keyOwner === fullTagName) return true;
+
+    return SUPPORTED_CATEGORIES.some(
+        (name) =>
+            category === `${userCanon}_${name}` ||
+            category === `${fullTagName}_${name}` ||
+            (ownerCanon === userCanon && category === `${keyOwner}_${name}`),
+    );
+};
+
+const _listCategoryPrefixesForOwner = (identifier, domain) => {
+    const canonical = TagsPartsModule.getFullTagName(identifier, domain);
+    const legacy = `${identifier}${domain ? `.${domain}` : ""}`;
+
+    if (legacy === canonical) return [canonical];
+
+    return [canonical, legacy];
+};
+
 /**
  * List data by category
  * @param {Object} data - Query parameters
@@ -875,34 +911,36 @@ const listData = async (data, authToken) => {
         }
         const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
 
-        let searchCategory = category;
-        let results = [];
+        const results = [];
+        const seenIds = new Set();
+        const searchCategories = [];
 
-        searchCategory = `${fullTagName}_${category}`;
+        for (const prefix of _listCategoryPrefixesForOwner(identifier, domain)) {
+            const searchCategory = `${prefix}_${category}`;
+            searchCategories.push(searchCategory);
 
-        // Search IPFS for tags where category matches
-        const ipfsResults = await IPFS.filter("category", searchCategory);
+            const ipfsResults = await IPFS.filter("category", searchCategory);
 
-        // List returns pin metadata only. The QR is decoded when one item is opened.
-        if (ipfsResults && Array.isArray(ipfsResults)) {
-            results = ipfsResults
-                .map((item) => {
-                    const publicData = item.publicData || {};
+            if (!Array.isArray(ipfsResults)) continue;
 
-                    if (publicData.category !== searchCategory) {
-                        return null;
-                    }
+            for (const item of ipfsResults) {
+                const publicData = item.publicData || {};
 
-                    return {
-                        id: item.id || item.cid,
-                        cid: item.cid,
-                        url: item.url,
-                        publicData,
-                        createdAt: item.created_at || item.createdAt,
-                        updatedAt: item.updated_at || item.updatedAt,
-                    };
-                })
-                .filter(Boolean);
+                if (!_ownsZelfKey(publicData, fullTagName, domain)) continue;
+
+                const rowId = item.id || item.cid;
+                if (!rowId || seenIds.has(rowId)) continue;
+                seenIds.add(rowId);
+
+                results.push({
+                    id: rowId,
+                    cid: item.cid,
+                    url: item.url,
+                    publicData,
+                    createdAt: item.created_at || item.createdAt,
+                    updatedAt: item.updated_at || item.updatedAt,
+                });
+            }
         }
 
         return {
@@ -912,7 +950,8 @@ const listData = async (data, authToken) => {
             data: results,
             timestamp: new Date().toISOString(),
             fullTagName,
-            searchCategory,
+            searchCategory: searchCategories[0],
+            searchCategories,
             totalCount: results.length,
         };
     } catch (error) {
@@ -1099,33 +1138,6 @@ const _isValidCreditCard = (cardNumber) => {
     return sum % 10 === 0;
 };
 
-const canonicalZelfKeyOwnerRef = (value, domain = "zelf") => {
-    if (!value) return "";
-
-    const suffix = `.${domain}`;
-    const bare = value.endsWith(suffix) ? value.slice(0, -suffix.length) : value;
-
-    return TagsPartsModule.getFullTagName(bare, domain);
-};
-
-const _ownsZelfKey = (publicData, fullTagName, domain = "zelf") => {
-    const keyOwner = publicData?.keyOwner || "";
-    const category = publicData?.category || "";
-
-    const ownerCanon = canonicalZelfKeyOwnerRef(keyOwner, domain);
-    const userCanon = canonicalZelfKeyOwnerRef(fullTagName, domain);
-
-    if (ownerCanon === userCanon) return true;
-    if (keyOwner === fullTagName) return true;
-
-    return SUPPORTED_CATEGORIES.some(
-        (name) =>
-            category === `${userCanon}_${name}` ||
-            category === `${fullTagName}_${name}` ||
-            (ownerCanon === userCanon && category === `${keyOwner}_${name}`),
-    );
-};
-
 /**
  * Decode one pinned QR for an item the authenticated tag owns.
  * The list endpoint does not download QRs.
@@ -1180,27 +1192,33 @@ const _listOwnedKeyItems = async (authToken) => {
     const domain = authToken.domain || "zelf";
     const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
     const items = [];
+    const seenIds = new Set();
 
     for (const category of SUPPORTED_CATEGORIES) {
-        const searchCategory = `${fullTagName}_${category}`;
-        const ipfsResults = await IPFS.filter("category", searchCategory);
+        for (const prefix of _listCategoryPrefixesForOwner(identifier, domain)) {
+            const searchCategory = `${prefix}_${category}`;
+            const ipfsResults = await IPFS.filter("category", searchCategory);
 
-        if (!Array.isArray(ipfsResults)) continue;
+            if (!Array.isArray(ipfsResults)) continue;
 
-        for (const row of ipfsResults) {
-            const publicData = row.publicData || {};
+            for (const row of ipfsResults) {
+                const publicData = row.publicData || {};
 
-            if (publicData.category !== searchCategory) continue;
-            if (!_ownsZelfKey(publicData, fullTagName, domain)) continue;
+                if (!_ownsZelfKey(publicData, fullTagName, domain)) continue;
 
-            items.push({
-                id: row.id || row.cid,
-                cid: row.cid,
-                name: row.name,
-                url: row.url,
-                publicData,
-                category,
-            });
+                const rowId = row.id || row.cid;
+                if (!rowId || seenIds.has(rowId)) continue;
+                seenIds.add(rowId);
+
+                items.push({
+                    id: rowId,
+                    cid: row.cid,
+                    name: row.name,
+                    url: row.url,
+                    publicData,
+                    category,
+                });
+            }
         }
     }
 

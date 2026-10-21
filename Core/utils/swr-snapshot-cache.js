@@ -10,6 +10,7 @@ const createSwrCache = ({
     now = () => Date.now(),
     warmIntervalMs = 0, // >0: refresh recently used keys in the background so readers never wait for a cold load
     warmIdleMs = 24 * 60 * 60 * 1000, // stop warming keys nobody asked for in this long
+    shouldPersist = () => true,
 } = {}) => {
     const entries = new Map();
     const loaders = new Map(); // key -> { loader, lastAccess }
@@ -35,6 +36,11 @@ const createSwrCache = ({
         const inflight = Promise.resolve()
             .then(loader)
             .then((value) => {
+                const cur = entries.get(key) || {};
+                if (!shouldPersist(value)) {
+                    entries.set(key, { ...cur, inflight: null });
+                    return value;
+                }
                 entries.set(key, { value, at: now(), inflight: null });
                 return value;
             })

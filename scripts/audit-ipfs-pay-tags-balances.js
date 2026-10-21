@@ -140,8 +140,13 @@ async function fetchPinsForDomain(domain, namePattern, maxPins) {
         },
         {},
     );
-    if (Array.isArray(result)) return result;
-    return result?.rows || [];
+    if (Array.isArray(result)) {
+        return { rows: result, incomplete: false };
+    }
+    return {
+        rows: result?.rows || [],
+        incomplete: Boolean(result?.incomplete),
+    };
 }
 
 async function runBatch(items, concurrency, fn) {
@@ -196,15 +201,25 @@ async function main() {
         console.error(`[audit] domain=${domain} name~="${namePattern}" maxPins=${opts.maxPins}`);
 
         let rows;
+        let scanIncomplete = false;
         try {
-            rows = await fetchPinsForDomain(domain, namePattern, opts.maxPins);
+            const fetched = await fetchPinsForDomain(domain, namePattern, opts.maxPins);
+            rows = fetched.rows;
+            scanIncomplete = fetched.incomplete;
         } catch (e) {
             console.error(`[audit] fetch failed domain=${domain}:`, e.message || e);
             byDomainStats[domain] = { error: String(e.message || e), pins: 0 };
             continue;
         }
 
-        byDomainStats[domain] = { pins: rows.length, namePattern };
+        byDomainStats[domain] = {
+            pins: rows.length,
+            namePattern,
+            ...(scanIncomplete ? { incomplete: true } : {}),
+        };
+        if (scanIncomplete) {
+            console.error(`[audit] WARNING domain=${domain} IPFS search-by-domain scan incomplete (partial pin set)`);
+        }
 
         const work = rows.map((row) => ({
             pinName: row.name || "",
@@ -288,6 +303,9 @@ async function main() {
 
     const summary = {
         totalPins: allRecords.length,
+        domainsWithIncompleteScan: Object.entries(byDomainStats)
+            .filter(([, stats]) => stats.incomplete)
+            .map(([domainName]) => domainName),
         withAnyPositiveBalance: allRecords.filter((r) => r.anyBalance).length,
         withUnknown: allRecords.filter((r) => r.anyUnknown).length,
         byNetworkPositive: {
