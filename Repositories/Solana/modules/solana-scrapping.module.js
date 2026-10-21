@@ -69,7 +69,25 @@ const getAddress = async (params) => {
 			response = solscanResponse || oklinkResponse;
 			source = solscanResponse ? "solscan" : oklinkResponse ? "oklink" : null;
 
+			if (looksEmpty(response)) {
+				try {
+					const saResult = await solanaSourceA.getAddress(params);
+					if (!looksEmpty(saResult)) {
+						response = saResult;
+						source = "sourceA";
+					}
+				} catch (e) {
+					console.error("solana sourceA getAddress fallback:", e?.message || e);
+				}
+			}
+
 			break;
+	}
+
+	if (!response) {
+		const error = new Error("solana_balance_unavailable");
+		error.status = 502;
+		throw error;
 	}
 
 	// Add source to response if response exists

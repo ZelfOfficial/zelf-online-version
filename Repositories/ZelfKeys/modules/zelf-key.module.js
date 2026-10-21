@@ -17,6 +17,7 @@ const {
 } = require("../../Tags/config/supported-domains");
 const { createNFT } = require("../../Avalanche/modules/avax-nft.module");
 const { resolveEncryptVersion } = require("../../Tags/modules/tags-addresses.module");
+const { ZELFPROOF_CLIENT_ERROR_STATUS } = require("../../ZelfProof/modules/zelf-proof.module");
 
 const config = require("../../../Core/config");
 const { errorHandler } = require("../../../Core/http-handler");
@@ -30,6 +31,64 @@ const {
 
 const TYPES_REQUIRING_TRANSPORT_ENCRYPTION = new Set(["password", "notes", "note", "credit_card", "payment-card"]);
 const SUPPORTED_CATEGORIES = ["password", "notes", "credit_card", "contact", "zotp"];
+
+const ZELF_KEY_CLIENT_ERROR_STATUS = {
+    ...ZELFPROOF_CLIENT_ERROR_STATUS,
+    ERR_LIVENESS_FAILED: 422,
+};
+
+const throwZelfKeyClientError = (code) => {
+    const status = ZELF_KEY_CLIENT_ERROR_STATUS[code] || 500;
+    throw new Error(`${status}:${code}`);
+};
+
+const isLivenessFailureMessage = (normalizedMessage) =>
+    normalizedMessage.includes("liveness") ||
+    normalizedMessage.includes("face is not central") ||
+    normalizedMessage.includes("no face detected") ||
+    normalizedMessage.includes("multiple face") ||
+    normalizedMessage.includes("face not recognized");
+
+const remapZelfKeyCaughtError = (error) => {
+    if (typeof error?.code === "string" && error.code.startsWith("ERR_")) {
+        const status =
+            Number.isFinite(error.status) && error.status >= 400 && error.status < 600
+                ? error.status
+                : ZELF_KEY_CLIENT_ERROR_STATUS[error.code] || 422;
+
+        throw new Error(`${status}:${error.code}`);
+    }
+
+    if (error?.message && typeof error.message === "string") {
+        const normalizedMessage = error.message.toLowerCase();
+
+        if (normalizedMessage.includes("password") && normalizedMessage.includes("invalid")) {
+            throwZelfKeyClientError("ERR_INVALID_PASSWORD");
+        }
+
+        if (isLivenessFailureMessage(normalizedMessage)) {
+            throwZelfKeyClientError("ERR_LIVENESS_FAILED");
+        }
+
+        if (normalizedMessage.includes("password") && normalizedMessage.includes("required")) {
+            throwZelfKeyClientError("ERR_PASSWORD_REQUIRED");
+        }
+    }
+
+    throw error;
+};
+
+/**
+ * Zelf ID password for ownership checks (never the site password on password store rows).
+ * @param {Object} data
+ * @returns {string|undefined}
+ */
+const resolveZelfIdPasswordForOwnership = (data) => {
+    if (!data || typeof data !== "object") return undefined;
+    if (data.zelfIdPassword) return data.zelfIdPassword;
+    if (data.type === "password") return undefined;
+    return data.password;
+};
 
 const normalizeOptionalString = (value) => {
     const trimmed = typeof value === "string" ? value.trim() : "";
@@ -431,7 +490,7 @@ const storeData = async (data, authToken) => {
 
         const faceBase64 = decryptedParams.face;
 
-        await _validateOwnership(data.faceBase64, resolveStoreKeyPassword(data), authToken, data);
+        await _validateOwnership(data.faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
 
         const { metadata, publicData, fullTagName, protection } = await createMetadataAndPublicData(
             type,
@@ -524,7 +583,7 @@ const storePasswordsBulk = async (data, authToken) => {
 
     const decryptedParams = await decryptKeyCredentials({ faceBase64, removePGP, ...data }, authToken);
 
-    await _validateOwnership(faceBase64, resolveKeyPasswordInput(data), authToken, data);
+    await _validateOwnership(faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
 
     const batchProtection = resolveProtection(data.protection);
     assertProtectionStoreRules(batchProtection, decryptedParams.password);
@@ -602,7 +661,7 @@ const retrieveData = async (data, authToken) => {
 
     if (protectionRequiresKeyPassword(protection)) {
         if (!decryptedParams.password) {
-            throw new Error("400:ERR_MISSING_PASSWORD");
+            throwZelfKeyClientError("ERR_PASSWORD_REQUIRED");
         }
     } else {
         decryptedParams.password = undefined;
@@ -626,29 +685,10 @@ const retrieveData = async (data, authToken) => {
     } catch (error) {
         console.error({ error });
 
-        if (typeof error?.code === "string" && error.code.startsWith("ERR_")) {
-            const status =
-                Number.isFinite(error.status) && error.status >= 400 && error.status < 600 ? error.status : 422;
-
-            throw new Error(`${status}:${error.code}`);
-        }
-
-        if (error?.message && typeof error.message === "string") {
-            const normalizedMessage = error.message.toLowerCase();
-
-            if (normalizedMessage.includes("password") && normalizedMessage.includes("invalid")) {
-                throw new Error("400:ERR_INVALID_PASSWORD");
-            }
-
-            if (
-                normalizedMessage.includes("liveness") ||
-                normalizedMessage.includes("face is not central") ||
-                normalizedMessage.includes("no face detected") ||
-                normalizedMessage.includes("multiple face") ||
-                normalizedMessage.includes("face not recognized")
-            ) {
-                throw new Error("422:ERR_LIVENESS_FAILED");
-            }
+        try {
+            remapZelfKeyCaughtError(error);
+        } catch (mapped) {
+            throw mapped;
         }
 
         throw new Error("409:failed_to_decrypt");
@@ -957,9 +997,9 @@ const listAllData = async (data, authToken) => {
 
 const deleteZelfKey = async (data, authToken) => {
     try {
-        const { id, faceBase64, masterPassword } = data;
+        const { id, faceBase64, password } = data;
 
-        await _validateOwnership(faceBase64, masterPassword, authToken, data);
+        await _validateOwnership(faceBase64, password, authToken, data);
 
         const result = await IPFS.deleteFiles([id]);
 
@@ -969,27 +1009,21 @@ const deleteZelfKey = async (data, authToken) => {
             message: "ZelfKey deleted successfully",
         };
     } catch (error) {
-        if (error?.message && typeof error.message === "string") {
-            const normalizedMessage = error.message.toLowerCase();
-
-            if (normalizedMessage.includes("password") && normalizedMessage.includes("invalid")) {
-                throw new Error("400:ERR_INVALID_PASSWORD");
-            }
-
-            if (normalizedMessage.includes("liveness") || normalizedMessage.includes("face")) {
-                throw new Error("400:ERR_LIVENESS_FAILED");
-            }
+        try {
+            remapZelfKeyCaughtError(error);
+        } catch (mapped) {
+            throw mapped;
         }
 
         throw error;
     }
 };
 
-const _validateOwnership = async (faceBase64, masterPassword, authToken, extraParams) => {
+const _validateOwnership = async (faceBase64, zelfIdPassword, authToken, extraParams) => {
     const sessionParams = {
         domain: authToken.domain,
         faceBase64,
-        password: masterPassword,
+        password: zelfIdPassword,
         tagName: authToken.tagName || authToken.identifier,
         removePGP: extraParams.removePGP || false,
     };
@@ -1220,7 +1254,7 @@ const changeMasterPassword = async (data, authToken) => {
         throw new Error("409:new_master_password_must_differ");
     }
 
-    await _validateOwnership(faceBase64, oldMasterPassword, authToken, data);
+    await _validateOwnership(faceBase64, data.password, authToken, data);
 
     const ownedItems = await _listOwnedKeyItems(authToken);
     const targets = ownedItems.filter(
@@ -1348,6 +1382,8 @@ module.exports = {
     resolveProtection,
     resolveRetrieveProtection,
     resolveKeyPasswordInput,
+    resolveZelfIdPasswordForOwnership,
     decryptKeyCredentials,
     protectionRequiresKeyPassword,
+    remapZelfKeyCaughtError,
 };

@@ -559,12 +559,65 @@ const unPinFiles = async (ids = []) => {
 	}
 };
 
+const SEARCH_BY_DOMAIN_ALLOWED_LIMITS = [25, 50, 100, 250, 500];
+const SEARCH_BY_DOMAIN_MAX_SCAN = 5000;
+
+const normalizeSearchByDomainLimit = (limit) => {
+	const parsed = parseInt(limit, 10);
+	if (SEARCH_BY_DOMAIN_ALLOWED_LIMITS.includes(parsed)) return parsed;
+	if (Number.isFinite(parsed) && parsed > 0) return Math.min(parsed, 500);
+	return 50;
+};
+
+const normalizeSearchByDomainOffset = (pageOffset) => {
+	const parsed = parseInt(pageOffset, 10);
+	return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+};
+
+const _matchesSearchByDomainRow = (row, domainLower, namePattern) => {
+	if (isContinuationPublicData(row.publicData)) return false;
+	if (!_rowBelongsToDomain(row, domainLower)) return false;
+	if (!namePattern) return true;
+	const label = String(row.name || row.publicData?.zelfName || "").toLowerCase();
+	return label.includes(namePattern.toLowerCase());
+};
+
+/**
+ * Walk Pinata pages until we have the full filtered set (capped) so total + pageOffset are accurate.
+ * @param {"domain"|"name"} property
+ * @param {string} value
+ * @param {string} domainLower
+ * @param {string} namePattern
+ */
+const _collectSearchByDomainRows = async (property, value, domainLower, namePattern) => {
+	const matched = [];
+	let pageToken = null;
+
+	while (matched.length < SEARCH_BY_DOMAIN_MAX_SCAN) {
+		const { files, nextPageToken } = await IPFS.filterPaged(property, value, { pageSize: 100, pageToken });
+		if (!files.length) break;
+
+		for (const file of files) {
+			const row = _formatSearchResults([file])[0];
+			if (!row) continue;
+			if (!_matchesSearchByDomainRow(row, domainLower, namePattern)) continue;
+			matched.push(row);
+			if (matched.length >= SEARCH_BY_DOMAIN_MAX_SCAN) break;
+		}
+
+		if (!nextPageToken || matched.length >= SEARCH_BY_DOMAIN_MAX_SCAN) break;
+		pageToken = nextPageToken;
+	}
+
+	return matched;
+};
+
 /**
  * Search for tags by domain
  * @param {Object} params - Search parameters
  * @param {string} params.domain - Domain name
  * @param {Object} authUser - Authenticated user
- * @returns {Array} - Search results
+ * @returns {{ rows: Array, total: number, limit: number, pageOffset: number }}
  */
 const searchByDomain = async (params, authUser) => {
 	const { domain, limit, pageOffset, name } = params;
@@ -573,24 +626,24 @@ const searchByDomain = async (params, authUser) => {
 
 	if (!domainConfig) throw new Error("Domain not supported");
 
-	// Default to 50 records, support 25, 50, 100, 250, 500; cap matches Core/ipfs filter SAFETY_CAP
-	const paginationOptions = {
-		limit: limit ? parseInt(limit, 10) : 50,
-		pageOffset: pageOffset ? parseInt(pageOffset, 10) : 0,
-	};
-
+	const resolvedLimit = normalizeSearchByDomainLimit(limit);
+	const resolvedOffset = normalizeSearchByDomainOffset(pageOffset);
 	const namePattern = typeof name === "string" ? name.trim() : "";
+	const domainLower = String(domain).toLowerCase();
 
-	if (namePattern) {
-		const records = await IPFS.filter("name", namePattern, paginationOptions);
-		const formatted = _formatSearchResults(records);
-		const domainLower = String(domain).toLowerCase();
-		return formatted.filter((row) => !isContinuationPublicData(row.publicData) && _rowBelongsToDomain(row, domainLower));
-	}
+	const property = namePattern ? "name" : "domain";
+	const filterValue = namePattern || domain;
 
-	const records = await IPFS.filter("domain", domain, paginationOptions);
+	const allRows = await _collectSearchByDomainRows(property, filterValue, domainLower, namePattern);
+	const total = allRows.length;
+	const rows = allRows.slice(resolvedOffset, resolvedOffset + resolvedLimit);
 
-	return _formatSearchResults(records).filter((row) => !isContinuationPublicData(row.publicData));
+	return {
+		rows,
+		total,
+		limit: resolvedLimit,
+		pageOffset: resolvedOffset,
+	};
 };
 
 /**

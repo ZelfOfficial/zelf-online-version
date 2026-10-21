@@ -55,7 +55,8 @@ const loadSnapshot = async (domain, deps) => {
     const TagsIPFSModule = deps.TagsIPFSModule || require("../../Tags/modules/tags-ipfs.module");
     const TagsArweaveModule = deps.TagsArweaveModule || require("../../Tags/modules/tags-arweave.module");
 
-    const ipfsRows = await TagsIPFSModule.searchByDomain({ domain, limit: SNAPSHOT_CAP, pageOffset: 0 });
+    const ipfsSearch = await TagsIPFSModule.searchByDomain({ domain, limit: SNAPSHOT_CAP, pageOffset: 0 });
+    const ipfsRows = Array.isArray(ipfsSearch) ? ipfsSearch : ipfsSearch?.rows || [];
     let arweaveRows = [];
     try {
         arweaveRows = (await withTimeout(TagsArweaveModule.searchByDomain({ domain }), ARWEAVE_TIMEOUT_MS)) || [];

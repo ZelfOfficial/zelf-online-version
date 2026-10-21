@@ -19,6 +19,8 @@ const schemas = {
         domain: string().required(),
         storage: stringEnum(["IPFS", "Arweave", "Walrus"]).required(),
         name: string(),
+        limit: number().integer().min(1).max(500),
+        pageOffset: number().integer().min(0),
     },
     leaseOffline: {
         tagName: string().required(),
@@ -289,12 +291,14 @@ const getValidation = async (ctx, next) => {
 };
 
 const searchByDomainValidation = async (ctx, next) => {
-    const { domain, storage, name } = ctx.request.query;
+    const { domain, storage, name, limit, pageOffset } = ctx.request.query;
 
     const valid = validate(schemas.searchByDomain, {
         domain,
         storage,
         name,
+        limit: limit !== undefined && limit !== "" ? Number(limit) : undefined,
+        pageOffset: pageOffset !== undefined && pageOffset !== "" ? Number(pageOffset) : undefined,
     });
 
     if (valid.error) {

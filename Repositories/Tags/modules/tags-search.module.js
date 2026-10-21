@@ -388,8 +388,25 @@ const searchByDomain = async (params, authUser) => {
     switch (storage) {
         case "IPFS":
             return await TagsIPFSModule.searchByDomain({ domain, limit, pageOffset, name }, authUser);
-        case "Arweave":
-            return await TagsArweaveModule.searchByDomain({ domain }, authUser);
+        case "Arweave": {
+            const rows = await TagsArweaveModule.searchByDomain({ domain }, authUser);
+            const allRows = Array.isArray(rows) ? rows : [];
+            const resolvedLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 500);
+            const resolvedOffset = Math.max(parseInt(pageOffset, 10) || 0, 0);
+            return {
+                rows: allRows.slice(resolvedOffset, resolvedOffset + resolvedLimit),
+                total: allRows.length,
+                limit: resolvedLimit,
+                pageOffset: resolvedOffset,
+            };
+        }
+        default:
+            return {
+                rows: [],
+                total: 0,
+                limit: parseInt(limit, 10) || 50,
+                pageOffset: parseInt(pageOffset, 10) || 0,
+            };
     }
 };
 

@@ -104,12 +104,13 @@ const searchTagsByDomain = async (ctx) => {
     try {
         const { domain, storage, limit, pageOffset, name } = ctx.request.query;
 
-        let data = await TagsSearchModule.searchByDomain({ domain, storage, limit, pageOffset, name }, ctx.state.user);
+        const result = await TagsSearchModule.searchByDomain({ domain, storage, limit, pageOffset, name }, ctx.state.user);
 
         ctx.body = {
-            data,
-            limit,
-            total: data.length,
+            data: result.rows,
+            limit: result.limit,
+            pageOffset: result.pageOffset,
+            total: result.total,
         };
     } catch (error) {
         const _exception = errorHandler(error, ctx);
