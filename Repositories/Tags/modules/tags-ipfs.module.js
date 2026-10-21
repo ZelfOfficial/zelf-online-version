@@ -572,12 +572,14 @@ const _getCachedFilteredRows = async (property, filterValue, domainLower, namePa
 	const key = _searchByDomainCacheKey(domainLower, property, filterValue, namePattern);
 	const hit = searchByDomainFilteredCache.get(key);
 	if (hit && Date.now() - hit.at < SEARCH_BY_DOMAIN_CACHE_TTL_MS) {
-		return hit.rows;
+		return { rows: hit.rows, incomplete: false };
 	}
 
-	const rows = await _collectSearchByDomainRows(property, filterValue, domainLower, namePattern);
-	searchByDomainFilteredCache.set(key, { at: Date.now(), rows });
-	return rows;
+	const collected = await _collectSearchByDomainRows(property, filterValue, domainLower, namePattern);
+	if (!collected.incomplete) {
+		searchByDomainFilteredCache.set(key, { at: Date.now(), rows: collected.rows });
+	}
+	return collected;
 };
 
 const normalizeSearchByDomainLimit = (limit) => {
@@ -611,23 +613,28 @@ const _collectSearchByDomainRows = async (property, value, domainLower, namePatt
 	const matched = [];
 	let pageToken = null;
 
-	while (matched.length < SEARCH_BY_DOMAIN_MAX_SCAN) {
-		const { files, nextPageToken } = await IPFS.filterPaged(property, value, { pageSize: 100, pageToken });
-		if (!files.length) break;
+	try {
+		while (matched.length < SEARCH_BY_DOMAIN_MAX_SCAN) {
+			const { files, nextPageToken } = await IPFS.filterPaged(property, value, { pageSize: 100, pageToken });
+			if (!files.length) break;
 
-		for (const file of files) {
-			const row = _formatSearchResults([file])[0];
-			if (!row) continue;
-			if (!_matchesSearchByDomainRow(row, domainLower, namePattern)) continue;
-			matched.push(row);
-			if (matched.length >= SEARCH_BY_DOMAIN_MAX_SCAN) break;
+			for (const file of files) {
+				const row = _formatSearchResults([file])[0];
+				if (!row) continue;
+				if (!_matchesSearchByDomainRow(row, domainLower, namePattern)) continue;
+				matched.push(row);
+				if (matched.length >= SEARCH_BY_DOMAIN_MAX_SCAN) break;
+			}
+
+			if (!nextPageToken || matched.length >= SEARCH_BY_DOMAIN_MAX_SCAN) break;
+			pageToken = nextPageToken;
 		}
 
-		if (!nextPageToken || matched.length >= SEARCH_BY_DOMAIN_MAX_SCAN) break;
-		pageToken = nextPageToken;
+		return { rows: matched, incomplete: false };
+	} catch (error) {
+		console.error("searchByDomain scan interrupted:", error?.message || error);
+		return { rows: matched, incomplete: true };
 	}
-
-	return matched;
 };
 
 /**
@@ -652,7 +659,7 @@ const searchByDomain = async (params, authUser) => {
 	const property = namePattern ? "name" : "domain";
 	const filterValue = namePattern || domain;
 
-	const allRows = await _getCachedFilteredRows(property, filterValue, domainLower, namePattern);
+	const { rows: allRows, incomplete } = await _getCachedFilteredRows(property, filterValue, domainLower, namePattern);
 	const total = allRows.length;
 	const rows = allRows.slice(resolvedOffset, resolvedOffset + resolvedLimit);
 
@@ -661,6 +668,7 @@ const searchByDomain = async (params, authUser) => {
 		total,
 		limit: resolvedLimit,
 		pageOffset: resolvedOffset,
+		...(incomplete ? { incomplete: true } : {}),
 	};
 };
 

@@ -104,6 +104,10 @@ describe("ZelfKeys changeMasterPassword", () => {
         );
 
         expect(TagsModule.decryptTag).toHaveBeenCalledTimes(1);
+        expect(TagsModule.decryptTag).toHaveBeenCalledWith(
+            expect.objectContaining({ password: "old-secret" }),
+            authToken,
+        );
         expect(ZelfProofModule.decrypt).toHaveBeenCalledTimes(1);
         expect(ZelfProofModule.encrypt).toHaveBeenCalledWith(
             expect.objectContaining({

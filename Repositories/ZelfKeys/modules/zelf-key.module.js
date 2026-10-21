@@ -34,7 +34,6 @@ const SUPPORTED_CATEGORIES = ["password", "notes", "credit_card", "contact", "zo
 
 const ZELF_KEY_CLIENT_ERROR_STATUS = {
     ...ZELFPROOF_CLIENT_ERROR_STATUS,
-    ERR_LIVENESS_FAILED: 422,
 };
 
 const throwZelfKeyClientError = (code) => {
@@ -67,7 +66,7 @@ const remapZelfKeyCaughtError = (error) => {
         }
 
         if (isLivenessFailureMessage(normalizedMessage)) {
-            throwZelfKeyClientError("ERR_LIVENESS_FAILED");
+            throwZelfKeyClientError("ERR_VERIFICATION_FAILED");
         }
 
         if (normalizedMessage.includes("password") && normalizedMessage.includes("required")) {
@@ -92,6 +91,9 @@ const normalizeOptionalString = (value) => {
 const resolveZelfIdPasswordForOwnership = (data) => {
     if (!data || typeof data !== "object") return undefined;
     if (data.zelfIdPassword) return data.zelfIdPassword;
+
+    const oldMasterPassword = normalizeOptionalString(data.oldMasterPassword);
+    if (oldMasterPassword) return oldMasterPassword;
 
     const masterPassword = normalizeOptionalString(data.masterPassword);
     const password = normalizeOptionalString(data.password);
@@ -226,8 +228,9 @@ const stampV4PublicData = (publicData) =>
 
 const createMetadataAndPublicData = async (type, data, authToken) => {
     const identifier = authToken.tagName || authToken.identifier;
+    const domain = authToken.domain || "zelf";
 
-    const fullTagName = `${identifier}${authToken.domain ? "." + authToken.domain : ""}`;
+    const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
     const protection = resolveProtection(data.protection);
 
     const typePayload = {
@@ -667,7 +670,7 @@ const retrieveData = async (data, authToken) => {
 
     if (protectionRequiresKeyPassword(protection)) {
         if (!decryptedParams.password) {
-            throw new Error("400:ERR_MISSING_PASSWORD");
+            throw new Error("409:ERR_PASSWORD_REQUIRED");
         }
     } else {
         decryptedParams.password = undefined;
@@ -1016,7 +1019,7 @@ const _assertKeyRecordBelongsToCaller = async (id, authToken) => {
 
     const publicData = item.publicData || {};
 
-    if (!_ownsZelfKey(publicData, fullTagName)) {
+    if (!_ownsZelfKey(publicData, fullTagName, domain)) {
         throw new Error("403:Not authorized to delete this ZelfKey");
     }
 
@@ -1096,13 +1099,31 @@ const _isValidCreditCard = (cardNumber) => {
     return sum % 10 === 0;
 };
 
-const _ownsZelfKey = (publicData, fullTagName) => {
+const canonicalZelfKeyOwnerRef = (value, domain = "zelf") => {
+    if (!value) return "";
+
+    const suffix = `.${domain}`;
+    const bare = value.endsWith(suffix) ? value.slice(0, -suffix.length) : value;
+
+    return TagsPartsModule.getFullTagName(bare, domain);
+};
+
+const _ownsZelfKey = (publicData, fullTagName, domain = "zelf") => {
     const keyOwner = publicData?.keyOwner || "";
     const category = publicData?.category || "";
 
+    const ownerCanon = canonicalZelfKeyOwnerRef(keyOwner, domain);
+    const userCanon = canonicalZelfKeyOwnerRef(fullTagName, domain);
+
+    if (ownerCanon === userCanon) return true;
     if (keyOwner === fullTagName) return true;
 
-    return SUPPORTED_CATEGORIES.some((name) => category === `${fullTagName}_${name}`);
+    return SUPPORTED_CATEGORIES.some(
+        (name) =>
+            category === `${userCanon}_${name}` ||
+            category === `${fullTagName}_${name}` ||
+            (ownerCanon === userCanon && category === `${keyOwner}_${name}`),
+    );
 };
 
 /**
@@ -1126,7 +1147,7 @@ const getProof = async (data, authToken) => {
 
     const publicData = item.publicData || {};
 
-    if (!_ownsZelfKey(publicData, fullTagName)) {
+    if (!_ownsZelfKey(publicData, fullTagName, domain)) {
         throw new Error("403:Not authorized to read this ZelfKey");
     }
 
@@ -1170,7 +1191,7 @@ const _listOwnedKeyItems = async (authToken) => {
             const publicData = row.publicData || {};
 
             if (publicData.category !== searchCategory) continue;
-            if (!_ownsZelfKey(publicData, fullTagName)) continue;
+            if (!_ownsZelfKey(publicData, fullTagName, domain)) continue;
 
             items.push({
                 id: row.id || row.cid,
@@ -1415,4 +1436,6 @@ module.exports = {
     decryptKeyCredentials,
     protectionRequiresKeyPassword,
     remapZelfKeyCaughtError,
+    canonicalZelfKeyOwnerRef,
+    _ownsZelfKey,
 };

@@ -44,7 +44,10 @@ const resolveDefaultSourceAddress = async (params) => {
 	try {
 		const nativeOnly = await solanaSourceA.getNativeBalanceSummary(params);
 		if (!looksEmpty(nativeOnly)) {
-			return { response: nativeOnly, source: "sourceA" };
+			return {
+				response: { ...nativeOnly, tokensIncomplete: true },
+				source: "sourceA_native",
+			};
 		}
 	} catch (e) {
 		console.error("solana sourceA getNativeBalanceSummary:", e?.message || e);

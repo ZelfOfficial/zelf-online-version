@@ -64,6 +64,8 @@ describe("solana-scrapping getAddress", () => {
         const result = await getAddress({ id: "wallet" });
 
         expect(result.balance).toBe("2.5");
+        expect(result.source).toBe("sourceA_native");
+        expect(result.tokensIncomplete).toBe(true);
         expect(solanaSourceA.getAddress).toHaveBeenCalledTimes(1);
         expect(solanaSourceA.getNativeBalanceSummary).toHaveBeenCalledTimes(1);
     });

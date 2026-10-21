@@ -7,7 +7,11 @@ jest.mock("../../Repositories/Tags/modules/tags-parts.module", () => ({
     decryptPasswordParams: jest.fn(),
     decryptCreditCardParams: jest.fn(),
     decryptNotesParams: jest.fn(),
-    getFullTagName: jest.fn((identifier, domain) => `${identifier}.${domain || "zelf"}`),
+    getFullTagName: jest.fn((tagName, domain) => {
+        const resolvedDomain = domain || "zelf";
+        if (tagName && tagName.includes(`.${resolvedDomain}`)) return tagName;
+        return `${tagName}.${resolvedDomain}`;
+    }),
     urlToBase64: jest.fn(),
 }));
 
@@ -27,16 +31,20 @@ jest.mock("../../Repositories/ZelfProof/modules/zelf-proof.module", () => ({
     ZELFPROOF_CLIENT_ERROR_STATUS: {
         ERR_INVALID_PASSWORD: 401,
         ERR_PASSWORD_REQUIRED: 409,
+        ERR_VERIFICATION_FAILED: 422,
     },
 }));
 
 const TagsModule = require("../../Repositories/Tags/modules/tags.module");
 const IPFS = require("../../Core/ipfs");
 
+const { errorHandler } = require("../../Core/http-handler");
+
 const {
     resolveZelfIdPasswordForOwnership,
     remapZelfKeyCaughtError,
     deleteZelfKey,
+    _ownsZelfKey,
 } = require("../../Repositories/ZelfKeys/modules/zelf-key.module");
 
 const authToken = { tagName: "leaseuser", identifier: "leaseuser", domain: "zelf" };
@@ -63,10 +71,12 @@ describe("Zelf Keys ownership + error codes", () => {
 
     it("maps invalid password to 401 ERR_INVALID_PASSWORD", () => {
         expect(() => remapZelfKeyCaughtError(new Error("invalid password provided"))).toThrow("401:ERR_INVALID_PASSWORD");
+        expect(errorHandler(new Error("401:ERR_INVALID_PASSWORD")).code).toBe("ERR_INVALID_PASSWORD");
     });
 
     it("maps missing password to 409 ERR_PASSWORD_REQUIRED", () => {
         expect(() => remapZelfKeyCaughtError(new Error("password is required"))).toThrow("409:ERR_PASSWORD_REQUIRED");
+        expect(errorHandler(new Error("409:ERR_PASSWORD_REQUIRED")).code).toBe("ERR_PASSWORD_REQUIRED");
     });
 
     it("accepts masterPassword for extension v4 ownership on delete", () => {
@@ -86,9 +96,26 @@ describe("Zelf Keys ownership + error codes", () => {
         ).toBe("explicit-zelf-id");
     });
 
-    it("maps liveness failures to 422 without matching generic face text", () => {
-        expect(() => remapZelfKeyCaughtError(new Error("face is not central"))).toThrow("422:ERR_LIVENESS_FAILED");
+    it("maps liveness failures to 422 ERR_VERIFICATION_FAILED without matching generic face text", () => {
+        expect(() => remapZelfKeyCaughtError(new Error("face is not central"))).toThrow("422:ERR_VERIFICATION_FAILED");
+        expect(errorHandler(new Error("422:ERR_VERIFICATION_FAILED")).code).toBe("ERR_VERIFICATION_FAILED");
         expect(() => remapZelfKeyCaughtError(new Error("face metadata mismatch"))).toThrow("face metadata mismatch");
+    });
+
+    it("uses oldMasterPassword for change-master-password ownership", () => {
+        expect(
+            resolveZelfIdPasswordForOwnership({
+                oldMasterPassword: "rotate-from-old",
+                newMasterPassword: "rotate-to-new",
+            }),
+        ).toBe("rotate-from-old");
+    });
+});
+
+describe("legacy keyOwner normalization", () => {
+    it("treats x.zelf.zelf keyOwner as x.zelf for ownership", () => {
+        const publicData = { keyOwner: "x.zelf.zelf", category: "x.zelf.zelf_password" };
+        expect(_ownsZelfKey(publicData, "x.zelf", "zelf")).toBe(true);
     });
 });
 
@@ -160,7 +187,7 @@ describe("deleteZelfKey ownership (_validateOwnership / decryptTag)", () => {
         TagsModule.decryptTag.mockRejectedValue(new Error("face not recognized"));
 
         await expect(deleteZelfKey({ id: "pin-3", faceBase64: "bad-face" }, authToken)).rejects.toThrow(
-            "422:ERR_LIVENESS_FAILED",
+            "422:ERR_VERIFICATION_FAILED",
         );
         expect(IPFS.deleteFiles).not.toHaveBeenCalled();
     });

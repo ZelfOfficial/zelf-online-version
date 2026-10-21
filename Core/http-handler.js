@@ -141,6 +141,11 @@ const tryCatchLog = async (status = "failed", message, code, exception, ctx = nu
 	return true;
 };
 
+const isZelfClientErrorCode = (value) => typeof value === "string" && /^ERR_[A-Z0-9_]+$/.test(value);
+
+const resolveErrorCode = (defaultCode, optionalMessage) =>
+	isZelfClientErrorCode(optionalMessage) ? optionalMessage : defaultCode;
+
 const errorHandler = (exception, ctx = null, optionalMessage) => {
 	// if (config.env === "development") {
 	console.error({ exception });
@@ -204,12 +209,12 @@ const errorHandler = (exception, ctx = null, optionalMessage) => {
 		case "400":
 			status = 400;
 			message = optionalMessage || "Bad Request";
-			code = "BadRequest";
+			code = resolveErrorCode("BadRequest", optionalMessage);
 			break;
 		case "401":
 			status = 401;
 			message = optionalMessage || "Authentication required";
-			code = "Unauthorized";
+			code = resolveErrorCode("Unauthorized", optionalMessage);
 			break;
 		case "403":
 			status = 403;
@@ -224,7 +229,7 @@ const errorHandler = (exception, ctx = null, optionalMessage) => {
 		case "409":
 			status = 409;
 			message = optionalMessage || "Record conflicts with existing records in place.";
-			code = "Conflict";
+			code = resolveErrorCode("Conflict", optionalMessage);
 			break;
 		case "429":
 			status = 429;
@@ -264,7 +269,7 @@ const errorHandler = (exception, ctx = null, optionalMessage) => {
 		case "422":
 			status = 422;
 			message = optionalMessage || "Record cannot be saved with the current params";
-			code = "UnprocessableEntity";
+			code = resolveErrorCode("UnprocessableEntity", optionalMessage);
 			break;
 		case "423":
 			status = 423;
