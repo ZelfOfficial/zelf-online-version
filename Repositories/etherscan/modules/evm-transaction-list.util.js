@@ -25,6 +25,66 @@ const isTimeoutError = (err) =>
 	err?.code === "ETIMEDOUT" ||
 	/timeout/i.test(String(err?.message || ""));
 
+const httpStatusFromError = (err) => {
+	const status = err?.response?.status ?? err?.status;
+	return typeof status === "number" ? status : null;
+};
+
+const isWalkPaginationIncompleteError = (err) => {
+	if (isTimeoutError(err)) return true;
+	if (err?.name === "AbortError" || err?.code === "ABORT_ERR") return true;
+	if (/abort/i.test(String(err?.message || "")) || /budget/i.test(String(err?.message || ""))) return true;
+
+	const status = httpStatusFromError(err);
+	if (status === 429) return true;
+	if (status != null && status >= 500) return true;
+
+	return false;
+};
+
+const isWalkEndOfListError = (err) => {
+	const message = String(err?.message || "");
+	if (
+		message === "routescan_tx_empty" ||
+		message === "blockscout_tx_empty" ||
+		message === "routescan_page_unavailable" ||
+		message === "blockscout_page_unavailable"
+	) {
+		return true;
+	}
+
+	const status = httpStatusFromError(err);
+	return status != null && status >= 400 && status < 500 && status !== 429;
+};
+
+const buildWalkEndOfListRouteScan = (partial = {}) => ({
+	items: [],
+	nextToken: partial.nextToken ?? null,
+});
+
+const buildWalkEndOfListBlockscout = (partial = {}) => ({
+	items: [],
+	nextPageParams: partial.nextPageParams ?? null,
+});
+
+const resolveWalkHopError = (err, partial, kind) => {
+	if (isWalkPaginationIncompleteError(err)) {
+		if (kind === "blockscout") {
+			return {
+				...buildWalkBudgetIncomplete({ nextToken: null }),
+				nextPageParams: partial.nextPageParams ?? null,
+			};
+		}
+		return buildWalkBudgetIncomplete({ nextToken: partial.nextToken ?? null });
+	}
+
+	if (isWalkEndOfListError(err)) {
+		return kind === "blockscout" ? buildWalkEndOfListBlockscout(partial) : buildWalkEndOfListRouteScan(partial);
+	}
+
+	throw err;
+};
+
 const inferTraffic = (from, to, address) =>
 	String(from || "").toLowerCase() === String(address || "").toLowerCase() ? "OUT" : "IN";
 
@@ -359,7 +419,7 @@ const fetchTransactionsFromRouteScan = async (
 				timeout: Math.min(timeout, remaining),
 			});
 		} catch (err) {
-			return buildWalkBudgetIncomplete({ nextToken: pageResult?.nextToken ?? null });
+			return resolveWalkHopError(err, { nextToken: pageResult?.nextToken ?? null }, "routescan");
 		}
 
 		if (current === targetPage) {
@@ -368,7 +428,7 @@ const fetchTransactionsFromRouteScan = async (
 
 		walkCursor = pageResult.nextToken;
 		if (!walkCursor) {
-			throw new Error("routescan_page_unavailable");
+			return buildWalkEndOfListRouteScan({ nextToken: null });
 		}
 	}
 
@@ -460,10 +520,11 @@ const fetchTransactionsFromBlockscout = async (
 				timeout: Math.min(timeout, remaining),
 			});
 		} catch (err) {
-			return {
-				...buildWalkBudgetIncomplete({ nextToken: null }),
-				nextPageParams: pageResult?.nextPageParams ?? null,
-			};
+			return resolveWalkHopError(
+				err,
+				{ nextPageParams: pageResult?.nextPageParams ?? null },
+				"blockscout"
+			);
 		}
 
 		if (current === targetPage) {
@@ -471,7 +532,7 @@ const fetchTransactionsFromBlockscout = async (
 		}
 
 		if (!pageResult.nextPageParams) {
-			throw new Error("blockscout_page_unavailable");
+			return buildWalkEndOfListBlockscout({ nextPageParams: null });
 		}
 
 		walkCursor = pageResult.nextPageParams;

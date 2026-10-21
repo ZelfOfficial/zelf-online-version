@@ -237,6 +237,59 @@ describe("evm-transaction-list.util", () => {
 		expect(httpGet).toHaveBeenCalledTimes(1);
 	});
 
+	it("fetchTransactionsFromBlockscout page 2 with empty history ends without incomplete", async () => {
+		const httpGet = jest.fn().mockResolvedValueOnce({
+			data: { items: [], next_page_params: null },
+		});
+
+		const result = await fetchTransactionsFromBlockscout(httpGet, {
+			baseUrl: "https://explorer.optimism.io",
+			address: TEST_ADDRESS,
+			limit: 25,
+			page: 2,
+			deadlineMs: 12000,
+		});
+
+		expect(result.items).toEqual([]);
+		expect(result.incomplete).toBeUndefined();
+		expect(result.hasMore).toBeUndefined();
+	});
+
+	it("fetchTransactionsFromBlockscout page 2 with upstream 404 ends without incomplete", async () => {
+		const httpGet = jest.fn().mockRejectedValueOnce({
+			response: { status: 404 },
+			message: "Request failed with status code 404",
+		});
+
+		const result = await fetchTransactionsFromBlockscout(httpGet, {
+			baseUrl: "https://arbitrum.blockscout.com",
+			address: TEST_ADDRESS,
+			limit: 25,
+			page: 2,
+			deadlineMs: 12000,
+		});
+
+		expect(result.items).toEqual([]);
+		expect(result.incomplete).toBeUndefined();
+	});
+
+	it("fetchTransactionsFromRouteScan page 2 with empty history ends without incomplete", async () => {
+		const httpGet = jest.fn().mockResolvedValueOnce({
+			data: { items: [], link: {} },
+		});
+
+		const result = await fetchTransactionsFromRouteScan(httpGet, {
+			chainId: 1,
+			address: TEST_ADDRESS,
+			limit: 25,
+			page: 2,
+			deadlineMs: 12000,
+		});
+
+		expect(result.items).toEqual([]);
+		expect(result.incomplete).toBeUndefined();
+	});
+
 	it("fetchTransactionsFromBlockscout returns incomplete when a hop times out mid-walk", async () => {
 		const httpGet = jest
 			.fn()
@@ -247,6 +300,29 @@ describe("evm-transaction-list.util", () => {
 				},
 			})
 			.mockRejectedValueOnce({ code: "ECONNABORTED", message: "timeout of 4000ms exceeded" });
+
+		const result = await fetchTransactionsFromBlockscout(httpGet, {
+			baseUrl: "https://explorer.optimism.io",
+			address: TEST_ADDRESS,
+			limit: 1,
+			page: 2,
+			deadlineMs: 12000,
+		});
+
+		expect(result.incomplete).toBe(true);
+		expect(result.hasMore).toBe(true);
+	});
+
+	it("fetchTransactionsFromBlockscout returns incomplete on upstream 429 during walk", async () => {
+		const httpGet = jest
+			.fn()
+			.mockResolvedValueOnce({
+				data: {
+					items: [{ hash: "0x1", from: { hash: "0xa" }, to: { hash: "0xb" }, value: "0", timestamp: "2024-01-01T00:00:00.000000Z" }],
+					next_page_params: { block_number: 10, index: 1 },
+				},
+			})
+			.mockRejectedValueOnce({ response: { status: 429 }, message: "Too Many Requests" });
 
 		const result = await fetchTransactionsFromBlockscout(httpGet, {
 			baseUrl: "https://explorer.optimism.io",
