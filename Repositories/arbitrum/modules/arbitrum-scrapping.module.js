@@ -6,6 +6,24 @@ const StandardizedChainFormatter = require("../../class/standardized-chain-forma
 const { getTickerPrice } = require("../../binance/modules/binance.module");
 const { getTokenPrice } = require("../utils/token-pricing");
 const { getETHPrice } = require("../utils/eth-price");
+const {
+	normalizePage,
+	formatDecimalString,
+	mapEtherscanV2Transaction,
+	mapBlockscoutTransaction,
+	buildListResponse,
+	fetchTransactionsFromEtherscanV2,
+	fetchTransactionsFromBlockscout,
+	pickBlockscoutCursor,
+	runTransactionProviderLadder,
+	TX_LIST_DEADLINE_MS,
+	DEFAULT_TX_TIMEOUT_MS,
+	formatUtcIsoDate,
+	isTimeoutError,
+} = require("../../etherscan/modules/evm-transaction-list.util");
+
+const ARBITRUM_CHAIN_ID = 42161;
+const ARBITRUM_BLOCKSCOUT_BASE = process.env.ARBITRUM_BLOCKSCOUT_URL || "https://arbitrum.blockscout.com";
 
 // Initialize Arbitrum formatter
 const arbitrumFormatter = new StandardizedChainFormatter("Arbitrum One", "ETH", "https://s2.coinmarketcap.com/static/img/coins/64x64/11841.png");
@@ -254,8 +272,8 @@ const getTokens = async (params, query) => {
 const getTransactionsList = async (query) => {
 	try {
 		const { address, page = "0", show = "100" } = query;
+		const deadlineMs = query.deadlineMs || TX_LIST_DEADLINE_MS;
 
-		// Get ETH price for transaction formatting
 		let price = "3000.00000000";
 		try {
 			const priceData = await getTickerPrice({ symbol: "ETH" });
@@ -264,46 +282,25 @@ const getTransactionsList = async (query) => {
 			console.log("Price fetch failed, using default:", priceError.message);
 		}
 
-		// Try OKLink API first
-		let response;
-		let source;
+		const pageNumber = normalizePage(page === "0" ? 1 : page);
+		const blockscoutCursor = pickBlockscoutCursor(query);
+		const blockscoutProvider = async (hopTimeout, walkDeadlineMs) =>
+			getArbitrumBlockscoutTransactions(address, query, show, price, hopTimeout, walkDeadlineMs);
+		const oklinkProvider = async (hopTimeout) => getOKLinkTransactions(address, page, show, price, hopTimeout);
+		const arbiscanProvider = async (hopTimeout) => getArbiscanTransactions(address, page, show, price, hopTimeout);
 
-		try {
-			console.log("Trying OKLink API...");
-			const oklinkResponse = await getOKLinkTransactions(address, page, show, price);
-			if (oklinkResponse && oklinkResponse.transactions && oklinkResponse.transactions.length > 0) {
-				response = oklinkResponse;
-				source = "oklink";
-				console.log(`Found ${oklinkResponse.transactions.length} transactions via OKLink`);
-			}
-		} catch (oklinkError) {
-			console.log("OKLink failed:", oklinkError.message);
+		const ladderProviders =
+			pageNumber > 1 && !blockscoutCursor
+				? [blockscoutProvider, oklinkProvider, arbiscanProvider]
+				: [oklinkProvider, arbiscanProvider, blockscoutProvider];
+
+		const ladderResult = await runTransactionProviderLadder(ladderProviders, { deadlineMs });
+
+		if (ladderResult) {
+			return ladderResult;
 		}
 
-		// Try Arbiscan API as fallback
-		if (!response) {
-			try {
-				console.log("Trying Arbiscan API...");
-				const arbiscanResponse = await getArbiscanTransactions(address, page, show, price);
-				if (arbiscanResponse && arbiscanResponse.transactions && arbiscanResponse.transactions.length > 0) {
-					response = arbiscanResponse;
-					source = "arbiscan";
-					console.log(`Found ${arbiscanResponse.transactions.length} transactions via Arbiscan`);
-				}
-			} catch (arbiscanError) {
-				console.log("Arbiscan failed:", arbiscanError.message);
-			}
-		}
-
-		// Add source to response if response exists
-		if (response) {
-			response.source = source;
-			return response;
-		}
-
-		// If no transactions found from external APIs, return empty result
-		console.log("No transactions found from external APIs");
-		return { pagination: { records: "0", pages: "0", page: "0" }, transactions: [] };
+		return { pagination: { records: "0", pages: "0", page: String(pageNumber) }, transactions: [] };
 	} catch (error) {
 		console.error("Error getting Arbitrum transactions:", error.message || "Unknown error");
 		return { pagination: { records: "0", pages: "0", page: "0" }, transactions: [] };
@@ -313,7 +310,7 @@ const getTransactionsList = async (query) => {
 /**
  * Get OKLink transactions for Arbitrum One
  */
-const getOKLinkTransactions = async (address, page, show, price) => {
+const getOKLinkTransactions = async (address, page, show, price, timeout = DEFAULT_TX_TIMEOUT_MS) => {
 	try {
 		const t = Date.now();
 
@@ -321,7 +318,7 @@ const getOKLinkTransactions = async (address, page, show, price) => {
 
 		const { data } = await axios.get(url, {
 			httpsAgent: agent,
-			timeout: 10000,
+			timeout,
 			validateStatus: function (status) {
 				return status < 500;
 			},
@@ -335,34 +332,43 @@ const getOKLinkTransactions = async (address, page, show, price) => {
 			console.log(`✅ OKLink API success! Found ${data.data.hits.length} transactions out of ${data.data.total} total`);
 
 			const rawTransactions = data.data.hits.map((tx) => {
-				const value = parseFloat(tx.value);
-				const fiatValue = value * parseFloat(price);
+				const value = formatDecimalString(tx.value);
+				const priceNum = parseFloat(price);
+				const fiatValue = Number(value) * priceNum;
 				const traffic = tx.from.toLowerCase() === address.toLowerCase() ? "OUT" : "IN";
+				const ts = Number(tx.blocktime) || 0;
 
 				return {
 					hash: tx.hash,
 					block: tx.blockHeight.toString(),
 					from: tx.from,
 					to: tx.to,
-					value: value.toString(),
+					value,
+					amount: value,
+					price: priceNum,
+					assetPrice: priceNum,
 					fiatValue: fiatValue.toFixed(2),
+					fiatAmount: fiatValue.toFixed(2),
 					gas: "0",
 					gasPrice: "0",
 					nonce: "0",
 					input: "0x",
-					blocktime: tx.blocktime,
-					timestamp: tx.blocktime,
+					blocktime: ts,
+					timestamp: ts,
 					traffic: traffic,
 					method: tx.method || "ETH transfer",
 					status: tx.status === "0x1" ? "Success" : "Failed",
 					image: "https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png",
-					age: tx.blocktime ? moment(tx.blocktime * 1000).fromNow() : "N/A",
-					txnFee: tx.fee ? parseFloat(tx.fee).toFixed(8) : "0",
+					age: ts ? moment(ts * 1000).fromNow() : "N/A",
+					date: formatUtcIsoDate(ts),
+					txnFee: tx.fee ? formatDecimalString(tx.fee, 8) : "0",
+					asset: "ETH",
 					confirmations: "1",
 				};
 			});
 
 			return {
+				source: "oklink",
 				pagination: {
 					records: data.data.total.toString(),
 					pages: Math.ceil(data.data.total / parseInt(show)).toString(),
@@ -382,61 +388,90 @@ const getOKLinkTransactions = async (address, page, show, price) => {
 /**
  * Get Arbiscan transactions
  */
-const getArbiscanTransactions = async (address, page, show, price) => {
+const getArbiscanTransactions = async (address, page, show, price, timeout = DEFAULT_TX_TIMEOUT_MS) => {
 	try {
-		const url = `https://api.arbiscan.io/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=${page}&offset=${show}&sort=desc`;
-
-		const { data } = await axios.get(url, {
-			timeout: 10000,
-			validateStatus: function (status) {
-				return status < 500;
-			},
-			headers: {
-				"User-Agent": generateRandomUserAgent(),
-				Accept: "application/json",
-			},
+		const etherscanPage = normalizePage(page === "0" ? 1 : page);
+		const items = await fetchTransactionsFromEtherscanV2((url, options) => instance.get(url, options), {
+			chainId: ARBITRUM_CHAIN_ID,
+			address,
+			page: etherscanPage,
+			offset: parseInt(show, 10) || 25,
+			timeout,
 		});
 
-		if (data.status === "1" && data.result && data.result.length > 0) {
-			const rawTransactions = data.result.map((tx) => {
-				const value = parseFloat(tx.value) / Math.pow(10, 18);
-				const fiatValue = value * parseFloat(price);
-				const traffic = tx.from.toLowerCase() === address.toLowerCase() ? "OUT" : "IN";
+		const rawTransactions = items.map((tx) => mapEtherscanV2Transaction(tx, address, { asset: "ETH", price }));
+		const transactions = arbitrumFormatter.formatTransactions(rawTransactions);
 
-				return {
-					hash: tx.hash,
-					block: tx.blockNumber,
-					from: tx.from,
-					to: tx.to,
-					value: value.toString(),
-					fiatValue: fiatValue.toFixed(2),
-					gas: tx.gasUsed || "0",
-					gasPrice: tx.gasPrice || "0",
-					nonce: tx.nonce || "0",
-					input: tx.input || "0x",
-					blocktime: parseInt(tx.timeStamp),
-					traffic: traffic,
-					method: tx.methodId ? "Contract Interaction" : "ETH transfer",
-					status: tx.isError === "0" ? "Success" : "Failed",
-					image: "https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png",
-					date: moment(parseInt(tx.timeStamp) * 1000).format("YYYY-MM-DD HH:mm:ss"),
-					age: moment(parseInt(tx.timeStamp) * 1000).fromNow(),
-					txnFee: tx.gasUsed && tx.gasPrice ? ((parseFloat(tx.gasUsed) * parseFloat(tx.gasPrice)) / Math.pow(10, 18)).toFixed(8) : "0",
-					confirmations: "1",
-				};
-			});
+		return { ...buildListResponse(transactions, { page: etherscanPage, show: parseInt(show, 10) || 25 }), source: "etherscan_v2" };
+	} catch (error) {
+		console.log("Arbitrum Etherscan V2 transactions failed:", error.message);
+		return null;
+	}
+};
 
-			const transactions = arbitrumFormatter.formatTransactions(rawTransactions);
+const getArbitrumBlockscoutTransactions = async (
+	address,
+	query,
+	show,
+	price,
+	hopTimeout = DEFAULT_TX_TIMEOUT_MS,
+	walkDeadlineMs
+) => {
+	const limit = parseInt(show, 10) || 25;
+	const pageNumber = normalizePage(query.page === "0" ? 1 : query.page);
+	const walkBudgetMs =
+		typeof walkDeadlineMs === "number" && walkDeadlineMs > 0 ? walkDeadlineMs : hopTimeout;
 
+	try {
+		const blockscoutPage = await fetchTransactionsFromBlockscout((url, options) => instance.get(url, options), {
+			baseUrl: ARBITRUM_BLOCKSCOUT_BASE,
+			address,
+			limit,
+			page: pageNumber,
+			cursor: pickBlockscoutCursor(query),
+			timeout: hopTimeout,
+			deadlineMs: walkBudgetMs,
+		});
+
+		if (blockscoutPage.incomplete) {
 			return {
-				pagination: { records: transactions.length.toString(), pages: "1", page: page },
-				transactions: transactions,
+				...buildListResponse([], {
+					page: pageNumber,
+					show: limit,
+					incomplete: true,
+					hasMore: blockscoutPage.hasMore,
+					pagingNote: blockscoutPage.pagingNote,
+				}),
+				source: "blockscout",
 			};
 		}
 
-		return null;
+		const rawTransactions = blockscoutPage.items.map((tx) => mapBlockscoutTransaction(tx, address, { asset: "ETH", price }));
+		const transactions = arbitrumFormatter.formatTransactions(rawTransactions);
+
+		return {
+			...buildListResponse(transactions, {
+				page: pageNumber,
+				show: limit,
+				nextPageParams: blockscoutPage.nextPageParams,
+			}),
+			source: "blockscout",
+		};
 	} catch (error) {
-		console.log("Arbiscan transactions failed:", error.message);
+		if (isTimeoutError(error)) {
+			return {
+				...buildListResponse([], {
+					page: pageNumber,
+					show: limit,
+					incomplete: true,
+					hasMore: true,
+					pagingNote:
+						"Transaction list pagination exceeded the time budget before reaching the requested page.",
+				}),
+				source: "blockscout",
+			};
+		}
+		console.log("Arbitrum Blockscout transactions failed:", error.message);
 		return null;
 	}
 };
