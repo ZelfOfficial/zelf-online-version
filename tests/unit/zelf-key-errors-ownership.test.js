@@ -74,9 +74,14 @@ describe("Zelf Keys ownership + error codes", () => {
         expect(errorHandler(new Error("401:ERR_INVALID_PASSWORD")).code).toBe("ERR_INVALID_PASSWORD");
     });
 
-    it("maps missing password to 409 ERR_PASSWORD_REQUIRED", () => {
+    it("maps decrypt password required messages to 409 ERR_PASSWORD_REQUIRED", () => {
         expect(() => remapZelfKeyCaughtError(new Error("password is required"))).toThrow("409:ERR_PASSWORD_REQUIRED");
         expect(errorHandler(new Error("409:ERR_PASSWORD_REQUIRED")).code).toBe("ERR_PASSWORD_REQUIRED");
+    });
+
+    it("maps missing store master password to 400 ERR_MISSING_PASSWORD", () => {
+        expect(errorHandler(new Error("400:ERR_MISSING_PASSWORD")).code).toBe("ERR_MISSING_PASSWORD");
+        expect(errorHandler(new Error("400:ERR_MISSING_PASSWORD")).status).toBe(400);
     });
 
     it("accepts masterPassword for extension v4 ownership on delete", () => {
