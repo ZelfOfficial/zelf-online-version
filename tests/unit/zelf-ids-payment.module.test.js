@@ -1,10 +1,26 @@
+jest.mock("../../Repositories/Tags/modules/tag-smart-contract-payment.module", () => ({
+	throwPaymentConfirmationTagNotFound: jest.fn(),
+	verifySmartContractPayment: jest.fn(),
+}));
+
+jest.mock("../../Repositories/Tags/modules/my-tags.module", () => ({
+	confirmPayUniqueAddress: jest.fn(),
+}));
+
+jest.mock("../../Repositories/ZelfID/modules/zelf-id-purchase-manual-review.module", () => ({
+	recordPurchaseManualReview: jest.fn(),
+}));
+
+jest.mock("../../Repositories/ZelfID/modules/zelf-id.module", () => ({
+	searchTag: jest.fn(),
+}));
+
 const moment = require("moment");
 const { buildMetadata } = require("../../Repositories/ZelfID/modules/zelf-ids-payment.module");
+const { addDurationToTag } = require("../../Repositories/ZelfID/modules/my-zelf-id.module");
 
-const domainConfig = {
-	getTagKey: () => "tagName",
-	tags: require("../fixtures/zelf-plan-license.fixture").zelfPlanLicenseData().tags,
-};
+const { zelfPlanLicense } = require("../fixtures/zelf-plan-license.fixture");
+const domainConfig = zelfPlanLicense();
 
 describe("zelf-ids-payment.module", () => {
 	test("buildMetadata stamps a long name as the requested paid plan", () => {
@@ -258,6 +274,25 @@ describe("zelf-ids-payment.module", () => {
 		);
 		expect(v36Extra.duration).toBe("2");
 		expect(moment(v36Extra.expiresAt).diff(moment(stored, "YYYY-MM-DD HH:mm:ss"), "year", true)).toBeGreaterThanOrEqual(0.9);
+	});
+
+	test("addDurationToTag refuses unlimited -> premium downgrade before payment is captured", async () => {
+		const tagObject = {
+			publicData: {
+				origin: "online",
+				type: "mainnet",
+				plan: "unlimited",
+				duration: "1",
+				tagName: "zid12345.zelf",
+				hasPassword: "true",
+				v: "4",
+				expiresAt: moment().add(1, "year").format("YYYY-MM-DD HH:mm:ss"),
+			},
+		};
+
+		await expect(
+			addDurationToTag({ tagName: "zid12345", domain: "zelf", duration: 1, price: 29, plan: "premium", domainConfig }, tagObject)
+		).rejects.toThrow("409:plan_downgrade_not_allowed");
 	});
 
 	test("buildMetadata keeps v=3 on a legacy Tags proof while still stamping plan", () => {

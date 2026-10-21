@@ -69,6 +69,62 @@ describe("Zelf ID plan prices come only from license planPricing", () => {
         expect(() => getZelfIdCheckoutPrice({ tagName: "abcdefgh.zelf", duration: "4", domainConfig: d })).toThrow("409:");
         expect(() => getZelfIdPrice({ tagName: "abc.zelf", duration: "1", domainConfig: d, requestedPlan: "premium" })).toThrow("409:");
     });
+
+    test("lease-time getZelfIdPrice ignores legacy 10% referral discount when referrer is not whitelisted", () => {
+        const d = live();
+        const quote = getZelfIdPrice({
+            tagName: "abcdefgh.zelf",
+            duration: "1",
+            referralTagName: "jim.zelf",
+            domainConfig: d,
+        });
+        expect(quote.discount).toBe(0);
+        expect(quote.price).toBe(quote.priceWithoutDiscount);
+    });
+
+    test("Zelf ID plan quotes ignore legacy 10% referral discount when referrer is not whitelisted", () => {
+        const d = live();
+        const bare = "jim";
+        const q = d.getPrice("abcdefgh", "1", `${bare}.zelf`, { plan: "unlimited" });
+        expect(q.priceWithoutDiscount).toBe(99);
+        expect(q.price).toBe(99);
+        expect(q.discount).toBe(0);
+    });
+
+    test("purchase reward uses license rewardPrice on the list amount for Zelf ID plans", () => {
+        const d = license({
+            premium: { "6-15": P, "16-27": P },
+            unlimited: { 1: U, 2: U, 3: U, 4: U, 5: U, "6-15": U, "16-27": U },
+        });
+        const atTen = d.getPrice("abcdefgh", "1", "", { plan: "unlimited" });
+        expect(atTen.reward).toBe(9.9);
+
+        const atFifteen = license({
+            premium: { "6-15": P, "16-27": P },
+            unlimited: { 1: U, 2: U, 3: U, 4: U, 5: U, "6-15": U, "16-27": U },
+        });
+        atFifteen.tags.payment.rewardPrice = 15;
+        const reward15 = atFifteen.getPrice("abcdefgh", "1", "", { plan: "unlimited" });
+        expect(reward15.reward).toBe(6.6);
+    });
+
+    test("whitelist coupon zeros billable price but list reward stays on pre-discount license price", () => {
+        const d = new Domain({
+            name: "zelf",
+            tags: {
+                payment: {
+                    rewardPrice: 10,
+                    whitelist: { "coupon.zelf": "100%" },
+                    pricingTable: {},
+                    planPricing: { premium: { "6-15": P }, unlimited: { "6-15": U } },
+                },
+            },
+        });
+        const q = d.getPrice("abcdefgh", "1", "coupon.zelf", { plan: "unlimited" });
+        expect(q.priceWithoutDiscount).toBe(99);
+        expect(q.price).toBe(0);
+        expect(q.reward).toBe(9.9);
+    });
 });
 
 describe("license cache TTL", () => {

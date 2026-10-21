@@ -396,11 +396,31 @@ const applyRevenueCatPurchase = async (inspected) => {
             eventID: eventId,
             eventPrice: price,
             revenueCatOriginalTransactionId: originalTransactionId || tagObject.publicData.revenueCatOriginalTransactionId,
+            paymentCaptured: true,
+            paymentSource: "revenuecat",
+            eventID: eventId,
+            billableUsdPrice: price,
         },
         tagObject
     );
 
     await rememberTransaction(inspected);
+
+    if (result.manualReview) {
+        return {
+            status: "success",
+            action: "needs_manual_review",
+            confirmed: false,
+            manualReview: true,
+            cache: Boolean(result.manualReviewCache),
+            reason: result.reason,
+            tagName,
+            domain,
+            duration,
+            plan,
+            expiresAt: tagObject.publicData.expiresAt || null,
+        };
+    }
 
     return {
         status: "success",

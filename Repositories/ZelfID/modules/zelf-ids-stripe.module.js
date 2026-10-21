@@ -147,6 +147,18 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
     const checkedPlan = resolvedPlan === "free" ? resolvePaidPlan({ tagName: expectedFull, domainConfig: licenseConfig }) : resolvedPlan;
     assertLicenseOffersPlan({ domainConfig: licenseConfig, tagName: expectedFull, plan: checkedPlan, duration: expectedDuration });
 
+    const ZelfIdModule = require("./zelf-id.module");
+    const tagData = await ZelfIdModule.searchTag({ tagName: localName, domain: domainName, domainConfig: licenseConfig, environment: "all" }, {});
+    if (!tagData.available && tagData.tagObject) {
+        const { assertPurchaseKeepsPaidValue } = require("./zelf-id-plan.module");
+        assertPurchaseKeepsPaidValue({
+            publicData: tagData.tagObject.publicData,
+            requestedPlan: resolvedPlan,
+            tagName: localName,
+            domainConfig: licenseConfig,
+        });
+    }
+
     const amountUsd = resolveQuotedUsd(tokenDecoded);
 
     if (!(amountUsd > 0)) {
@@ -265,9 +277,30 @@ const confirmPaidStripeSession = async (session) => {
             duration: durationParam,
             plan,
             domainConfig,
+            paymentCaptured: true,
+            paymentSource: "stripe",
+            sessionId: inspected.sessionId,
+            billableUsdPrice: price,
         },
         tagObject
     );
+
+    if (result.manualReview) {
+        return {
+            status: "success",
+            action: "needs_manual_review",
+            confirmed: false,
+            manualReview: true,
+            cache: Boolean(result.manualReviewCache),
+            reason: result.reason,
+            tagName,
+            domain,
+            duration,
+            plan,
+            expiresAt: tagObject.publicData.expiresAt || null,
+            publicData: tagObject.publicData,
+        };
+    }
 
     return {
         status: "success",

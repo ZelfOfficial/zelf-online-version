@@ -405,6 +405,7 @@ const buildMetadata = (params, tagObject, domainConfig) => {
     const duration = normalizePaymentDuration(params.duration || tagObject.publicData.duration);
     const encryptVersion = resolveEncryptVersion(tagObject.publicData);
     const requestedPlan = params.plan || params.requestedPlan;
+
     const v4Stamp = resolveV4PaymentStamp({
         tagName: params.tagName || tagObject.fullTagName,
         encryptVersion,
@@ -594,8 +595,10 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
     const devAmountFraction = resolveTagPayBillableFraction({
         reducedFeeRequested: Boolean(requestOptions.reducedFeeRequested),
     });
-    const listPriceUsd = priceDetails.price;
-    const billableUsdPrice = roundBillableUsdPrice(devAmountFraction != null ? listPriceUsd * devAmountFraction : listPriceUsd);
+    const listPriceUsd = priceDetails.priceWithoutDiscount ?? priceDetails.price;
+    const billableUsdPrice = roundBillableUsdPrice(
+        devAmountFraction != null ? priceDetails.price * devAmountFraction : priceDetails.price
+    );
     const zelfPayCount = tagData.ipfs?.length || tagData.arweave?.length;
 
     const renewTagPayObject = await _fetchTagPayRecord(
@@ -730,6 +733,7 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         referralTagName: referral.referralTagName || undefined,
         listPriceUsd,
         billableUsdPrice,
+        reward: priceDetails.reward,
         discount: priceDetails.discount,
         discountType: priceDetails.discountType,
         // $0 after a license coupon: confirm with network FREE, no Stripe or on-chain payment.
