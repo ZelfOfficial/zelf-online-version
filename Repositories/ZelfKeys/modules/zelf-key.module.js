@@ -28,6 +28,12 @@ const {
     PROTECTION_FACE_PASSWORD,
     passwordCredentialSchema,
 } = require("../middlewares/zelf-key.middleware");
+const {
+    resolveZotpTotpMetadataFields,
+    resolveZotpTotpForRetrieve,
+    normalizeSetupKey,
+    createZotpValidationError,
+} = require("./zelf-key-zotp.module");
 
 const TYPES_REQUIRING_TRANSPORT_ENCRYPTION = new Set(["password", "notes", "note", "credit_card", "payment-card"]);
 const SUPPORTED_CATEGORIES = ["password", "notes", "credit_card", "contact", "zotp"];
@@ -241,10 +247,21 @@ const createMetadataAndPublicData = async (type, data, authToken) => {
     };
 
     switch (type) {
-        case "zotp":
+        case "zotp": {
+            const setupKeyResult = normalizeSetupKey(data.setupKey);
+            if (!setupKeyResult.normalized) {
+                throw createZotpValidationError(setupKeyResult.code, setupKeyResult.message);
+            }
+
+            const totpMeta = resolveZotpTotpMetadataFields(data);
+            if (totpMeta.error) {
+                throw createZotpValidationError(totpMeta.error.code, totpMeta.error.message);
+            }
+
             typePayload.metadata = {
-                setupKey: `${data.setupKey}`,
+                setupKey: setupKeyResult.normalized,
                 username: `${data.username}`,
+                ...totpMeta.metadataFields,
             };
 
             typePayload.publicData = withFolderMetadata(
@@ -260,6 +277,7 @@ const createMetadataAndPublicData = async (type, data, authToken) => {
             );
 
             break;
+        }
         case "password":
             typePayload.metadata = {
                 password: `${data.password}`,
@@ -717,6 +735,14 @@ const retrieveData = async (data, authToken) => {
             console.error("failed_to_encrypt_metadata_for_transport", error);
             throw new Error("409:failed_to_encrypt_metadata_for_transport");
         }
+    }
+
+    const totpForRetrieve = resolveZotpTotpForRetrieve(zelfKey?.publicData, zelfKey?.metadata);
+    if (totpForRetrieve && zelfKey?.publicData) {
+        zelfKey.publicData = {
+            ...zelfKey.publicData,
+            ...totpForRetrieve,
+        };
     }
 
     return {
@@ -1433,6 +1459,7 @@ const summarizeData = async (_data, authToken) => {
 };
 
 module.exports = {
+    createMetadataAndPublicData,
     storeData,
     storePasswordsBulk,
     retrieveData,
