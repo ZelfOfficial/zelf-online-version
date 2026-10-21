@@ -2,7 +2,11 @@ const {
     normalizeSetupKey,
     resolveZotpTotpParams,
     withZotpTotpDefaults,
-    formatZotpTotpPublicDataFields,
+    resolveZotpTotpForRetrieve,
+    formatZotpTotpMetadataFields,
+    buildZotpStorePinKeyvaluePayloads,
+    countPinKeyvalues,
+    PINATA_MAX_KEYVALUES_PER_PIN,
     ZOTP_DEFAULT_ALGORITHM,
     ZOTP_DEFAULT_DIGITS,
     ZOTP_DEFAULT_PERIOD,
@@ -62,10 +66,10 @@ describe("ZelfKey ZOTP module", () => {
         });
     });
 
-    describe("formatZotpTotpPublicDataFields", () => {
-        it("stringifies digits and period for ZelfProof storage", () => {
+    describe("formatZotpTotpMetadataFields", () => {
+        it("stringifies digits and period for encrypted metadata", () => {
             expect(
-                formatZotpTotpPublicDataFields({
+                formatZotpTotpMetadataFields({
                     algorithm: "SHA256",
                     digits: 8,
                     period: 60,
@@ -78,31 +82,52 @@ describe("ZelfKey ZOTP module", () => {
         });
     });
 
-    describe("withZotpTotpDefaults", () => {
-        it("parses string digits/period from stored publicData", () => {
+    describe("resolveZotpTotpForRetrieve", () => {
+        it("reads TOTP params from metadata with numeric defaults for legacy rows", () => {
             expect(
-                withZotpTotpDefaults({
-                    type: "zotp",
-                    algorithm: "SHA512",
-                    digits: "7",
-                    period: "45",
-                })
+                resolveZotpTotpForRetrieve(
+                    { type: "zotp", issuer: "GitHub" },
+                    { setupKey: "JBSWY3DPEHPK3PXP", username: "user@zelf.world" }
+                )
+            ).toMatchObject({
+                algorithm: ZOTP_DEFAULT_ALGORITHM,
+                digits: ZOTP_DEFAULT_DIGITS,
+                period: ZOTP_DEFAULT_PERIOD,
+            });
+        });
+
+        it("parses metadata strings for clients", () => {
+            expect(
+                resolveZotpTotpForRetrieve(
+                    { type: "zotp" },
+                    { algorithm: "SHA512", digits: "7", period: "45" }
+                )
             ).toMatchObject({
                 algorithm: "SHA512",
                 digits: 7,
                 period: 45,
             });
         });
+    });
 
-        it("fills defaults for zotp publicData only", () => {
-            expect(withZotpTotpDefaults({ type: "password" })).toEqual({ type: "password" });
-            expect(withZotpTotpDefaults({ type: "zotp", issuer: "GitHub" })).toEqual({
-                type: "zotp",
+    describe("buildZotpStorePinKeyvaluePayloads", () => {
+        it("counts save + QR pin payloads within Pinata limit for default zOTP publicData", () => {
+            const publicData = {
+                category: "alice.zelf_zotp",
                 issuer: "GitHub",
-                algorithm: ZOTP_DEFAULT_ALGORITHM,
-                digits: ZOTP_DEFAULT_DIGITS,
-                period: ZOTP_DEFAULT_PERIOD,
+                keyOwner: "alice.zelf",
+                protection: "face",
+                type: "zotp",
+                username: "user@zelf.world",
+                v: "4",
+            };
+            const payloads = buildZotpStorePinKeyvaluePayloads(publicData, {
+                identifier: "alice.zelf_123456",
+                walrusBlobId: "blob",
             });
+
+            expect(countPinKeyvalues(payloads.saveZelfKey)).toBeLessThanOrEqual(PINATA_MAX_KEYVALUES_PER_PIN);
+            expect(countPinKeyvalues(payloads.qrCode)).toBeLessThanOrEqual(PINATA_MAX_KEYVALUES_PER_PIN);
         });
     });
 });

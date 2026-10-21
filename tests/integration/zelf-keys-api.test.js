@@ -274,11 +274,9 @@ describe("ZelfKeys API Integration Tests", () => {
             expect(response.body.data).toHaveProperty("type", "zotp");
             expect(response.body.data).toHaveProperty("zelfProof");
             expect(response.body.data.ipfs?.publicData?.v).toBe("4");
-            expect(response.body.data.ipfs?.publicData).toMatchObject({
-                algorithm: "SHA256",
-                digits: 8,
-                period: 60,
-            });
+            expect(response.body.data.ipfs?.publicData).not.toHaveProperty("algorithm");
+            expect(response.body.data.ipfs?.publicData).not.toHaveProperty("digits");
+            expect(response.body.data.ipfs?.publicData).not.toHaveProperty("period");
 
             storedZotpZelfProof = response.body.data.zelfProof;
             console.log("✅ ZOTP stored successfully");
@@ -401,11 +399,9 @@ describe("ZelfKeys API Integration Tests", () => {
             expect(response.body.data).toHaveProperty("category", "zotp");
             const stored = (response.body.data.data || []).find((item) => item.publicData?.issuer === "GitHub");
             if (stored) {
-                expect(stored.publicData).toMatchObject({
-                    algorithm: "SHA256",
-                    digits: 8,
-                    period: 60,
-                });
+                expect(stored.publicData).not.toHaveProperty("algorithm");
+                expect(stored.publicData).not.toHaveProperty("digits");
+                expect(stored.publicData).not.toHaveProperty("period");
             }
             console.log(`✅ Listed ${response.body.data.totalCount} zotp records`);
         });

@@ -7,6 +7,8 @@ const ZOTP_DEFAULT_ALGORITHM = "SHA1";
 const ZOTP_DEFAULT_DIGITS = 6;
 const ZOTP_DEFAULT_PERIOD = 30;
 const ZOTP_MAX_PERIOD = 300;
+/** Pinata allows at most 9 metadata keyvalues per pin. */
+const PINATA_MAX_KEYVALUES_PER_PIN = 9;
 
 const BASE32_PATTERN = /^[A-Z2-7]+$/;
 
@@ -121,47 +123,66 @@ const resolveZotpTotpParams = (data) => {
 };
 
 /**
- * TOTP fields as stored on ZelfProof publicData (cleartext values must be strings).
+ * TOTP fields stored in encrypted metadata (string values for ZelfProof).
  * @param {{ algorithm: string, digits: number, period: number }} resolved
  */
-const formatZotpTotpPublicDataFields = (resolved) => ({
+const formatZotpTotpMetadataFields = (resolved) => ({
     algorithm: `${resolved.algorithm}`,
     digits: `${resolved.digits}`,
     period: `${resolved.period}`,
 });
 
 /**
- * Apply default TOTP public fields for list/retrieve (legacy records may omit them).
+ * Resolve TOTP params for API responses (numeric digits/period).
  * @param {Object} publicData
- * @returns {Object}
+ * @param {Object} [metadata]
  */
-const withZotpTotpDefaults = (publicData) => {
+const resolveZotpTotpForRetrieve = (publicData, metadata) => {
     if (!publicData || publicData.type !== "zotp") {
-        return publicData;
+        return null;
     }
 
-    const algorithmRaw = publicData.algorithm;
-    const algorithm =
-        typeof algorithmRaw === "string" && ZOTP_ALGORITHMS.includes(algorithmRaw.toUpperCase())
-            ? algorithmRaw.toUpperCase()
-            : ZOTP_DEFAULT_ALGORITHM;
+    const resolved = resolveZotpTotpParams({
+        algorithm: metadata?.algorithm ?? publicData?.algorithm,
+        digits: metadata?.digits ?? publicData?.digits,
+        period: metadata?.period ?? publicData?.period,
+    });
 
-    const digitsParsed = parsePositiveInt(publicData.digits, "digits", { min: 6, max: 8 });
-    const periodParsed = parsePositiveInt(publicData.period, "period", { min: 1, max: ZOTP_MAX_PERIOD });
+    if (resolved.error) {
+        return {
+            algorithm: ZOTP_DEFAULT_ALGORITHM,
+            digits: ZOTP_DEFAULT_DIGITS,
+            period: ZOTP_DEFAULT_PERIOD,
+        };
+    }
 
     return {
-        ...publicData,
-        algorithm,
-        digits: digitsParsed.value ?? ZOTP_DEFAULT_DIGITS,
-        period: periodParsed.value ?? ZOTP_DEFAULT_PERIOD,
+        algorithm: resolved.algorithm,
+        digits: resolved.digits,
+        period: resolved.period,
     };
 };
 
 /**
- * Build resolved TOTP params and string publicData fields for zOTP store.
+ * @deprecated Legacy publicData-only helper; prefer resolveZotpTotpForRetrieve.
+ */
+const withZotpTotpDefaults = (publicData) => {
+    const totp = resolveZotpTotpForRetrieve(publicData, {});
+    if (!totp) {
+        return publicData;
+    }
+
+    return {
+        ...publicData,
+        ...totp,
+    };
+};
+
+/**
+ * Build resolved TOTP params and string metadata fields for zOTP store.
  * @param {Object} data store request body (after middleware normalization)
  */
-const resolveZotpTotpPublicDataFields = (data) => {
+const resolveZotpTotpMetadataFields = (data) => {
     const resolved = resolveZotpTotpParams(data);
     if (resolved.error) {
         return resolved;
@@ -169,7 +190,35 @@ const resolveZotpTotpPublicDataFields = (data) => {
 
     return {
         resolved,
-        publicFields: formatZotpTotpPublicDataFields(resolved),
+        metadataFields: formatZotpTotpMetadataFields(resolved),
+    };
+};
+
+const countPinKeyvalues = (keyvalues) =>
+    Object.keys(keyvalues || {}).filter((key) => {
+        const value = keyvalues[key];
+        return value !== undefined && value !== null && value !== "";
+    }).length;
+
+/**
+ * Keyvalue payloads passed to IPFS.pinFile during zOTP store (_store + saveZelfKey).
+ * @param {Object} publicData stamped public metadata (no TOTP fields)
+ * @param {{ identifier?: string, walrusBlobId?: string }} options
+ */
+const buildZotpStorePinKeyvaluePayloads = (publicData, options = {}) => {
+    const { identifier = "zelfkey_pin_placeholder", walrusBlobId } = options;
+    const saveZelfKeyPayload = { ...publicData };
+
+    if (walrusBlobId) {
+        saveZelfKeyPayload.walrus = walrusBlobId;
+    }
+
+    return {
+        saveZelfKey: saveZelfKeyPayload,
+        qrCode: {
+            ...publicData,
+            identifier,
+        },
     };
 };
 
@@ -179,9 +228,13 @@ module.exports = {
     ZOTP_DEFAULT_DIGITS,
     ZOTP_DEFAULT_PERIOD,
     ZOTP_MAX_PERIOD,
+    PINATA_MAX_KEYVALUES_PER_PIN,
     normalizeSetupKey,
     resolveZotpTotpParams,
-    formatZotpTotpPublicDataFields,
-    resolveZotpTotpPublicDataFields,
+    formatZotpTotpMetadataFields,
+    resolveZotpTotpMetadataFields,
+    resolveZotpTotpForRetrieve,
     withZotpTotpDefaults,
+    countPinKeyvalues,
+    buildZotpStorePinKeyvaluePayloads,
 };

@@ -27,7 +27,7 @@ const {
     PROTECTION_FACE_PASSWORD,
     passwordCredentialSchema,
 } = require("../middlewares/zelf-key.middleware");
-const { withZotpTotpDefaults, resolveZotpTotpPublicDataFields } = require("./zelf-key-zotp.module");
+const { resolveZotpTotpMetadataFields, resolveZotpTotpForRetrieve } = require("./zelf-key-zotp.module");
 
 const TYPES_REQUIRING_TRANSPORT_ENCRYPTION = new Set(["password", "notes", "note", "credit_card", "payment-card"]);
 const SUPPORTED_CATEGORIES = ["password", "notes", "credit_card", "contact", "zotp"];
@@ -175,14 +175,15 @@ const createMetadataAndPublicData = async (type, data, authToken) => {
 
     switch (type) {
         case "zotp": {
-            const totpPublic = resolveZotpTotpPublicDataFields(data);
-            if (totpPublic.error) {
-                throw new Error(`409:${totpPublic.error.code}:${totpPublic.error.message}`);
+            const totpMeta = resolveZotpTotpMetadataFields(data);
+            if (totpMeta.error) {
+                throw new Error(`409:${totpMeta.error.code}:${totpMeta.error.message}`);
             }
 
             typePayload.metadata = {
                 setupKey: `${data.setupKey}`,
                 username: `${data.username}`,
+                ...totpMeta.metadataFields,
             };
 
             typePayload.publicData = withFolderMetadata(
@@ -193,7 +194,6 @@ const createMetadataAndPublicData = async (type, data, authToken) => {
                     protection,
                     type,
                     username: `${data.username}`,
-                    ...totpPublic.publicFields,
                 },
                 normalizeOptionalString(data.folder),
             );
@@ -678,8 +678,12 @@ const retrieveData = async (data, authToken) => {
         }
     }
 
-    if (zelfKey?.publicData) {
-        zelfKey.publicData = withZotpTotpDefaults(zelfKey.publicData);
+    const totpForRetrieve = resolveZotpTotpForRetrieve(zelfKey?.publicData, zelfKey?.metadata);
+    if (totpForRetrieve && zelfKey?.publicData) {
+        zelfKey.publicData = {
+            ...zelfKey.publicData,
+            ...totpForRetrieve,
+        };
     }
 
     return {
@@ -860,7 +864,7 @@ const listData = async (data, authToken) => {
                         id: item.id || item.cid,
                         cid: item.cid,
                         url: item.url,
-                        publicData: withZotpTotpDefaults(publicData),
+                        publicData,
                         createdAt: item.created_at || item.createdAt,
                         updatedAt: item.updated_at || item.updatedAt,
                     };

@@ -3,18 +3,31 @@ jest.mock("../../Repositories/Tags/modules/tags.module", () => ({
 }));
 
 const ZelfKeyModule = require("../../Repositories/ZelfKeys/modules/zelf-key.module");
+const {
+    PINATA_MAX_KEYVALUES_PER_PIN,
+    buildZotpStorePinKeyvaluePayloads,
+    countPinKeyvalues,
+} = require("../../Repositories/ZelfKeys/modules/zelf-key-zotp.module");
 
 const authToken = { tagName: "alice", identifier: "alice", domain: "zelf" };
 
 const expectAllPublicDataValuesAreStrings = (publicData) => {
-    for (const [key, value] of Object.entries(publicData)) {
+    for (const value of Object.values(publicData)) {
         expect(typeof value).toBe("string");
     }
 };
 
-describe("ZelfKeys zOTP store publicData (ZelfProof encrypt contract)", () => {
-    it("uses string cleartext values for default TOTP params (no client params)", async () => {
-        const { publicData } = await ZelfKeyModule.createMetadataAndPublicData(
+const expectPinPayloadsWithinLimit = (publicData, options = {}) => {
+    const payloads = buildZotpStorePinKeyvaluePayloads(publicData, options);
+
+    for (const payload of Object.values(payloads)) {
+        expect(countPinKeyvalues(payload)).toBeLessThanOrEqual(PINATA_MAX_KEYVALUES_PER_PIN);
+    }
+};
+
+describe("ZelfKeys zOTP store payloads", () => {
+    it("keeps TOTP params in encrypted metadata, not public pin keyvalues (defaults)", async () => {
+        const { metadata, publicData } = await ZelfKeyModule.createMetadataAndPublicData(
             "zotp",
             {
                 username: "user@zelf.world",
@@ -25,17 +38,23 @@ describe("ZelfKeys zOTP store publicData (ZelfProof encrypt contract)", () => {
         );
 
         expectAllPublicDataValuesAreStrings(publicData);
-        expect(publicData).toMatchObject({
-            type: "zotp",
+        expect(publicData).not.toHaveProperty("algorithm");
+        expect(publicData).not.toHaveProperty("digits");
+        expect(publicData).not.toHaveProperty("period");
+        expect(metadata).toMatchObject({
             algorithm: "SHA1",
             digits: "6",
             period: "30",
-            v: "4",
+        });
+
+        expectPinPayloadsWithinLimit(publicData, {
+            identifier: "alice.zelf_123456",
+            walrusBlobId: "walrus-blob-id",
         });
     });
 
-    it("uses string cleartext values for explicit SHA256 / 8 / 60", async () => {
-        const { publicData } = await ZelfKeyModule.createMetadataAndPublicData(
+    it("keeps TOTP params in metadata for explicit SHA256 / 8 / 60 and stays within Pinata limits", async () => {
+        const { metadata, publicData } = await ZelfKeyModule.createMetadataAndPublicData(
             "zotp",
             {
                 username: "user@zelf.world",
@@ -44,15 +63,22 @@ describe("ZelfKeys zOTP store publicData (ZelfProof encrypt contract)", () => {
                 algorithm: "SHA256",
                 digits: 8,
                 period: 60,
+                folder: "Work",
             },
             authToken
         );
 
-        expectAllPublicDataValuesAreStrings(publicData);
-        expect(publicData).toMatchObject({
+        expect(publicData).not.toHaveProperty("algorithm");
+        expect(metadata).toMatchObject({
             algorithm: "SHA256",
             digits: "8",
             period: "60",
+        });
+        expect(publicData.folder).toBe("Work");
+
+        expectPinPayloadsWithinLimit(publicData, {
+            identifier: "alice.zelf_123456",
+            walrusBlobId: "walrus-blob-id",
         });
     });
 });
