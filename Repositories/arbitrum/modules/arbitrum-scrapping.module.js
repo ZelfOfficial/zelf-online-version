@@ -6,6 +6,19 @@ const StandardizedChainFormatter = require("../../class/standardized-chain-forma
 const { getTickerPrice } = require("../../binance/modules/binance.module");
 const { getTokenPrice } = require("../utils/token-pricing");
 const { getETHPrice } = require("../utils/eth-price");
+const {
+	normalizePage,
+	mapEtherscanV2Transaction,
+	mapBlockscoutTransaction,
+	buildListResponse,
+	fetchTransactionsFromEtherscanV2,
+	fetchTransactionsFromBlockscout,
+	fetchTransactionsFromRpcScan,
+	DEFAULT_TX_TIMEOUT_MS,
+} = require("../../etherscan/modules/evm-transaction-list.util");
+
+const ARBITRUM_CHAIN_ID = 42161;
+const ARBITRUM_BLOCKSCOUT_BASE = process.env.ARBITRUM_BLOCKSCOUT_URL || "https://arbitrum.blockscout.com";
 
 // Initialize Arbitrum formatter
 const arbitrumFormatter = new StandardizedChainFormatter("Arbitrum One", "ETH", "https://s2.coinmarketcap.com/static/img/coins/64x64/11841.png");
@@ -32,6 +45,7 @@ const generateRandomUserAgent = () => {
 
 // Arbitrum API endpoints
 const ARBITRUM_RPC = "https://arb1.arbitrum.io/rpc";
+const ARBITRUM_RPC_URL = process.env.ARBITRUM_RPC_URL || ARBITRUM_RPC;
 const ARBISCAN_API = "https://api.arbiscan.io/api";
 
 /**
@@ -280,18 +294,46 @@ const getTransactionsList = async (query) => {
 			console.log("OKLink failed:", oklinkError.message);
 		}
 
-		// Try Arbiscan API as fallback
+		// Try Etherscan API V2 (unified multi-chain) as fallback
 		if (!response) {
 			try {
-				console.log("Trying Arbiscan API...");
+				console.log("Trying Etherscan API V2 for Arbitrum...");
 				const arbiscanResponse = await getArbiscanTransactions(address, page, show, price);
 				if (arbiscanResponse && arbiscanResponse.transactions && arbiscanResponse.transactions.length > 0) {
 					response = arbiscanResponse;
-					source = "arbiscan";
-					console.log(`Found ${arbiscanResponse.transactions.length} transactions via Arbiscan`);
+					source = "etherscan_v2";
+					console.log(`Found ${arbiscanResponse.transactions.length} transactions via Etherscan V2`);
 				}
 			} catch (arbiscanError) {
-				console.log("Arbiscan failed:", arbiscanError.message);
+				console.log("Etherscan V2 Arbitrum failed:", arbiscanError.message);
+			}
+		}
+
+		if (!response) {
+			try {
+				console.log("Trying Arbitrum Blockscout API...");
+				const blockscoutResponse = await getArbitrumBlockscoutTransactions(address, page, show, price);
+				if (blockscoutResponse?.transactions?.length) {
+					response = blockscoutResponse;
+					source = "blockscout";
+					console.log(`Found ${blockscoutResponse.transactions.length} transactions via Blockscout`);
+				}
+			} catch (blockscoutError) {
+				console.log("Arbitrum Blockscout failed:", blockscoutError.message);
+			}
+		}
+
+		if (!response) {
+			try {
+				console.log("Trying Arbitrum RPC block scan fallback...");
+				const rpcResponse = await getArbitrumRpcScanTransactions(address, page, show, price);
+				if (rpcResponse?.transactions?.length) {
+					response = rpcResponse;
+					source = "rpc_scan";
+					console.log(`Found ${rpcResponse.transactions.length} transactions via RPC scan`);
+				}
+			} catch (rpcScanError) {
+				console.log("Arbitrum RPC scan failed:", rpcScanError.message);
 			}
 		}
 
@@ -384,59 +426,62 @@ const getOKLinkTransactions = async (address, page, show, price) => {
  */
 const getArbiscanTransactions = async (address, page, show, price) => {
 	try {
-		const url = `https://api.arbiscan.io/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=${page}&offset=${show}&sort=desc`;
-
-		const { data } = await axios.get(url, {
-			timeout: 10000,
-			validateStatus: function (status) {
-				return status < 500;
-			},
-			headers: {
-				"User-Agent": generateRandomUserAgent(),
-				Accept: "application/json",
-			},
+		const etherscanPage = normalizePage(page === "0" ? 1 : page);
+		const items = await fetchTransactionsFromEtherscanV2((url, options) => instance.get(url, options), {
+			chainId: ARBITRUM_CHAIN_ID,
+			address,
+			page: etherscanPage,
+			offset: parseInt(show, 10) || 25,
+			timeout: DEFAULT_TX_TIMEOUT_MS,
 		});
 
-		if (data.status === "1" && data.result && data.result.length > 0) {
-			const rawTransactions = data.result.map((tx) => {
-				const value = parseFloat(tx.value) / Math.pow(10, 18);
-				const fiatValue = value * parseFloat(price);
-				const traffic = tx.from.toLowerCase() === address.toLowerCase() ? "OUT" : "IN";
+		const rawTransactions = items.map((tx) => mapEtherscanV2Transaction(tx, address, { asset: "ETH", price }));
+		const transactions = arbitrumFormatter.formatTransactions(rawTransactions);
 
-				return {
-					hash: tx.hash,
-					block: tx.blockNumber,
-					from: tx.from,
-					to: tx.to,
-					value: value.toString(),
-					fiatValue: fiatValue.toFixed(2),
-					gas: tx.gasUsed || "0",
-					gasPrice: tx.gasPrice || "0",
-					nonce: tx.nonce || "0",
-					input: tx.input || "0x",
-					blocktime: parseInt(tx.timeStamp),
-					traffic: traffic,
-					method: tx.methodId ? "Contract Interaction" : "ETH transfer",
-					status: tx.isError === "0" ? "Success" : "Failed",
-					image: "https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png",
-					date: moment(parseInt(tx.timeStamp) * 1000).format("YYYY-MM-DD HH:mm:ss"),
-					age: moment(parseInt(tx.timeStamp) * 1000).fromNow(),
-					txnFee: tx.gasUsed && tx.gasPrice ? ((parseFloat(tx.gasUsed) * parseFloat(tx.gasPrice)) / Math.pow(10, 18)).toFixed(8) : "0",
-					confirmations: "1",
-				};
-			});
-
-			const transactions = arbitrumFormatter.formatTransactions(rawTransactions);
-
-			return {
-				pagination: { records: transactions.length.toString(), pages: "1", page: page },
-				transactions: transactions,
-			};
-		}
-
-		return null;
+		return buildListResponse(transactions, { page: etherscanPage, show: parseInt(show, 10) || 25 });
 	} catch (error) {
-		console.log("Arbiscan transactions failed:", error.message);
+		console.log("Arbitrum Etherscan V2 transactions failed:", error.message);
+		return null;
+	}
+};
+
+const getArbitrumRpcScanTransactions = async (address, page, show, price) => {
+	try {
+		const limit = parseInt(show, 10) || 25;
+		const items = await fetchTransactionsFromRpcScan((url, body, options) => instance.post(url, body, options), {
+			rpcUrl: ARBITRUM_RPC_URL,
+			address,
+			limit,
+			maxBlocks: Number(process.env.ARBITRUM_RPC_SCAN_MAX_BLOCKS) || 40,
+			timeout: DEFAULT_TX_TIMEOUT_MS,
+		});
+
+		const rawTransactions = items.map((tx) => ({ ...tx, price }));
+		const transactions = arbitrumFormatter.formatTransactions(rawTransactions);
+
+		return buildListResponse(transactions, { page: normalizePage(page === "0" ? 1 : page), show: limit });
+	} catch (error) {
+		console.log("Arbitrum RPC scan transactions failed:", error.message);
+		return null;
+	}
+};
+
+const getArbitrumBlockscoutTransactions = async (address, page, show, price) => {
+	try {
+		const limit = parseInt(show, 10) || 25;
+		const items = await fetchTransactionsFromBlockscout((url, options) => instance.get(url, options), {
+			baseUrl: ARBITRUM_BLOCKSCOUT_BASE,
+			address,
+			limit,
+			timeout: DEFAULT_TX_TIMEOUT_MS,
+		});
+
+		const rawTransactions = items.map((tx) => mapBlockscoutTransaction(tx, address, { asset: "ETH", price }));
+		const transactions = arbitrumFormatter.formatTransactions(rawTransactions);
+
+		return buildListResponse(transactions, { page: normalizePage(page === "0" ? 1 : page), show: limit });
+	} catch (error) {
+		console.log("Arbitrum Blockscout transactions failed:", error.message);
 		return null;
 	}
 };

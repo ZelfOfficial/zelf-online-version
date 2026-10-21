@@ -23,6 +23,17 @@ const {
 } = require("../../../Core/naas-gateway-catalog");
 const { getTickerPrice } = require("../../binance/modules/binance.module");
 const { get_ApiKey } = require("../../Solana/modules/oklink");
+const {
+    normalizeTransactionLimit,
+    normalizePage,
+    mapEtherscanV2Transaction,
+    mapRouteScanTransaction,
+    buildListResponse,
+    fetchTransactionsFromEtherscanV2,
+    fetchTransactionsFromRouteScan,
+    DEFAULT_TX_TIMEOUT_MS,
+} = require("./evm-transaction-list.util");
+const ETH_MAINNET_CHAIN_ID = 1;
 
 const instance = getCleanInstance(1000);
 const agent = new https.Agent({ rejectUnauthorized: false });
@@ -245,26 +256,130 @@ const getTransactionStatus = async (params) => {
  * @param {Object} params
  * @returns
  */
-const getTransactionsList = async (params) => {
-    const address = params.address;
-    const show = params.show;
-
+const getEthereumTransactionsFromOkLink = async (address, page, show, price) => {
     try {
-        const { data } = await instance.get(`${urlBase}/api/evm-tx/ethereum-transactions?address=${address}&show=${show}`, {
+        const t = Date.now();
+        const url = `https://www.oklink.com/api/explorer/v2/eth/addresses/${address}/transactionsByClassfy/condition?offset=${page}&limit=${show}&address=${address}&nonzeroValue=false&t=${t}`;
+
+        const { data } = await axios.get(url, {
+            httpsAgent: agent,
+            timeout: DEFAULT_TX_TIMEOUT_MS,
+            validateStatus: (status) => status < 500,
             headers: {
-                Authorization: `Bearer ${token}`,
+                "X-Apikey": get_ApiKey().getApiKey(),
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
             },
         });
 
-        return { pagination: { records: "0", pages: "0", page: "0" }, transactions: data };
-    } catch (error) {
-        console.error({ error, address });
+        if (!(data?.code === "0" || data?.code === 0) || !Array.isArray(data?.data?.hits) || data.data.hits.length === 0) {
+            return null;
+        }
 
-        return {
-            pagination: { records: "0", pages: "0", page: "0" },
-            transactions: [],
-        };
+        const transactions = data.data.hits.map((tx) => {
+            const value = parseFloat(tx.value || 0);
+            const traffic = String(tx.from || "").toLowerCase() === String(address).toLowerCase() ? "OUT" : "IN";
+
+            return {
+                hash: tx.hash,
+                block: String(tx.blockHeight || ""),
+                from: tx.from,
+                to: tx.to,
+                amount: String(value),
+                value: String(value),
+                fiatAmount: (value * Number(price || 0)).toFixed(2),
+                traffic,
+                method: tx.method || "ETH transfer",
+                txnFee: tx.fee ? String(Number(tx.fee)) : "0",
+                age: tx.blocktime ? moment(tx.blocktime * 1000).fromNow() : "",
+                date: tx.blocktime ? moment(tx.blocktime * 1000).format("YYYY-MM-DD HH:mm:ss") : "",
+                asset: "ETH",
+            };
+        });
+
+        return buildListResponse(transactions, {
+            page,
+            show,
+            total: data.data.total ?? transactions.length,
+        });
+    } catch (error) {
+        console.error({ oklinkEthereumTxError: error?.message || error });
+        return null;
     }
+};
+
+const getTransactionsList = async (params) => {
+    const address = params.address;
+    const show = normalizeTransactionLimit(params.show, 10);
+    const page = normalizePage(params.page || 1);
+
+    let price = 0;
+    try {
+        const ticker = await getTickerPrice({ symbol: "ETH" });
+        price = Number(ticker?.price || 0);
+    } catch (_) {}
+
+    const httpGet = (url, options) => instance.get(url, options);
+
+    try {
+        const routeScanItems = await fetchTransactionsFromRouteScan(httpGet, {
+            chainId: ETH_MAINNET_CHAIN_ID,
+            address,
+            limit: show,
+        });
+        const transactions = routeScanItems.map((tx) => mapRouteScanTransaction(tx, address, { asset: "ETH", price }));
+
+        return { ...buildListResponse(transactions, { page, show }), source: "routescan" };
+    } catch (routeScanError) {
+        console.error({ routeScanEthereumTxError: routeScanError?.message || routeScanError });
+    }
+
+    try {
+        const etherscanItems = await fetchTransactionsFromEtherscanV2(httpGet, {
+            chainId: ETH_MAINNET_CHAIN_ID,
+            address,
+            page,
+            offset: show,
+        });
+        const transactions = etherscanItems.map((tx) => mapEtherscanV2Transaction(tx, address, { asset: "ETH", price }));
+
+        return { ...buildListResponse(transactions, { page, show }), source: "etherscan_v2" };
+    } catch (etherscanError) {
+        console.error({ etherscanV2EthereumTxError: etherscanError?.message || etherscanError });
+    }
+
+    const oklinkResponse = await getEthereumTransactionsFromOkLink(address, page - 1, show, price);
+    if (oklinkResponse?.transactions?.length) {
+        return { ...oklinkResponse, source: "oklink" };
+    }
+
+    const bogotaUrl = process.env.MICROSERVICES_BOGOTA_URL || urlBase;
+    const bogotaToken = process.env.MICROSERVICES_BOGOTA_TOKEN || token;
+
+    if (bogotaUrl && bogotaToken) {
+        try {
+            const { data } = await instance.get(`${bogotaUrl}/api/evm-tx/ethereum-transactions?address=${address}&show=${show}`, {
+                headers: {
+                    Authorization: `Bearer ${bogotaToken}`,
+                },
+                timeout: DEFAULT_TX_TIMEOUT_MS,
+            });
+
+            if (Array.isArray(data) && data.length > 0) {
+                return {
+                    pagination: { records: String(data.length), pages: "1", page: String(page) },
+                    transactions: data,
+                    source: "bogota",
+                };
+            }
+        } catch (error) {
+            console.error({ bogotaEthereumTxError: error?.message || error, address });
+        }
+    }
+
+    return {
+        pagination: { records: "0", pages: "0", page: String(page) },
+        transactions: [],
+    };
 };
 
 /**
