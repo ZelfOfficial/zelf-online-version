@@ -545,6 +545,11 @@ const configuration = {
             "sui_resolveNameServiceAddress",
             "sui_getAllBalances",
             "sui_getBalance",
+            "suix_getAllBalances",
+            "suix_getBalance",
+            "suix_getCoinMetadata",
+            "suix_getReferenceGasPrice",
+            "suix_queryTransactionBlocks",
             "sui_getCoins",
             "sui_getAllCoins",
             "dryRunTransactionBlock",
@@ -616,7 +621,11 @@ const configuration = {
                     process.env.BLOCKDAG_RPC_URL ||
                     "https://rpc.bdagscan.com",
             },
-            /** Sui: chainId is a logical Zelf id for /api/rpc/chains (not an EVM chain id). */
+            /**
+             * Sui: chainId is a logical Zelf id for /api/rpc/chains (not an EVM chain id).
+             * Mainnet JSON-RPC is gone. POST /api/rpc/sui translates a fixed set of read
+             * methods through GraphQL at `${SUI_RPC_URL}/graphql` and does not POST this URL.
+             */
             sui: {
                 chainId: Number(process.env.SUI_CHAIN_ID) || 101,
                 rpcUrl: process.env.RPC_PROXY_SUI_URL || process.env.SUI_RPC_URL || "https://fullnode.mainnet.sui.io:443",

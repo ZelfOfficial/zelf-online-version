@@ -1,340 +1,539 @@
-const axios = require("axios");
-const https = require("https");
 const moment = require("moment");
 const { getTickerPrice } = require("../../binance/modules/binance.module");
-const { get_ApiKey } = require("../../Solana/modules/oklink");
-const agent = new https.Agent({
-	rejectUnauthorized: false,
-});
+const { suiCoin } = require("../../TxNotifications/modules/tokens");
+const { querySuiGraphql } = require("./sui-graphql.client");
+const {
+	GRAPHQL_PAGE_MAX,
+	SUI_DECIMALS,
+	SUI_IMAGE,
+	absBigInt,
+	coinSymbolFromType,
+	formatCoinAmount,
+	isNativeSui,
+	netGasMist,
+	sameAddress,
+	shortenCoinType,
+	upstreamError,
+	wrapUpstream,
+} = require("./sui-coin.util");
 
-const urlBase = "https://www.oklink.com";
 /**
- * @param {*} params
+ * Portfolio reads for /api/sui. Balances, coin metadata, and history come from
+ * Sui GraphQL. A failed lookup throws (502); it does not pretend the wallet is empty.
+ *
+ * `page` is a 0-based page index and `show` is the page size (10, 25, 50, 100),
+ * matching the other wallet history endpoints. `pagination.records` stays a string.
+ * `hasNextPage` and `nextCursor` are added so clients can follow the GraphQL cursor
+ * (`cursor` query param) instead of walking page indexes.
  */
 
-const getAddress = async (params) => {
-	const t = Date.now();
+const SUI_COIN = "0x2::sui::SUI";
+const MAX_PAGE_INDEX = 50;
+/** Sui rejects a selection past ~21 internal nodes. Five coinMetadata lookups stay under that. */
+const METADATA_BATCH = 5;
+const METADATA_TTL_MS = 15 * 60 * 1000;
+
+const metadataCache = new Map();
+let metadataQueue = Promise.resolve();
+
+const TX_NODE_FIELDS = `
+	digest
+	sender { address }
+	kind { __typename }
+	gasInput { gasPrice gasBudget }
+	effects {
+		status
+		timestamp
+		checkpoint { sequenceNumber }
+		gasEffects { gasSummary { computationCost storageCost storageRebate nonRefundableStorageFee } }
+		balanceChanges(first: 50) { nodes { owner { address } amount coinType { repr } } }
+	}`;
+
+const BALANCE_FIELDS = `
+	coinType { repr }
+	totalBalance`;
+
+const pageIndexOf = (page) => {
+	const parsed = Number.parseInt(page, 10);
+	if (!Number.isFinite(parsed) || parsed < 0) return 0;
+	if (parsed > MAX_PAGE_INDEX) throw upstreamError("sui_page_out_of_range", 400);
+	return parsed;
+};
+
+const showOf = (show, fallback = 10) => {
+	const parsed = Number.parseInt(show, 10);
+	if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+	return Math.min(parsed, 100);
+};
+
+const loadSuiPrice = async () => {
 	try {
-		const address = params.id;
-
-		const { data } = await axios.get(
-			`${urlBase}/api/explorer/v2/common/address/getHolderInfo?address=${address}&blockChain=SUI&t=${t}`,
-
-			{
-				httpsAgent: agent,
-				headers: {
-					"X-Apikey": get_ApiKey().getApiKey(),
-					"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
-				},
-			}
-		);
-
-		// Check if API returned an error or invalid response
-		if (!data || !data.data) {
-			throw new Error("Invalid response from API");
-		}
-
-		const { price } = await getTickerPrice({ symbol: "SUI" });
-
-		// Safely get transactions, handle errors gracefully
-		let transactions = [];
-		try {
-			const transactionsData = await getTransactions({ id: address }, { page: "0", show: "10" });
-			transactions = transactionsData.transactions || [];
-		} catch (error) {
-			console.error("Error fetching transactions:", error.message);
-			transactions = [];
-		}
-
-		// Safely get tokens, handle errors gracefully
-		let tokens = [];
-		try {
-			const tokenHoldings = await getTokens({ id: address }, { page: "0", show: "10" });
-			tokens = tokenHoldings.tokens || [];
-		} catch (error) {
-			console.error("Error fetching tokens:", error.message);
-			tokens = [];
-		}
-
-		// Safely extract values with defaults for zero-balance addresses
-		const balance = data.data.balance || 0;
-		const usdBalance = data.data.usdBalance || 0;
-		const tokenUsdValue = data.data.tokenUsdValue || 0;
-		const tokenNum = data.data.tokenNum || 0;
-
-		// Check if SUI token already exists in tokens array
-		let hasSuiToken = false;
-		for (let index = 0; index < tokens.length; index++) {
-			const token = tokens[index];
-			if (token.symbol === "SUI" || token.tokenType === "SUI") {
-				token.tokenType = "SUI";
-				hasSuiToken = true;
-				break;
-			}
-		}
-
-		// Always include native SUI token at the beginning (even if balance is 0)
-		if (!hasSuiToken) {
-			tokens.unshift({
-				_fiatBalance: usdBalance.toString(),
-				address_token: "0x2",
-				amount: balance.toString(),
-				fiatBalance: usdBalance,
-				image: "https://static.oklink.com/cdn/web3/currency/token/small/784-0x2::sui::SUI-1?v=1742304132417",
-				name: "Sui",
-				price: price,
-				symbol: "SUI",
-				tokenType: "SUI",
-			});
-		}
-
-		const response = {
-			_balance: balance,
-			_fiatBalance: usdBalance.toString(),
-			address,
-			balance: balance.toString(),
-			fiatBalance: usdBalance,
-			account: {
-				asset: "SUI",
-				fiatBalance: usdBalance,
-				price: price,
-			},
-			tokenHoldings: {
-				balance: tokenUsdValue.toString(),
-				total: tokens.length,
-				tokens: tokens,
-			},
-			transactions: transactions,
-		};
-
-		return response;
-	} catch (error) {
-		console.error("Error in getAddress:", error.message);
-
-		// Return a consistent structure even on error
-		const address = params.id;
-		let price = "0";
-		try {
-			const priceData = await getTickerPrice({ symbol: "SUI" });
-			price = priceData.price || "0";
-		} catch (priceError) {
-			console.error("Error fetching price:", priceError.message);
-		}
-
-		// Always include native SUI token even on error
-		const defaultSuiToken = {
-			_fiatBalance: "0",
-			address_token: "0x2",
-			amount: "0",
-			fiatBalance: 0,
-			image: "https://static.oklink.com/cdn/web3/currency/token/small/784-0x2::sui::SUI-1?v=1742304132417",
-			name: "Sui",
-			price: price,
-			symbol: "SUI",
-			tokenType: "SUI",
-		};
-
-		return {
-			_balance: 0,
-			_fiatBalance: "0",
-			address,
-			balance: "0",
-			fiatBalance: 0,
-			account: {
-				asset: "SUI",
-				fiatBalance: 0,
-				price,
-			},
-			tokenHoldings: {
-				balance: "0",
-				total: 1,
-				tokens: [defaultSuiToken],
-			},
-			transactions: [],
-		};
+		const quoted = await getTickerPrice({ symbol: "SUI" });
+		return quoted?.price ?? "0";
+	} catch (_error) {
+		console.error("[sui] price_unavailable");
+		return "0";
 	}
 };
+
+const fiatOf = (amount, price) => {
+	const left = Number(amount);
+	const right = Number(price);
+	if (!Number.isFinite(left) || !Number.isFinite(right)) return 0;
+	return Number((left * right).toFixed(6));
+};
+
+const metadataKey = (coinType) => shortenCoinType(coinType).toLowerCase();
+
+const safeErrorCode = (error, fallback) => (typeof error?.code === "string" && /^[a-z0-9_]+$/i.test(error.code) ? error.code : fallback);
+
+const isQueryRejection = (error) => error?.queryError === true || error?.code === "sui_graphql_query_rejected";
+
+const resetSuiMetadataCache = () => {
+	metadataCache.clear();
+	metadataQueue = Promise.resolve();
+};
+
+const scheduleMetadata = (work) => {
+	const run = metadataQueue.then(work, work);
+	metadataQueue = run.then(
+		() => undefined,
+		() => undefined
+	);
+	return run;
+};
+
+const mapToken = (node, suiPrice) => {
+	const repr = node?.coinType?.repr || "";
+	const native = isNativeSui(repr);
+	const known = suiCoin(repr);
+	const decimals = Number.isInteger(node?.coinMetadata?.decimals)
+		? node.coinMetadata.decimals
+		: native || known?.native
+			? SUI_DECIMALS
+			: Number.isInteger(known?.decimals)
+				? known.decimals
+				: null;
+	const amount = formatCoinAmount(node?.totalBalance ?? "0", decimals);
+	const price = native ? String(suiPrice ?? "0") : "0";
+	const fiat = fiatOf(amount, price);
+	const symbol = node?.coinMetadata?.symbol || known?.symbol || (native ? "SUI" : coinSymbolFromType(repr) || "Unknown");
+	const name = node?.coinMetadata?.name || (native ? "Sui" : symbol);
+	const icon = node?.coinMetadata?.iconUrl || "";
+	const fullType = shortenCoinType(repr);
+
+	return {
+		_fiatBalance: String(fiat),
+		address_token: native ? "0x2" : fullType,
+		amount: String(amount),
+		coinType: fullType,
+		decimals,
+		fiatBalance: fiat,
+		image: icon || (native ? SUI_IMAGE : ""),
+		isNative: native,
+		name,
+		price,
+		symbol: native ? "SUI" : symbol,
+		tokenType: native ? "SUI" : fullType,
+	};
+};
+
+const shortTypeId = (coinType, length) => {
+	const hex = String(coinType || "")
+		.split("::")[0]
+		.replace(/^0x/i, "");
+	return hex.slice(-length).toLowerCase() || "coin";
+};
+
 /**
- *
- * @param {Object} params - Contiene el id (dirección)
- * @param {Object} query - Parámetros adicionales
+ * The extension merges holdings on symbol + tokenType. Native SUI stays symbol
+ * "SUI" / tokenType "SUI". Any other coin whose symbol is "SUI", or that shares
+ * a symbol with another row, gets a short type-id suffix so it cannot replace
+ * the native balance.
  */
-const getTokens = async (params, query) => {
-	try {
-		const t = Date.now();
-		const { data } = await axios.get(
-			`${urlBase}/api/explorer/v2/sui/addresses/${params.id}/holders/token?offset=${query.page}&limit=${query.show}&t=${t}`,
+const disambiguateTokenSymbols = (tokens) => {
+	const counts = new Map();
+	for (const token of tokens) {
+		const key = String(token.symbol || "").toUpperCase();
+		counts.set(key, (counts.get(key) || 0) + 1);
+	}
 
-			{
-				httpsAgent: agent,
-				headers: {
-					"X-Apikey": get_ApiKey().getApiKey(),
-					"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
-				},
-			}
+	const used = new Set();
+	return tokens.map((token) => {
+		if (token.isNative || isNativeSui(token.coinType)) {
+			used.add("SUI");
+			return { ...token, isNative: true, name: "Sui", symbol: "SUI", tokenType: "SUI", address_token: "0x2" };
+		}
+
+		const raw = String(token.symbol || "Unknown");
+		const key = raw.toUpperCase();
+		if (key !== "SUI" && counts.get(key) === 1 && !used.has(key)) {
+			used.add(key);
+			return token;
+		}
+
+		const hex = String(token.coinType || "")
+			.split("::")[0]
+			.replace(/^0x/i, "");
+		let length = 4;
+		let symbol = `${raw}·${shortTypeId(token.coinType, length)}`;
+		while (used.has(symbol.toUpperCase()) && length < hex.length) {
+			length += 2;
+			symbol = `${raw}·${shortTypeId(token.coinType, length)}`;
+		}
+		used.add(symbol.toUpperCase());
+		const name = /^sui$/i.test(String(token.name || "")) ? symbol : token.name || symbol;
+		return { ...token, name, symbol };
+	});
+};
+
+const fetchBalancePage = async (address, { pageIndex, show }) => {
+	const skip = pageIndex * show;
+	const need = skip + show;
+	const collected = [];
+	let after = null;
+	let hasMore = true;
+
+	while (collected.length < need && hasMore) {
+		const first = Math.min(GRAPHQL_PAGE_MAX, need - collected.length);
+		const data = await querySuiGraphql(
+			`query SuiCoinBalances($address: SuiAddress!, $first: Int!, $after: String) {
+				address(address: $address) {
+					balances(first: $first, after: $after) {
+						pageInfo { hasNextPage endCursor }
+						nodes { ${BALANCE_FIELDS} }
+					}
+				}
+			}`,
+			{ address, first, after }
 		);
+		if (!data?.address) throw upstreamError("sui_graphql_unavailable");
+		const connection = data.address.balances || { nodes: [], pageInfo: {} };
+		const nodes = connection.nodes || [];
+		collected.push(...nodes);
+		hasMore = Boolean(connection.pageInfo?.hasNextPage) && nodes.length > 0;
+		after = connection.pageInfo?.endCursor || null;
+		if (!after) break;
+	}
 
-		// Handle empty or invalid response
-		if (!data || !data.data || !data.data.hits || !Array.isArray(data.data.hits)) {
-			return { balance: "0", total: 0, tokens: [] };
+	const tokens = collected.slice(skip, skip + show);
+	const hasNextPage = collected.length > skip + tokens.length || (tokens.length === show && hasMore);
+	return { nodes: tokens, hasNextPage };
+};
+
+const fetchSuiBalance = async (address) => {
+	const data = await querySuiGraphql(
+		`query SuiNativeBalance($address: SuiAddress!) {
+			address(address: $address) {
+				balance(coinType: "${SUI_COIN}") { ${BALANCE_FIELDS} }
+			}
+		}`,
+		{ address }
+	);
+	if (!data?.address) throw upstreamError("sui_graphql_unavailable");
+	const node = data.address.balance;
+	const human = formatCoinAmount(node?.totalBalance ?? "0", SUI_DECIMALS);
+	return { human, decimals: SUI_DECIMALS, raw: String(node?.totalBalance ?? "0") };
+};
+
+const pickChange = (node, address) => {
+	const changes = node?.effects?.balanceChanges?.nodes || [];
+	const mine = changes.filter((change) => sameAddress(change?.owner?.address, address));
+	if (!mine.length) return null;
+	const sui = mine.find((change) => isNativeSui(change?.coinType?.repr) && absBigInt(change.amount) > 0n);
+	if (sui) return sui;
+	return mine.slice().sort((left, right) => {
+		const delta = absBigInt(right?.amount) - absBigInt(left?.amount);
+		return delta > 0n ? 1 : delta < 0n ? -1 : 0;
+	})[0];
+};
+
+const fetchMetadataBatch = async (coinTypes) => {
+	const declarations = coinTypes.map((_, index) => `$t${index}: String!`).join(", ");
+	const fields = coinTypes.map((_, index) => `c${index}: coinMetadata(coinType: $t${index}) { decimals symbol name iconUrl }`).join("\n");
+	const variables = Object.fromEntries(coinTypes.map((coinType, index) => [`t${index}`, coinType]));
+	try {
+		const data = await querySuiGraphql(`query SuiCoinMeta(${declarations}) { ${fields} }`, variables);
+		return coinTypes.map((coinType, index) => ({ coinType, meta: data?.[`c${index}`] || null, rejected: false }));
+	} catch (error) {
+		console.error(isQueryRejection(error) ? "[sui] metadata_query_rejected" : "[sui] metadata_unavailable");
+		return coinTypes.map((coinType) => ({ coinType, meta: null, rejected: true }));
+	}
+};
+
+/**
+ * Coin metadata is not selected on balance or transaction queries (that blows
+ * Sui's ~21-node limit once a page touches about 8 coin types). Lookups run in
+ * batches of METADATA_BATCH, one batch at a time, and successful results are
+ * cached. A rejected batch becomes "no metadata" and is not cached.
+ */
+const fetchCoinMetadata = async (coinTypes) => {
+	const unique = [...new Set((coinTypes || []).filter(Boolean))];
+	const metadata = new Map();
+	const missing = [];
+	const now = Date.now();
+
+	for (const coinType of unique) {
+		const key = metadataKey(coinType);
+		const hit = metadataCache.get(key);
+		if (hit && hit.expiresAt > now) metadata.set(key, hit.value);
+		else missing.push(coinType);
+	}
+
+	for (let offset = 0; offset < missing.length; offset += METADATA_BATCH) {
+		const batch = missing.slice(offset, offset + METADATA_BATCH);
+		const rows = await scheduleMetadata(() => fetchMetadataBatch(batch));
+		for (const row of rows) {
+			const key = metadataKey(row.coinType);
+			if (!row.rejected) metadataCache.set(key, { value: row.meta, expiresAt: Date.now() + METADATA_TTL_MS });
+			metadata.set(key, row.meta);
 		}
+	}
 
-		function formatCryptoData(data) {
-			return data.map((item) => ({
-				_fiatBalance: item.usdValue ? item.usdValue.toString() : "0",
-				address_token: item.tokenType ? item.tokenType.split("::")[0] : "",
-				amount: item.value ? item.value.toString() : "0",
-				fiatBalance: item.usdValue || 0,
-				image: item.logoUrl || "",
-				name: item.coinName || "Unknown",
-				price: item.price ? item.price.toString() : "0",
-				symbol: item.symbol || "Unknown",
-				tokenType: item.symbol || "Unknown",
-			}));
-		}
+	return metadata;
+};
 
-		const tokens = formatCryptoData(data.data.hits);
+const withMetadata = (node, metadata) => {
+	const repr = node?.coinType?.repr || "";
+	const fetched = metadata.get(metadataKey(repr));
+	const known = suiCoin(repr);
+	const coinMetadata =
+		fetched ||
+		(known
+			? { decimals: known.decimals, name: known.native ? "Sui" : known.symbol, symbol: known.symbol, iconUrl: "" }
+			: null);
+	return { ...node, coinMetadata };
+};
+
+const mapTransactionRow = (node, address, suiPrice, metadata) => {
+	if (!node?.digest) return null;
+	const effects = node.effects || {};
+	const primary = pickChange(node, address);
+	const repr = primary?.coinType?.repr || "";
+	const native = !repr || isNativeSui(repr);
+	const meta = metadata.get(metadataKey(repr)) || null;
+	const known = suiCoin(repr);
+	const decimals = native ? SUI_DECIMALS : Number.isInteger(meta?.decimals) ? meta.decimals : Number.isInteger(known?.decimals) ? known.decimals : null;
+	const human = primary ? formatCoinAmount(primary.amount, decimals) : "0";
+	const amount = decimals == null ? human : Number(human).toFixed(6);
+	const symbol = native ? "SUI" : meta?.symbol || known?.symbol || coinSymbolFromType(repr) || "Unknown";
+	const timestamp = Date.parse(effects.timestamp);
+	const timestampMs = Number.isFinite(timestamp) ? timestamp : 0;
+	const sender = node.sender?.address || "";
+	const traffic = sameAddress(sender, address) ? "OUT" : "IN";
+	const changes = effects.balanceChanges?.nodes || [];
+	const counterparty = changes.find((change) => change?.owner?.address && !sameAddress(change.owner.address, address));
+	const summary = effects.gasEffects?.gasSummary;
+	const fee = formatCoinAmount(netGasMist(summary).toString(), SUI_DECIMALS);
+	const fiat = native ? fiatOf(human, suiPrice) : 0;
+
+	return {
+		_amount: Number(human) || 0,
+		_source: { digest: node.digest },
+		age: timestampMs ? moment(timestampMs).fromNow() : "",
+		amount,
+		asset: symbol,
+		block: effects.checkpoint?.sequenceNumber != null ? String(effects.checkpoint.sequenceNumber) : "0",
+		date: timestampMs ? moment(timestampMs).format("YYYY-MM-DD HH:mm:ss") : "",
+		fiatBalance: fiat,
+		from: sender,
+		gas: node.gasInput?.gasPrice != null ? String(node.gasInput.gasPrice) : "0",
+		hash: node.digest,
+		method: node.kind?.__typename || "",
+		status: effects.status === "FAILURE" ? "failure" : "success",
+		timestamp: timestampMs,
+		to: traffic === "OUT" ? counterparty?.owner?.address || "" : address,
+		traffic,
+		txnFee: fee,
+	};
+};
+
+const fetchTransactionPage = async (address, { pageIndex, show, cursor }) => {
+	const skip = cursor ? 0 : pageIndex * show;
+	const need = skip + show;
+	const newestFirst = [];
+	let before = cursor;
+	let hasOlder = true;
+
+	while (newestFirst.length < need && hasOlder) {
+		const last = Math.min(GRAPHQL_PAGE_MAX, need - newestFirst.length);
+		const data = await querySuiGraphql(
+			`query SuiHistory($address: SuiAddress!, $last: Int!, $before: String) {
+				transactions(last: $last, before: $before, filter: { affectedAddress: $address }) {
+					pageInfo { hasPreviousPage startCursor }
+					nodes { ${TX_NODE_FIELDS} }
+				}
+			}`,
+			{ address, last, before }
+		);
+		const connection = data?.transactions;
+		if (!connection) throw upstreamError("sui_graphql_unavailable");
+		const nodes = connection.nodes || [];
+		newestFirst.push(...[...nodes].reverse());
+		hasOlder = Boolean(connection.pageInfo?.hasPreviousPage) && nodes.length > 0;
+		before = connection.pageInfo?.startCursor || null;
+		if (!before) break;
+	}
+
+	const page = newestFirst.slice(skip, skip + show);
+	const hasNextPage = newestFirst.length > skip + page.length || (page.length === show && hasOlder);
+	return { nodes: page, hasNextPage, nextCursor: hasNextPage ? before : null };
+};
+
+const getTokens = async (params, query = {}) => {
+	const address = String(params?.id || "").trim();
+	if (!address) throw upstreamError("sui_invalid_address", 400);
+
+	try {
+		const pageIndex = pageIndexOf(query.page);
+		const show = showOf(query.show);
+		const [suiPrice, page] = await Promise.all([loadSuiPrice(), fetchBalancePage(address, { pageIndex, show })]);
+		const metadata = await fetchCoinMetadata(page.nodes.map((node) => node?.coinType?.repr));
+		const tokens = disambiguateTokenSymbols(page.nodes.map((node) => mapToken(withMetadata(node, metadata), suiPrice)));
 		const balance = tokens.reduce((sum, token) => sum + (token.fiatBalance || 0), 0);
 
 		return {
-			balance: balance.toString(),
+			balance: String(balance),
+			hasNextPage: page.hasNextPage,
 			total: tokens.length,
 			tokens,
 		};
 	} catch (error) {
-		console.error("Error in getTokens:", error.message);
-		return { balance: "0", total: 0, tokens: [] };
+		wrapUpstream(error, "sui_tokens_unavailable");
 	}
 };
 
-/**
- * get transactions list
- * @param {Object} params
- * @returns
- */
-const getTransactions = async (params, query) => {
+const getTransactions = async (params, query = {}) => {
+	const address = String(params?.id || "").trim();
+	if (!address) throw upstreamError("sui_invalid_address", 400);
+	const pageLabel = query.page ?? "0";
+	const showLabel = query.show ?? "10";
+
 	try {
-		const address = params.id;
-
-		const page = query.page;
-
-		const show = query.show;
-
-		const t = Date.now();
-
-		const { data } = await axios.get(
-			`${urlBase}/api/explorer/v2/sui/addresses/${address}/transactionsByClassfy/condition?offset=${query.page}&limit=${query.show}&address=${address}&nonzeroValue=false&t=${t}`,
-			{
-				httpsAgent: agent,
-				headers: {
-					"X-Apikey": get_ApiKey().getApiKey(),
-					"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
-				},
-			}
-		);
-
-		// Handle empty or invalid response
-		if (!data || !data.data) {
-			return {
-				pagination: { records: "0", page, show },
-				transactions: [],
-			};
-		}
-
-		const hits = data.data.hits || [];
-		const total = data.data.total || 0;
-
-		function formatCryptoData(data) {
-			const formattedTransactions = data.map((item) => ({
-				_amount: item.amount || 0,
-				_source: item,
-				age: item.timestamp ? moment(item.timestamp).fromNow() : "",
-				amount: item.amount ? Number(item.amount).toFixed(6) : "0.000000",
-				asset: "SUI",
-				block: item.checkpoint ? item.checkpoint.toString() : "0",
-				date: item.timestamp ? moment(item.timestamp).format("YYYY-MM-DD HH:mm:ss") : "",
-				fiatBalance: item.usdValue || 0,
-				from: item.from || "",
-				gas: item.gas ? item.gas.toString() : "0",
-				hash: item.hash || "",
-				method: item.method || "",
-				timestamp: item.timestamp || 0,
-				to: item.to || "",
-				traffic: item.from === address ? "OUT" : "IN",
-				txnFee: item.fee ? item.fee.toString() : "0",
-			}));
-
-			// Sort by timestamp (newest first)
-			return formattedTransactions.sort((a, b) => b.timestamp - a.timestamp);
-		}
+		const show = showOf(showLabel);
+		const cursor = typeof query.cursor === "string" && query.cursor ? query.cursor : null;
+		const pageIndex = cursor ? 0 : pageIndexOf(pageLabel);
+		const suiPrice = await loadSuiPrice();
+		const page = await fetchTransactionPage(address, { pageIndex, show, cursor });
+		const coinTypes = page.nodes.map((node) => pickChange(node, address)?.coinType?.repr).filter((type) => type && !isNativeSui(type));
+		const metadata = await fetchCoinMetadata(coinTypes);
+		const transactions = page.nodes
+			.map((node) => mapTransactionRow(node, address, suiPrice, metadata))
+			.filter(Boolean)
+			.sort((left, right) => right.timestamp - left.timestamp);
+		const records = page.hasNextPage ? String((pageIndex + 1) * show + 1) : String(pageIndex * show + transactions.length);
 
 		return {
-			pagination: { records: total.toString(), page, show },
-			transactions: formatCryptoData(hits),
+			pagination: {
+				hasNextPage: page.hasNextPage,
+				nextCursor: page.nextCursor,
+				page: String(pageLabel),
+				records,
+				show: String(showLabel),
+			},
+			transactions,
 		};
 	} catch (error) {
-		console.error("Error in getTransactions:", error.message);
-		return {
-			pagination: { records: "0", page: query.page, show: query.show },
-			transactions: [],
-		};
+		wrapUpstream(error, "sui_transactions_unavailable");
 	}
 };
 
-/**
- * get transaction status
- * @param {Object} params
- */
 const getTransaction = async (params) => {
+	const digest = String(params?.id || "").trim();
+	if (!digest) throw upstreamError("sui_invalid_transaction", 400);
+
 	try {
-		const t = Date.now();
-		const { data } = await axios.get(`${urlBase}/api/explorer/v1/sui/transactionDetail?txHash=${params.id}&t=${t}`, {
-			httpsAgent: agent,
-			headers: {
-				"X-Apikey": get_ApiKey().getApiKey(),
-				"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
-			},
+		const data = await querySuiGraphql(
+			`query SuiTransaction($digest: String!) {
+				transaction(digest: $digest) { ${TX_NODE_FIELDS} }
+			}`,
+			{ digest }
+		);
+		if (!data || !Object.prototype.hasOwnProperty.call(data, "transaction")) throw upstreamError("sui_graphql_unavailable");
+		if (!data.transaction) throw upstreamError("transaction_not_found", 404);
+
+		const node = data.transaction;
+		const sender = node.sender?.address || "";
+		const primaryType = pickChange(node, sender)?.coinType?.repr;
+		const metadata = await fetchCoinMetadata(primaryType && !isNativeSui(primaryType) ? [primaryType] : []);
+		const row = mapTransactionRow(node, sender, "0", metadata);
+		const summary = node.effects?.gasEffects?.gasSummary || {};
+		return {
+			...row,
+			computationCostFee: String(summary.computationCost ?? "0"),
+			confirmedNumber: row?.block || "0",
+			gasBudget: node.gasInput?.gasBudget != null ? String(node.gasInput.gasBudget) : "0",
+			gasPayment: "0",
+			gasPrice: node.gasInput?.gasPrice != null ? String(node.gasInput.gasPrice) : "0",
+			nonRefundableStorageFee: String(summary.nonRefundableStorageFee ?? "0"),
+			tokenTransferNum: node.effects?.balanceChanges?.nodes?.length || 0,
+			txFee: row?.txnFee || "0",
+		};
+	} catch (error) {
+		wrapUpstream(error, "sui_transaction_unavailable");
+	}
+};
+
+const getAddress = async (params) => {
+	const address = String(params?.id || "").trim();
+	if (!address) throw upstreamError("sui_invalid_address", 400);
+
+	try {
+		const suiPrice = await loadSuiPrice();
+		const suiBalance = await fetchSuiBalance(address);
+		const tokenPage = await getTokens({ id: address }, { page: "0", show: "10" }).catch((error) => {
+			console.error("[sui] tokens_unavailable", safeErrorCode(error, "sui_tokens_unavailable"));
+			return { tokens: [] };
+		});
+		const history = await getTransactions({ id: address }, { page: "0", show: "10" }).catch((error) => {
+			console.error("[sui] transactions_unavailable", safeErrorCode(error, "sui_transactions_unavailable"));
+			return { transactions: [] };
 		});
 
-		if (data.code == 404) {
-			const error = new Error("transaction_not_found");
-			error.status = 404;
-			throw error;
-		}
-		const response = {
-			_source: data.data,
-			age: moment(data.data.timestamp).fromNow(),
-			amount: data.data.amount,
-			block: data.data.height.toString(),
-			computationCostFee: data.data.computationCostFee,
-			confirmedNumber: data.data.confirmedNumber,
-			date: moment(data.data.timestamp).format("YYYY-MM-DD HH:mm:ss"),
-			from: data.data.from,
-			gasBudget: data.data.gasBudget,
-			gasPayment: data.data.gasPayment,
-			gasPrice: data.data.gasPrice,
-			hash: data.data.hash,
-			nonRefundableStorageFee: data.data.nonRefundableStorageFee,
-			status: data.data.status,
-			to: data.data.to,
-			tokenTransferNum: data.data.tokenTransferNum,
-			txFee: data.data.totalGasFee,
-		};
+		const tokens = [...(tokenPage.tokens || [])];
+		const suiIndex = tokens.findIndex((token) => token.isNative || isNativeSui(token.coinType));
+		const pricedSui = mapToken(
+			{
+				coinType: { repr: `0x${"0".repeat(63)}2::sui::SUI` },
+				totalBalance: suiBalance.raw,
+				coinMetadata: { decimals: suiBalance.decimals, name: "Sui", symbol: "SUI", iconUrl: tokens[suiIndex]?.image || "" },
+			},
+			suiPrice
+		);
+		if (suiIndex >= 0) tokens[suiIndex] = { ...tokens[suiIndex], ...pricedSui, image: tokens[suiIndex].image || pricedSui.image };
+		else tokens.unshift(pricedSui);
 
-		return response;
-	} catch (exception) {
-		const error = new Error("timeout_data_source");
-		error.status = 500;
-		throw error;
+		const fiatBalance = fiatOf(suiBalance.human, suiPrice);
+		const holdingsFiat = tokens.reduce((sum, token) => sum + (token.fiatBalance || 0), 0);
+
+		return {
+			_balance: suiBalance.human,
+			_fiatBalance: String(fiatBalance),
+			address,
+			balance: suiBalance.human,
+			fiatBalance,
+			account: {
+				asset: "SUI",
+				fiatBalance,
+				price: suiPrice,
+			},
+			tokenHoldings: {
+				balance: String(holdingsFiat),
+				total: tokens.length,
+				tokens,
+			},
+			transactions: history.transactions || [],
+		};
+	} catch (error) {
+		wrapUpstream(error, "sui_balance_unavailable");
 	}
 };
 
-const getGasTracker = async (params) => {
-	return response;
-};
 module.exports = {
+	METADATA_BATCH,
 	getAddress,
-	getTransactions,
 	getTransaction,
 	getTokens,
+	getTransactions,
+	resetSuiMetadataCache,
 };
