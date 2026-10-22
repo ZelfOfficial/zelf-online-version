@@ -38,6 +38,42 @@ const ensureStoreMasterPasswordForProtection = (body) => {
 	return masterPassword.length > 0;
 };
 
+/**
+ * Whitespace-only is an empty key password. Passwords that contain any
+ * non-whitespace character are left unchanged, including surrounding spaces.
+ */
+const blankKeyPasswordToEmpty = (value) => {
+	if (typeof value !== "string") return value;
+	return value.trim() === "" ? "" : value;
+};
+
+const optionalKeyPassword = () => string().optional().allow("").custom((value) => blankKeyPasswordToEmpty(value));
+
+const requestProtection = (body) => body?.publicData?.protection ?? body?.protection;
+
+const ensureRetrieveKeyPasswordForProtection = (body) => {
+	if (requestProtection(body) !== PROTECTION_FACE_PASSWORD) {
+		return true;
+	}
+
+	const raw = body?.masterPassword ?? body?.password;
+	const keyPassword = typeof raw === "string" ? raw.trim() : "";
+
+	return keyPassword.length > 0;
+};
+
+const applyRetrieveKeyPasswordNormalization = (body, validated) => {
+	if (!body || !validated) return;
+
+	if (typeof body.password === "string") {
+		body.password = validated.password;
+	}
+
+	if (typeof body.masterPassword === "string") {
+		body.masterPassword = validated.masterPassword;
+	}
+};
+
 const passwordCredentialSchema = {
 	alias: string().optional().allow("").max(50),
 	website: string().required(),
@@ -120,8 +156,8 @@ const schemas = {
 	retrieve: {
 		zelfProof: string().required(),
 		faceBase64: string().required(),
-		password: string().optional().allow(""),
-		masterPassword: string().optional().allow(""),
+		password: optionalKeyPassword(),
+		masterPassword: optionalKeyPassword(),
 		// Required for password/notes/cards transport encryption (enforced in the module once the
 		// stored type is known); zOTP metadata is returned as-is, so Android/iOS don't send it
 		clientPublicKey: string().optional().allow(""),
@@ -354,6 +390,13 @@ const retrieveValidation = async (ctx, next) => {
 		return;
 	}
 
+	applyRetrieveKeyPasswordNormalization(ctx.request.body, valid.value);
+
+	if (!ensureRetrieveKeyPasswordForProtection(ctx.request.body)) {
+		respondMissingMasterPassword(ctx);
+		return;
+	}
+
 	await next();
 };
 
@@ -491,6 +534,8 @@ module.exports = {
 	PROTECTION_FACE_PASSWORD,
 	BULK_PASSWORDS_MAX,
 	ensureStoreMasterPasswordForProtection,
+	ensureRetrieveKeyPasswordForProtection,
+	blankKeyPasswordToEmpty,
 	respondMissingMasterPassword,
 	passwordCredentialSchema,
 	storePasswordValidation,

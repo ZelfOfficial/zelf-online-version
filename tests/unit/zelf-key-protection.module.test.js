@@ -142,7 +142,114 @@ describe("ZelfKeys retrieve protection gating", () => {
             ),
         ).rejects.toThrow(/ERR_MISSING_PASSWORD/);
 
+        expect(TagsPartsModule.decryptParams).not.toHaveBeenCalled();
         expect(ZelfProofModule.decrypt).not.toHaveBeenCalled();
+    });
+
+    it("returns ERR_MISSING_PASSWORD for a whitespace-only zOTP retrieve password before face decrypt", async () => {
+        ZelfProofModule.preview.mockResolvedValue({
+            publicData: { protection: "face_password", type: "zotp", v: "4" },
+            passwordLayer: "WithPassword",
+        });
+
+        await expect(
+            ZelfKeyModule.retrieveData(
+                {
+                    zelfProof: "proof",
+                    faceBase64: "face",
+                    password: "   ",
+                    type: "zotp",
+                    v: "4",
+                    protection: "face",
+                },
+                authToken,
+            ),
+        ).rejects.toThrow(/ERR_MISSING_PASSWORD/);
+
+        expect(TagsPartsModule.decryptParams).not.toHaveBeenCalled();
+        expect(ZelfProofModule.decrypt).not.toHaveBeenCalled();
+    });
+
+    it("returns ERR_MISSING_PASSWORD for a whitespace-only password-record masterPassword before face decrypt", async () => {
+        ZelfProofModule.preview.mockResolvedValue({
+            publicData: { protection: "face_password", type: "password", v: "4" },
+            passwordLayer: "WithPassword",
+        });
+
+        await expect(
+            ZelfKeyModule.retrieveData(
+                {
+                    zelfProof: "proof",
+                    faceBase64: "face",
+                    masterPassword: " \t ",
+                    type: "password",
+                    v: "4",
+                },
+                authToken,
+            ),
+        ).rejects.toThrow(/ERR_MISSING_PASSWORD/);
+
+        expect(TagsPartsModule.decryptParams).not.toHaveBeenCalled();
+        expect(ZelfProofModule.decrypt).not.toHaveBeenCalled();
+    });
+
+    it("returns ERR_MISSING_PASSWORD when face_password decrypt yields a whitespace password", async () => {
+        ZelfProofModule.preview.mockResolvedValue({
+            publicData: { protection: "face_password", type: "zotp", v: "4" },
+            passwordLayer: "WithPassword",
+        });
+        TagsPartsModule.decryptParams.mockResolvedValue({
+            face: "decrypted-face",
+            password: "   ",
+        });
+
+        await expect(
+            ZelfKeyModule.retrieveData(
+                {
+                    zelfProof: "proof",
+                    faceBase64: "face",
+                    password: "session-wrapped-password",
+                    type: "zotp",
+                    v: "4",
+                },
+                authToken,
+            ),
+        ).rejects.toThrow(/ERR_MISSING_PASSWORD/);
+
+        expect(TagsPartsModule.decryptParams).toHaveBeenCalled();
+        expect(ZelfProofModule.decrypt).not.toHaveBeenCalled();
+    });
+
+    it("forwards right and wrong retrieve passwords without trimming surrounding spaces", async () => {
+        ZelfProofModule.preview.mockResolvedValue({
+            publicData: { protection: "face_password", type: "password", v: "4" },
+            passwordLayer: "WithPassword",
+        });
+        TagsPartsModule.decryptParams.mockImplementation(async (params) => ({
+            face: "decrypted-face",
+            password: params.password,
+        }));
+
+        for (const password of ["vault-password", "wrong-password", " vault "]) {
+            ZelfProofModule.decrypt.mockClear();
+
+            await ZelfKeyModule.retrieveData(
+                {
+                    zelfProof: "proof",
+                    faceBase64: "face",
+                    password,
+                    type: "zotp",
+                    v: "4",
+                },
+                authToken,
+            );
+
+            expect(ZelfProofModule.decrypt).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    password,
+                }),
+            );
+        }
     });
 
     it("forwards password for face_password keys", async () => {
