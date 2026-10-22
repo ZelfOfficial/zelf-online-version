@@ -16,7 +16,9 @@ jest.mock("../../Repositories/TxNotifications/adapters/http.util", () => {
 
 const { ProviderError, postJson } = require("../../Repositories/TxNotifications/adapters/http.util");
 const {
+	ENDPOINT_COOLDOWN_MS,
 	PUBLIC_SUI_GRAPHQL_URL,
+	RATE_LIMIT_COOLDOWN_MS,
 	querySuiGraphql,
 	resetSuiGraphqlClient,
 	suiGraphqlEndpoints,
@@ -86,6 +88,88 @@ describe("sui graphql client", () => {
 		postJson.mockClear();
 		await querySuiGraphql("query { chainIdentifier }");
 		expect(postJson.mock.calls.map((call) => call[0])).toEqual([PUBLIC_SUI_GRAPHQL_URL]);
+	});
+
+	it("retries a timed-out endpoint after the cooldown instead of leaving it dead", async () => {
+		const token = "super-secret-token";
+		process.env.SUI_RPC_URL = `https://example.quiknode.pro/${token}`;
+		const started = 1_700_000_000_000;
+		jest.useFakeTimers({ now: started });
+		jest.spyOn(console, "error").mockImplementation(() => {});
+		postJson.mockImplementation(async (url) => {
+			if (String(url).includes(token)) throw new ProviderError("sui_graphql_ETIMEDOUT");
+			return { data: { chainIdentifier: "ok" } };
+		});
+
+		try {
+			await querySuiGraphql("query { chainIdentifier }");
+			postJson.mockClear();
+			await querySuiGraphql("query { chainIdentifier }");
+			expect(postJson.mock.calls.map((call) => call[0])).toEqual([PUBLIC_SUI_GRAPHQL_URL]);
+
+			jest.setSystemTime(started + ENDPOINT_COOLDOWN_MS);
+			postJson.mockClear();
+			await querySuiGraphql("query { chainIdentifier }");
+			expect(postJson.mock.calls[0][0]).toBe(`https://example.quiknode.pro/${token}/graphql`);
+		} finally {
+			jest.useRealTimers();
+		}
+	});
+
+	it("falls through on 429 without a long cooldown", async () => {
+		const token = "super-secret-token";
+		process.env.SUI_RPC_URL = `https://example.quiknode.pro/${token}`;
+		const started = 1_700_000_000_000;
+		jest.useFakeTimers({ now: started });
+		const logs = [];
+		jest.spyOn(console, "error").mockImplementation((...args) => {
+			logs.push(args.map((part) => String(part)).join(" "));
+		});
+		postJson.mockImplementation(async (url) => {
+			if (String(url).includes(token)) throw new ProviderError("sui_graphql_http_429", { status: 429 });
+			return { data: { chainIdentifier: "public" } };
+		});
+
+		try {
+			await expect(querySuiGraphql("query { chainIdentifier }")).resolves.toEqual({ chainIdentifier: "public" });
+			expect(postJson.mock.calls.map((call) => call[0])).toEqual([
+				`https://example.quiknode.pro/${token}/graphql`,
+				PUBLIC_SUI_GRAPHQL_URL,
+			]);
+
+			postJson.mockClear();
+			await querySuiGraphql("query { chainIdentifier }");
+			expect(postJson.mock.calls.map((call) => call[0])).toEqual([PUBLIC_SUI_GRAPHQL_URL]);
+
+			jest.setSystemTime(started + RATE_LIMIT_COOLDOWN_MS);
+			postJson.mockClear();
+			await querySuiGraphql("query { chainIdentifier }");
+			expect(postJson.mock.calls[0][0]).toBe(`https://example.quiknode.pro/${token}/graphql`);
+			expect(logs.join("\n")).not.toContain(token);
+		} finally {
+			jest.useRealTimers();
+		}
+	});
+
+	it("does not fail over or cool down an endpoint when the query exceeds the node limit", async () => {
+		const token = "super-secret-token";
+		process.env.SUI_RPC_URL = `https://example.quiknode.pro/${token}`;
+		jest.spyOn(console, "error").mockImplementation(() => {});
+		postJson.mockResolvedValue({
+			errors: [{ message: "Exceeded the maximum number of output nodes (21). Please try a simpler query." }],
+		});
+
+		await expect(querySuiGraphql("query { balances { coinMetadata { decimals } } }")).rejects.toMatchObject({
+			code: "sui_graphql_query_rejected",
+			queryError: true,
+			status: 400,
+		});
+		expect(postJson).toHaveBeenCalledTimes(1);
+
+		postJson.mockClear();
+		postJson.mockResolvedValue({ data: { chainIdentifier: "back" } });
+		await expect(querySuiGraphql("query { chainIdentifier }")).resolves.toEqual({ chainIdentifier: "back" });
+		expect(postJson.mock.calls[0][0]).toBe(`https://example.quiknode.pro/${token}/graphql`);
 	});
 
 	it("throws a code-only error when every endpoint fails", async () => {

@@ -13,8 +13,13 @@ const PUBLIC_SUI_GRAPHQL_URL = "https://graphql.mainnet.sui.io/graphql";
 
 const LEGACY_JSON_RPC_HOSTS = new Set(["fullnode.mainnet.sui.io", "fullnode.testnet.sui.io", "fullnode.devnet.sui.io"]);
 
-/** Hosts that answered 404/network and should not be retried until the set is cleared. */
-const deadUrls = new Set();
+/** How long a timed-out or missing endpoint stays off the preferred path. */
+const ENDPOINT_COOLDOWN_MS = 60 * 1000;
+/** 429 is a burst, not an outage. Skip the endpoint briefly, then try it again. */
+const RATE_LIMIT_COOLDOWN_MS = 5 * 1000;
+
+/** url → timestamp (ms) when it may be tried again. */
+const cooldownUntil = new Map();
 
 const graphqlUrlFromRpc = (rpcUrl) => {
 	const raw = String(rpcUrl || "").trim();
@@ -58,23 +63,46 @@ const safeCode = (error, fallback) => {
 };
 
 /**
+ * Complexity and validation failures are a bad query, not a dead endpoint.
+ * Sui rejects selections past ~21 internal nodes ("output nodes" / complexity).
+ */
+const isQueryRejection = (errors) => {
+	const text = (errors || []).map((entry) => String(entry?.message || "")).join("\n");
+	return /complex|too many|output nodes|query nodes|maximum number of nodes|cannot query field|unknown argument|expected type|validation/i.test(text);
+};
+
+const queryRejectionError = () => {
+	const error = new ProviderError("sui_graphql_query_rejected", { status: 400, retryable: false });
+	error.queryError = true;
+	return error;
+};
+
+const cooling = (url, now = Date.now()) => (cooldownUntil.get(url) || 0) > now;
+
+const coolDown = (url, ms) => {
+	cooldownUntil.set(url, Date.now() + ms);
+};
+
+/**
  * Runs a GraphQL query. Returns the `data` object.
- * Transport failures try the next endpoint. A GraphQL `errors` payload also
- * tries the next endpoint so a provider with a stale schema does not hide the
- * public mainnet service.
+ * Timeouts and 404s skip that endpoint for ENDPOINT_COOLDOWN_MS. A 429 skips it
+ * only for RATE_LIMIT_COOLDOWN_MS and still falls through to the next endpoint.
+ * Query-limit and validation errors are thrown immediately: they are not an outage
+ * and must not fail over or cool down an endpoint.
  */
 const querySuiGraphql = async (query, variables) => {
-	let urls = suiGraphqlEndpoints().filter((url) => !deadUrls.has(url));
-	if (!urls.length) {
-		deadUrls.clear();
-		urls = suiGraphqlEndpoints();
-	}
+	let urls = suiGraphqlEndpoints().filter((url) => !cooling(url));
+	if (!urls.length) urls = suiGraphqlEndpoints();
 
 	let lastCode = "sui_graphql_unavailable";
 
 	for (const url of urls) {
 		try {
 			const body = await postJson(url, { query, variables }, { label: "sui_graphql" });
+			if (body?.errors?.length && isQueryRejection(body.errors)) {
+				console.error("[sui-graphql] query_rejected");
+				throw queryRejectionError();
+			}
 			if (!isGraphqlEnvelope(body) || body.errors?.length) {
 				lastCode = body?.errors?.length ? "sui_graphql_error" : "sui_graphql_invalid_response";
 				console.error("[sui-graphql] endpoint_failed", lastCode);
@@ -82,9 +110,11 @@ const querySuiGraphql = async (query, variables) => {
 			}
 			return body.data ?? null;
 		} catch (error) {
+			if (error?.queryError || error?.code === "sui_graphql_query_rejected") throw error;
 			lastCode = safeCode(error, "sui_graphql_unavailable");
 			const status = error?.status;
-			if (status === 404 || status === 410 || !status) deadUrls.add(url);
+			if (status === 429) coolDown(url, RATE_LIMIT_COOLDOWN_MS);
+			else if (status === 404 || status === 410 || !status) coolDown(url, ENDPOINT_COOLDOWN_MS);
 			console.error("[sui-graphql] endpoint_failed", lastCode);
 		}
 	}
@@ -93,11 +123,13 @@ const querySuiGraphql = async (query, variables) => {
 };
 
 const resetSuiGraphqlClient = () => {
-	deadUrls.clear();
+	cooldownUntil.clear();
 };
 
 module.exports = {
+	ENDPOINT_COOLDOWN_MS,
 	PUBLIC_SUI_GRAPHQL_URL,
+	RATE_LIMIT_COOLDOWN_MS,
 	graphqlUrlFromRpc,
 	querySuiGraphql,
 	resetSuiGraphqlClient,

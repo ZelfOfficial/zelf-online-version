@@ -1,5 +1,6 @@
 const moment = require("moment");
 const { getTickerPrice } = require("../../binance/modules/binance.module");
+const { suiCoin } = require("../../TxNotifications/modules/tokens");
 const { querySuiGraphql } = require("./sui-graphql.client");
 const {
 	GRAPHQL_PAGE_MAX,
@@ -28,6 +29,12 @@ const {
 
 const SUI_COIN = "0x2::sui::SUI";
 const MAX_PAGE_INDEX = 50;
+/** Sui rejects a selection past ~21 internal nodes. Five coinMetadata lookups stay under that. */
+const METADATA_BATCH = 5;
+const METADATA_TTL_MS = 15 * 60 * 1000;
+
+const metadataCache = new Map();
+let metadataQueue = Promise.resolve();
 
 const TX_NODE_FIELDS = `
 	digest
@@ -44,8 +51,7 @@ const TX_NODE_FIELDS = `
 
 const BALANCE_FIELDS = `
 	coinType { repr }
-	totalBalance
-	coinMetadata { decimals name symbol iconUrl }`;
+	totalBalance`;
 
 const pageIndexOf = (page) => {
 	const parsed = Number.parseInt(page, 10);
@@ -77,14 +83,41 @@ const fiatOf = (amount, price) => {
 	return Number((left * right).toFixed(6));
 };
 
+const metadataKey = (coinType) => shortenCoinType(coinType).toLowerCase();
+
+const safeErrorCode = (error, fallback) => (typeof error?.code === "string" && /^[a-z0-9_]+$/i.test(error.code) ? error.code : fallback);
+
+const isQueryRejection = (error) => error?.queryError === true || error?.code === "sui_graphql_query_rejected";
+
+const resetSuiMetadataCache = () => {
+	metadataCache.clear();
+	metadataQueue = Promise.resolve();
+};
+
+const scheduleMetadata = (work) => {
+	const run = metadataQueue.then(work, work);
+	metadataQueue = run.then(
+		() => undefined,
+		() => undefined
+	);
+	return run;
+};
+
 const mapToken = (node, suiPrice) => {
 	const repr = node?.coinType?.repr || "";
 	const native = isNativeSui(repr);
-	const decimals = Number.isInteger(node?.coinMetadata?.decimals) ? node.coinMetadata.decimals : native ? SUI_DECIMALS : null;
+	const known = suiCoin(repr);
+	const decimals = Number.isInteger(node?.coinMetadata?.decimals)
+		? node.coinMetadata.decimals
+		: native || known?.native
+			? SUI_DECIMALS
+			: Number.isInteger(known?.decimals)
+				? known.decimals
+				: null;
 	const amount = formatCoinAmount(node?.totalBalance ?? "0", decimals);
 	const price = native ? String(suiPrice ?? "0") : "0";
 	const fiat = fiatOf(amount, price);
-	const symbol = node?.coinMetadata?.symbol || (native ? "SUI" : coinSymbolFromType(repr) || "Unknown");
+	const symbol = node?.coinMetadata?.symbol || known?.symbol || (native ? "SUI" : coinSymbolFromType(repr) || "Unknown");
 	const name = node?.coinMetadata?.name || (native ? "Sui" : symbol);
 	const icon = node?.coinMetadata?.iconUrl || "";
 
@@ -148,9 +181,8 @@ const fetchSuiBalance = async (address) => {
 	);
 	if (!data?.address) throw upstreamError("sui_graphql_unavailable");
 	const node = data.address.balance;
-	const decimals = Number.isInteger(node?.coinMetadata?.decimals) ? node.coinMetadata.decimals : SUI_DECIMALS;
-	const human = formatCoinAmount(node?.totalBalance ?? "0", decimals);
-	return { human, decimals, raw: String(node?.totalBalance ?? "0") };
+	const human = formatCoinAmount(node?.totalBalance ?? "0", SUI_DECIMALS);
+	return { human, decimals: SUI_DECIMALS, raw: String(node?.totalBalance ?? "0") };
 };
 
 const pickChange = (node, address) => {
@@ -165,16 +197,61 @@ const pickChange = (node, address) => {
 	})[0];
 };
 
+const fetchMetadataBatch = async (coinTypes) => {
+	const declarations = coinTypes.map((_, index) => `$t${index}: String!`).join(", ");
+	const fields = coinTypes.map((_, index) => `c${index}: coinMetadata(coinType: $t${index}) { decimals symbol name iconUrl }`).join("\n");
+	const variables = Object.fromEntries(coinTypes.map((coinType, index) => [`t${index}`, coinType]));
+	try {
+		const data = await querySuiGraphql(`query SuiCoinMeta(${declarations}) { ${fields} }`, variables);
+		return coinTypes.map((coinType, index) => ({ coinType, meta: data?.[`c${index}`] || null, rejected: false }));
+	} catch (error) {
+		console.error(isQueryRejection(error) ? "[sui] metadata_query_rejected" : "[sui] metadata_unavailable");
+		return coinTypes.map((coinType) => ({ coinType, meta: null, rejected: true }));
+	}
+};
+
+/**
+ * Coin metadata is not selected on balance or transaction queries (that blows
+ * Sui's ~21-node limit once a page touches about 8 coin types). Lookups run in
+ * batches of METADATA_BATCH, one batch at a time, and successful results are
+ * cached. A rejected batch becomes "no metadata" and is not cached.
+ */
 const fetchCoinMetadata = async (coinTypes) => {
-	const unique = [...new Set(coinTypes)].slice(0, GRAPHQL_PAGE_MAX);
-	if (!unique.length) return new Map();
-	const declarations = unique.map((_, index) => `$t${index}: String!`).join(", ");
-	const fields = unique.map((_, index) => `c${index}: coinMetadata(coinType: $t${index}) { decimals symbol name }`).join("\n");
-	const variables = Object.fromEntries(unique.map((coinType, index) => [`t${index}`, coinType]));
-	const data = await querySuiGraphql(`query SuiCoinMeta(${declarations}) { ${fields} }`, variables);
+	const unique = [...new Set((coinTypes || []).filter(Boolean))];
 	const metadata = new Map();
-	unique.forEach((coinType, index) => metadata.set(coinType, data?.[`c${index}`] || null));
+	const missing = [];
+	const now = Date.now();
+
+	for (const coinType of unique) {
+		const key = metadataKey(coinType);
+		const hit = metadataCache.get(key);
+		if (hit && hit.expiresAt > now) metadata.set(key, hit.value);
+		else missing.push(coinType);
+	}
+
+	for (let offset = 0; offset < missing.length; offset += METADATA_BATCH) {
+		const batch = missing.slice(offset, offset + METADATA_BATCH);
+		const rows = await scheduleMetadata(() => fetchMetadataBatch(batch));
+		for (const row of rows) {
+			const key = metadataKey(row.coinType);
+			if (!row.rejected) metadataCache.set(key, { value: row.meta, expiresAt: Date.now() + METADATA_TTL_MS });
+			metadata.set(key, row.meta);
+		}
+	}
+
 	return metadata;
+};
+
+const withMetadata = (node, metadata) => {
+	const repr = node?.coinType?.repr || "";
+	const fetched = metadata.get(metadataKey(repr));
+	const known = suiCoin(repr);
+	const coinMetadata =
+		fetched ||
+		(known
+			? { decimals: known.decimals, name: known.native ? "Sui" : known.symbol, symbol: known.symbol, iconUrl: "" }
+			: null);
+	return { ...node, coinMetadata };
 };
 
 const mapTransactionRow = (node, address, suiPrice, metadata) => {
@@ -183,11 +260,12 @@ const mapTransactionRow = (node, address, suiPrice, metadata) => {
 	const primary = pickChange(node, address);
 	const repr = primary?.coinType?.repr || "";
 	const native = !repr || isNativeSui(repr);
-	const meta = metadata.get(repr) || null;
-	const decimals = native ? SUI_DECIMALS : Number.isInteger(meta?.decimals) ? meta.decimals : null;
+	const meta = metadata.get(metadataKey(repr)) || null;
+	const known = suiCoin(repr);
+	const decimals = native ? SUI_DECIMALS : Number.isInteger(meta?.decimals) ? meta.decimals : Number.isInteger(known?.decimals) ? known.decimals : null;
 	const human = primary ? formatCoinAmount(primary.amount, decimals) : "0";
 	const amount = decimals == null ? human : Number(human).toFixed(6);
-	const symbol = native ? "SUI" : meta?.symbol || coinSymbolFromType(repr) || "Unknown";
+	const symbol = native ? "SUI" : meta?.symbol || known?.symbol || coinSymbolFromType(repr) || "Unknown";
 	const timestamp = Date.parse(effects.timestamp);
 	const timestampMs = Number.isFinite(timestamp) ? timestamp : 0;
 	const sender = node.sender?.address || "";
@@ -259,7 +337,8 @@ const getTokens = async (params, query = {}) => {
 		const pageIndex = pageIndexOf(query.page);
 		const show = showOf(query.show);
 		const [suiPrice, page] = await Promise.all([loadSuiPrice(), fetchBalancePage(address, { pageIndex, show })]);
-		const tokens = page.nodes.map((node) => mapToken(node, suiPrice));
+		const metadata = await fetchCoinMetadata(page.nodes.map((node) => node?.coinType?.repr));
+		const tokens = page.nodes.map((node) => mapToken(withMetadata(node, metadata), suiPrice));
 		const balance = tokens.reduce((sum, token) => sum + (token.fiatBalance || 0), 0);
 
 		return {
@@ -324,7 +403,9 @@ const getTransaction = async (params) => {
 
 		const node = data.transaction;
 		const sender = node.sender?.address || "";
-		const row = mapTransactionRow(node, sender, "0", new Map());
+		const primaryType = pickChange(node, sender)?.coinType?.repr;
+		const metadata = await fetchCoinMetadata(primaryType && !isNativeSui(primaryType) ? [primaryType] : []);
+		const row = mapTransactionRow(node, sender, "0", metadata);
 		const summary = node.effects?.gasEffects?.gasSummary || {};
 		return {
 			...row,
@@ -347,12 +428,16 @@ const getAddress = async (params) => {
 	if (!address) throw upstreamError("sui_invalid_address", 400);
 
 	try {
-		const [suiPrice, suiBalance, tokenPage, history] = await Promise.all([
-			loadSuiPrice(),
-			fetchSuiBalance(address),
-			getTokens({ id: address }, { page: "0", show: "10" }),
-			getTransactions({ id: address }, { page: "0", show: "10" }),
-		]);
+		const suiPrice = await loadSuiPrice();
+		const suiBalance = await fetchSuiBalance(address);
+		const tokenPage = await getTokens({ id: address }, { page: "0", show: "10" }).catch((error) => {
+			console.error("[sui] tokens_unavailable", safeErrorCode(error, "sui_tokens_unavailable"));
+			return { tokens: [] };
+		});
+		const history = await getTransactions({ id: address }, { page: "0", show: "10" }).catch((error) => {
+			console.error("[sui] transactions_unavailable", safeErrorCode(error, "sui_transactions_unavailable"));
+			return { transactions: [] };
+		});
 
 		const tokens = [...(tokenPage.tokens || [])];
 		const suiIndex = tokens.findIndex((token) => token.symbol === "SUI" || isNativeSui(token.coinType));
@@ -394,8 +479,10 @@ const getAddress = async (params) => {
 };
 
 module.exports = {
+	METADATA_BATCH,
 	getAddress,
 	getTransaction,
 	getTokens,
 	getTransactions,
+	resetSuiMetadataCache,
 };
