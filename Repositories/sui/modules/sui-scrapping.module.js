@@ -120,20 +120,71 @@ const mapToken = (node, suiPrice) => {
 	const symbol = node?.coinMetadata?.symbol || known?.symbol || (native ? "SUI" : coinSymbolFromType(repr) || "Unknown");
 	const name = node?.coinMetadata?.name || (native ? "Sui" : symbol);
 	const icon = node?.coinMetadata?.iconUrl || "";
+	const fullType = shortenCoinType(repr);
 
 	return {
 		_fiatBalance: String(fiat),
-		address_token: native ? "0x2" : shortenCoinType(repr).split("::")[0] || "",
+		address_token: native ? "0x2" : fullType,
 		amount: String(amount),
-		coinType: shortenCoinType(repr),
+		coinType: fullType,
 		decimals,
 		fiatBalance: fiat,
 		image: icon || (native ? SUI_IMAGE : ""),
+		isNative: native,
 		name,
 		price,
-		symbol,
-		tokenType: symbol,
+		symbol: native ? "SUI" : symbol,
+		tokenType: native ? "SUI" : fullType,
 	};
+};
+
+const shortTypeId = (coinType, length) => {
+	const hex = String(coinType || "")
+		.split("::")[0]
+		.replace(/^0x/i, "");
+	return hex.slice(-length).toLowerCase() || "coin";
+};
+
+/**
+ * The extension merges holdings on symbol + tokenType. Native SUI stays symbol
+ * "SUI" / tokenType "SUI". Any other coin whose symbol is "SUI", or that shares
+ * a symbol with another row, gets a short type-id suffix so it cannot replace
+ * the native balance.
+ */
+const disambiguateTokenSymbols = (tokens) => {
+	const counts = new Map();
+	for (const token of tokens) {
+		const key = String(token.symbol || "").toUpperCase();
+		counts.set(key, (counts.get(key) || 0) + 1);
+	}
+
+	const used = new Set();
+	return tokens.map((token) => {
+		if (token.isNative || isNativeSui(token.coinType)) {
+			used.add("SUI");
+			return { ...token, isNative: true, name: "Sui", symbol: "SUI", tokenType: "SUI", address_token: "0x2" };
+		}
+
+		const raw = String(token.symbol || "Unknown");
+		const key = raw.toUpperCase();
+		if (key !== "SUI" && counts.get(key) === 1 && !used.has(key)) {
+			used.add(key);
+			return token;
+		}
+
+		const hex = String(token.coinType || "")
+			.split("::")[0]
+			.replace(/^0x/i, "");
+		let length = 4;
+		let symbol = `${raw}·${shortTypeId(token.coinType, length)}`;
+		while (used.has(symbol.toUpperCase()) && length < hex.length) {
+			length += 2;
+			symbol = `${raw}·${shortTypeId(token.coinType, length)}`;
+		}
+		used.add(symbol.toUpperCase());
+		const name = /^sui$/i.test(String(token.name || "")) ? symbol : token.name || symbol;
+		return { ...token, name, symbol };
+	});
 };
 
 const fetchBalancePage = async (address, { pageIndex, show }) => {
@@ -274,7 +325,7 @@ const mapTransactionRow = (node, address, suiPrice, metadata) => {
 	const counterparty = changes.find((change) => change?.owner?.address && !sameAddress(change.owner.address, address));
 	const summary = effects.gasEffects?.gasSummary;
 	const fee = formatCoinAmount(netGasMist(summary).toString(), SUI_DECIMALS);
-	const fiat = symbol === "SUI" ? fiatOf(human, suiPrice) : 0;
+	const fiat = native ? fiatOf(human, suiPrice) : 0;
 
 	return {
 		_amount: Number(human) || 0,
@@ -338,7 +389,7 @@ const getTokens = async (params, query = {}) => {
 		const show = showOf(query.show);
 		const [suiPrice, page] = await Promise.all([loadSuiPrice(), fetchBalancePage(address, { pageIndex, show })]);
 		const metadata = await fetchCoinMetadata(page.nodes.map((node) => node?.coinType?.repr));
-		const tokens = page.nodes.map((node) => mapToken(withMetadata(node, metadata), suiPrice));
+		const tokens = disambiguateTokenSymbols(page.nodes.map((node) => mapToken(withMetadata(node, metadata), suiPrice)));
 		const balance = tokens.reduce((sum, token) => sum + (token.fiatBalance || 0), 0);
 
 		return {
@@ -440,7 +491,7 @@ const getAddress = async (params) => {
 		});
 
 		const tokens = [...(tokenPage.tokens || [])];
-		const suiIndex = tokens.findIndex((token) => token.symbol === "SUI" || isNativeSui(token.coinType));
+		const suiIndex = tokens.findIndex((token) => token.isNative || isNativeSui(token.coinType));
 		const pricedSui = mapToken(
 			{
 				coinType: { repr: `0x${"0".repeat(63)}2::sui::SUI` },

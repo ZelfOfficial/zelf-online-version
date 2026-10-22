@@ -151,6 +151,35 @@ describe("sui graphql client", () => {
 		}
 	});
 
+	it("treats RESOURCE_EXHAUSTED as a bad query and does not fail over", async () => {
+		const token = "super-secret-token";
+		process.env.SUI_RPC_URL = `https://example.quiknode.pro/${token}`;
+		jest.spyOn(console, "error").mockImplementation(() => {});
+		postJson.mockResolvedValue({
+			errors: [{ message: "service quota exceeded", extensions: { code: "RESOURCE_EXHAUSTED" } }],
+		});
+
+		await expect(querySuiGraphql("query { balances { nodes { coinMetadata { decimals } } } }")).rejects.toMatchObject({
+			code: "sui_graphql_query_rejected",
+			queryError: true,
+			status: 400,
+		});
+		expect(postJson).toHaveBeenCalledTimes(1);
+		expect(postJson.mock.calls[0][0]).toBe(`https://example.quiknode.pro/${token}/graphql`);
+
+		postJson.mockClear();
+		postJson.mockResolvedValue({
+			errors: [{ message: "bad selection", extensions: { code: "GRAPHQL_VALIDATION_FAILED" } }],
+		});
+		await expect(querySuiGraphql("query { bad }")).rejects.toMatchObject({ code: "sui_graphql_query_rejected", queryError: true });
+		expect(postJson).toHaveBeenCalledTimes(1);
+
+		postJson.mockClear();
+		postJson.mockResolvedValue({ data: { chainIdentifier: "back" } });
+		await expect(querySuiGraphql("query { chainIdentifier }")).resolves.toEqual({ chainIdentifier: "back" });
+		expect(postJson.mock.calls[0][0]).toBe(`https://example.quiknode.pro/${token}/graphql`);
+	});
+
 	it("does not fail over or cool down an endpoint when the query exceeds the node limit", async () => {
 		const token = "super-secret-token";
 		process.env.SUI_RPC_URL = `https://example.quiknode.pro/${token}`;

@@ -295,6 +295,87 @@ describe("sui portfolio graphql", () => {
 		expect(result.tokens[2]).toMatchObject({ symbol: "C0", decimals: null, amount: "10" });
 	});
 
+	it("does not let a spam SUI coin or duplicate symbols replace native SUI", async () => {
+		const spamType = `0x${"ab".repeat(32)}::spam::SUI`;
+		const aSuiA = `0x${"11".repeat(32)}::wrapper::aSUI`;
+		const aSuiB = `0x${"22".repeat(32)}::wrapper::aSUI`;
+		const coin = (repr, raw, symbol, name, decimals) => ({
+			coinType: { repr },
+			totalBalance: raw,
+			coinMetadata: { decimals, symbol, name, iconUrl: "" },
+		});
+
+		querySuiGraphql.mockImplementation(async (text, variables) => {
+			if (text.includes("SuiNativeBalance")) {
+				return { address: { balance: { coinType: { repr: SUI_TYPE }, totalBalance: "11290000000000" } } };
+			}
+			if (text.includes("SuiCoinBalances")) {
+				return {
+					address: {
+						balances: {
+							pageInfo: { hasNextPage: false, endCursor: null },
+							nodes: [
+								coin(spamType, "299300000", "SUI", "Sui", 9),
+								coin(SUI_TYPE, "1000000000", "SUI", "Sui", 9),
+								coin(aSuiA, "1000000", "aSUI", "aSUI", 6),
+								coin(aSuiB, "2000000", "aSUI", "aSUI", 6),
+							],
+						},
+					},
+				};
+			}
+			if (text.includes("SuiCoinMeta")) {
+				const result = {};
+				for (const [key, coinType] of Object.entries(variables)) {
+					const index = key.replace(/^t/, "");
+					const type = String(coinType);
+					if (type.includes("::spam::SUI")) result[`c${index}`] = { decimals: 9, symbol: "SUI", name: "Sui", iconUrl: "" };
+					else if (type.includes("::wrapper::aSUI")) result[`c${index}`] = { decimals: 6, symbol: "aSUI", name: "aSUI", iconUrl: "" };
+					else if (type.includes("::sui::SUI")) result[`c${index}`] = { decimals: 9, symbol: "SUI", name: "Sui", iconUrl: "" };
+				}
+				return result;
+			}
+			if (text.includes("SuiHistory")) {
+				return { transactions: { pageInfo: { hasPreviousPage: false, startCursor: null }, nodes: [] } };
+			}
+			throw new Error(`unexpected query: ${text.slice(0, 40)}`);
+		});
+
+		const result = await getAddress({ id: ADDRESS });
+		const native = result.tokenHoldings.tokens.filter((token) => token.symbol === "SUI");
+		const spam = result.tokenHoldings.tokens.find((token) => token.coinType.endsWith("::spam::SUI"));
+		const duplicates = result.tokenHoldings.tokens.filter((token) => token.coinType.includes("::wrapper::aSUI"));
+
+		expect(result.balance).toBe("11290");
+		expect(result.fiatBalance).toBe(22580);
+		expect(native).toHaveLength(1);
+		expect(native[0]).toMatchObject({
+			isNative: true,
+			symbol: "SUI",
+			name: "Sui",
+			tokenType: "SUI",
+			address_token: "0x2",
+			amount: "11290",
+			price: "2",
+		});
+		expect(spam).toMatchObject({
+			isNative: false,
+			tokenType: spamType,
+			address_token: spamType,
+			coinType: spamType,
+			amount: "0.2993",
+			price: "0",
+			fiatBalance: 0,
+		});
+		expect(spam.symbol).not.toBe("SUI");
+		expect(spam.symbol.startsWith("SUI·")).toBe(true);
+		expect(spam.name).not.toBe("Sui");
+		expect(duplicates).toHaveLength(2);
+		expect(duplicates.map((token) => token.tokenType)).toEqual([aSuiA, aSuiB]);
+		expect(new Set(duplicates.map((token) => token.symbol)).size).toBe(2);
+		expect(duplicates.every((token) => token.symbol !== "aSUI" && token.isNative === false)).toBe(true);
+	});
+
 	it("returns the SUI balance when the token list and history fail", async () => {
 		querySuiGraphql.mockImplementation(async (text) => {
 			if (text.includes("SuiNativeBalance")) return { address: { balance: { coinType: { repr: SUI_TYPE }, totalBalance: "94770000000" } } };

@@ -62,14 +62,27 @@ const safeCode = (error, fallback) => {
 	return typeof code === "string" && /^[a-z0-9_]+$/i.test(code) ? code : fallback;
 };
 
+/** GraphQL `extensions.code` values that mean the query is bad, not the endpoint. */
+const QUERY_REJECTION_CODES = new Set([
+	"RESOURCE_EXHAUSTED",
+	"GRAPHQL_VALIDATION_FAILED",
+	"GRAPHQL_PARSE_FAILED",
+	"BAD_USER_INPUT",
+	"VALIDATION_ERROR",
+]);
+
 /**
  * Complexity and validation failures are a bad query, not a dead endpoint.
- * Sui rejects selections past ~21 internal nodes ("output nodes" / complexity).
+ * Sui's node limit comes back as `extensions.code = RESOURCE_EXHAUSTED`.
  */
-const isQueryRejection = (errors) => {
-	const text = (errors || []).map((entry) => String(entry?.message || "")).join("\n");
-	return /complex|too many|output nodes|query nodes|maximum number of nodes|cannot query field|unknown argument|expected type|validation/i.test(text);
-};
+const isQueryRejection = (errors) =>
+	(errors || []).some((entry) => {
+		const code = String(entry?.extensions?.code || entry?.code || "").toUpperCase();
+		if (QUERY_REJECTION_CODES.has(code)) return true;
+		return /complex|too many|output nodes|query nodes|maximum number of nodes|cannot query field|unknown argument|expected type|validation/i.test(
+			String(entry?.message || "")
+		);
+	});
 
 const queryRejectionError = () => {
 	const error = new ProviderError("sui_graphql_query_rejected", { status: 400, retryable: false });
