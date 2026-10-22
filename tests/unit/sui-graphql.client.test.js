@@ -16,6 +16,8 @@ jest.mock("../../Repositories/TxNotifications/adapters/http.util", () => {
 
 const { ProviderError, postJson } = require("../../Repositories/TxNotifications/adapters/http.util");
 const {
+	CHECKPOINT_LAG_BACKOFF_MS,
+	CHECKPOINT_LAG_RETRIES,
 	ENDPOINT_COOLDOWN_MS,
 	PUBLIC_SUI_GRAPHQL_URL,
 	RATE_LIMIT_COOLDOWN_MS,
@@ -42,6 +44,7 @@ describe("sui graphql client", () => {
 			else process.env[key] = previousEnv[key];
 		}
 		resetSuiGraphqlClient();
+		jest.useRealTimers();
 		jest.restoreAllMocks();
 	});
 
@@ -178,6 +181,91 @@ describe("sui graphql client", () => {
 		postJson.mockResolvedValue({ data: { chainIdentifier: "back" } });
 		await expect(querySuiGraphql("query { chainIdentifier }")).resolves.toEqual({ chainIdentifier: "back" });
 		expect(postJson.mock.calls[0][0]).toBe(`https://example.quiknode.pro/${token}/graphql`);
+	});
+
+	it("retries a lagging checkpoint on the same endpoint, including a client cursor", async () => {
+		const token = "super-secret-token";
+		process.env.SUI_RPC_URL = `https://example.quiknode.pro/${token}`;
+		jest.useFakeTimers();
+		jest.spyOn(console, "error").mockImplementation(() => {});
+		const cursor = "cursor-from-client";
+		let calls = 0;
+		postJson.mockImplementation(async () => {
+			calls += 1;
+			if (calls <= CHECKPOINT_LAG_RETRIES) {
+				return {
+					errors: [{ message: "Checkpoint 336708231 in the future", extensions: { code: "BAD_USER_INPUT" } }],
+				};
+			}
+			return { data: { address: { balances: { nodes: [] } } } };
+		});
+
+		try {
+			const pending = querySuiGraphql("query SuiCoinBalances($after: String)", { after: cursor, first: 50 });
+			await jest.advanceTimersByTimeAsync(CHECKPOINT_LAG_BACKOFF_MS * CHECKPOINT_LAG_RETRIES);
+			await expect(pending).resolves.toEqual({ address: { balances: { nodes: [] } } });
+
+			expect(postJson).toHaveBeenCalledTimes(CHECKPOINT_LAG_RETRIES + 1);
+			expect(postJson.mock.calls.every((call) => call[0] === `https://example.quiknode.pro/${token}/graphql`)).toBe(true);
+			expect(postJson.mock.calls.every((call) => call[1].variables.after === cursor)).toBe(true);
+		} finally {
+			jest.useRealTimers();
+		}
+	});
+
+	it("fails a lagging checkpoint over after retries without a long cooldown", async () => {
+		const token = "super-secret-token";
+		process.env.SUI_RPC_URL = `https://example.quiknode.pro/${token}`;
+		const started = 1_700_000_000_000;
+		jest.useFakeTimers({ now: started });
+		jest.spyOn(console, "error").mockImplementation(() => {});
+		postJson.mockImplementation(async (url) => {
+			if (String(url).includes(token)) {
+				return { errors: [{ message: "Checkpoint 99 in the future", extensions: { code: "BAD_USER_INPUT" } }] };
+			}
+			return { data: { transactions: { nodes: [{ digest: "ok" }] } } };
+		});
+
+		try {
+			const pending = querySuiGraphql("query SuiHistory($before: String)", { before: "page-6" });
+			await jest.advanceTimersByTimeAsync(CHECKPOINT_LAG_BACKOFF_MS * CHECKPOINT_LAG_RETRIES);
+			await expect(pending).resolves.toEqual({ transactions: { nodes: [{ digest: "ok" }] } });
+
+			const primaryCalls = postJson.mock.calls.filter((call) => String(call[0]).includes(token));
+			expect(primaryCalls).toHaveLength(CHECKPOINT_LAG_RETRIES + 1);
+			expect(postJson.mock.calls.at(-1)[0]).toBe(PUBLIC_SUI_GRAPHQL_URL);
+
+			postJson.mockClear();
+			const skipped = querySuiGraphql("query { chainIdentifier }");
+			await jest.advanceTimersByTimeAsync(0);
+			await expect(skipped).resolves.toEqual({ transactions: { nodes: [{ digest: "ok" }] } });
+			expect(postJson.mock.calls.map((call) => call[0])).toEqual([PUBLIC_SUI_GRAPHQL_URL]);
+
+			jest.setSystemTime(Date.now() + RATE_LIMIT_COOLDOWN_MS);
+			postJson.mockClear();
+			const again = querySuiGraphql("query { chainIdentifier }");
+			await jest.advanceTimersByTimeAsync(CHECKPOINT_LAG_BACKOFF_MS * CHECKPOINT_LAG_RETRIES);
+			await again;
+			expect(String(postJson.mock.calls[0][0])).toBe(`https://example.quiknode.pro/${token}/graphql`);
+			expect(Date.now() - started).toBeLessThan(ENDPOINT_COOLDOWN_MS);
+		} finally {
+			jest.useRealTimers();
+		}
+	});
+
+	it("still refuses a genuine BAD_USER_INPUT without retrying or failing over", async () => {
+		const token = "super-secret-token";
+		process.env.SUI_RPC_URL = `https://example.quiknode.pro/${token}`;
+		jest.spyOn(console, "error").mockImplementation(() => {});
+		postJson.mockResolvedValue({
+			errors: [{ message: "Variable \"$after\" got invalid value.", extensions: { code: "BAD_USER_INPUT" } }],
+		});
+
+		await expect(querySuiGraphql("query { x }", { after: "not-a-cursor" })).rejects.toMatchObject({
+			code: "sui_graphql_query_rejected",
+			queryError: true,
+		});
+		expect(postJson).toHaveBeenCalledTimes(1);
 	});
 
 	it("does not fail over or cool down an endpoint when the query exceeds the node limit", async () => {

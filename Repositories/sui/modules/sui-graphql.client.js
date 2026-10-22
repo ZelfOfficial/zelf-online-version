@@ -17,6 +17,13 @@ const LEGACY_JSON_RPC_HOSTS = new Set(["fullnode.mainnet.sui.io", "fullnode.test
 const ENDPOINT_COOLDOWN_MS = 60 * 1000;
 /** 429 is a burst, not an outage. Skip the endpoint briefly, then try it again. */
 const RATE_LIMIT_COOLDOWN_MS = 5 * 1000;
+/**
+ * QuickNode's pool can answer a cursor page with BAD_USER_INPUT
+ * "Checkpoint N in the future" when one backend is behind another.
+ * Retry that endpoint, then fail over. Do not park it for the long cooldown.
+ */
+const CHECKPOINT_LAG_RETRIES = 2;
+const CHECKPOINT_LAG_BACKOFF_MS = 300;
 
 /** url → timestamp (ms) when it may be tried again. */
 const cooldownUntil = new Map();
@@ -63,26 +70,29 @@ const safeCode = (error, fallback) => {
 };
 
 /** GraphQL `extensions.code` values that mean the query is bad, not the endpoint. */
-const QUERY_REJECTION_CODES = new Set([
-	"RESOURCE_EXHAUSTED",
-	"GRAPHQL_VALIDATION_FAILED",
-	"GRAPHQL_PARSE_FAILED",
-	"BAD_USER_INPUT",
-	"VALIDATION_ERROR",
-]);
+const QUERY_REJECTION_CODES = new Set(["RESOURCE_EXHAUSTED", "GRAPHQL_VALIDATION_FAILED", "GRAPHQL_PARSE_FAILED", "VALIDATION_ERROR"]);
+
+/** A cursor page landed on a backend that has not reached that checkpoint yet. */
+const isCheckpointLag = (errors) =>
+	(errors || []).some((entry) => /checkpoint\s+\S+\s+in the future/i.test(String(entry?.message || "")));
 
 /**
  * Complexity and validation failures are a bad query, not a dead endpoint.
  * Sui's node limit comes back as `extensions.code = RESOURCE_EXHAUSTED`.
+ * Plain `BAD_USER_INPUT` is a bad query too, except the checkpoint-lag message,
+ * which is handled separately.
  */
 const isQueryRejection = (errors) =>
 	(errors || []).some((entry) => {
+		if (isCheckpointLag([entry])) return false;
 		const code = String(entry?.extensions?.code || entry?.code || "").toUpperCase();
-		if (QUERY_REJECTION_CODES.has(code)) return true;
+		if (code === "BAD_USER_INPUT" || QUERY_REJECTION_CODES.has(code)) return true;
 		return /complex|too many|output nodes|query nodes|maximum number of nodes|cannot query field|unknown argument|expected type|validation/i.test(
 			String(entry?.message || "")
 		);
 	});
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const queryRejectionError = () => {
 	const error = new ProviderError("sui_graphql_query_rejected", { status: 400, retryable: false });
@@ -102,6 +112,9 @@ const coolDown = (url, ms) => {
  * only for RATE_LIMIT_COOLDOWN_MS and still falls through to the next endpoint.
  * Query-limit and validation errors are thrown immediately: they are not an outage
  * and must not fail over or cool down an endpoint.
+ * "Checkpoint N in the future" is retried on the same endpoint, then the next
+ * endpoint is tried. Tokens, history, and RPC paging all go through here, so a
+ * cursor from the client gets the same treatment.
  */
 const querySuiGraphql = async (query, variables) => {
 	let urls = suiGraphqlEndpoints().filter((url) => !cooling(url));
@@ -110,25 +123,45 @@ const querySuiGraphql = async (query, variables) => {
 	let lastCode = "sui_graphql_unavailable";
 
 	for (const url of urls) {
-		try {
-			const body = await postJson(url, { query, variables }, { label: "sui_graphql" });
-			if (body?.errors?.length && isQueryRejection(body.errors)) {
-				console.error("[sui-graphql] query_rejected");
-				throw queryRejectionError();
-			}
-			if (!isGraphqlEnvelope(body) || body.errors?.length) {
-				lastCode = body?.errors?.length ? "sui_graphql_error" : "sui_graphql_invalid_response";
+		let lagRetries = 0;
+		let nextEndpoint = false;
+
+		while (!nextEndpoint) {
+			try {
+				const body = await postJson(url, { query, variables }, { label: "sui_graphql" });
+				if (body?.errors?.length && isCheckpointLag(body.errors)) {
+					if (lagRetries < CHECKPOINT_LAG_RETRIES) {
+						lagRetries += 1;
+						console.error("[sui-graphql] checkpoint_lag_retry");
+						await sleep(CHECKPOINT_LAG_BACKOFF_MS);
+						continue;
+					}
+					lastCode = "sui_graphql_checkpoint_lag";
+					coolDown(url, RATE_LIMIT_COOLDOWN_MS);
+					console.error("[sui-graphql] checkpoint_lag");
+					nextEndpoint = true;
+					break;
+				}
+				if (body?.errors?.length && isQueryRejection(body.errors)) {
+					console.error("[sui-graphql] query_rejected");
+					throw queryRejectionError();
+				}
+				if (!isGraphqlEnvelope(body) || body.errors?.length) {
+					lastCode = body?.errors?.length ? "sui_graphql_error" : "sui_graphql_invalid_response";
+					console.error("[sui-graphql] endpoint_failed", lastCode);
+					nextEndpoint = true;
+					break;
+				}
+				return body.data ?? null;
+			} catch (error) {
+				if (error?.queryError || error?.code === "sui_graphql_query_rejected") throw error;
+				lastCode = safeCode(error, "sui_graphql_unavailable");
+				const status = error?.status;
+				if (status === 429) coolDown(url, RATE_LIMIT_COOLDOWN_MS);
+				else if (status === 404 || status === 410 || !status) coolDown(url, ENDPOINT_COOLDOWN_MS);
 				console.error("[sui-graphql] endpoint_failed", lastCode);
-				continue;
+				nextEndpoint = true;
 			}
-			return body.data ?? null;
-		} catch (error) {
-			if (error?.queryError || error?.code === "sui_graphql_query_rejected") throw error;
-			lastCode = safeCode(error, "sui_graphql_unavailable");
-			const status = error?.status;
-			if (status === 429) coolDown(url, RATE_LIMIT_COOLDOWN_MS);
-			else if (status === 404 || status === 410 || !status) coolDown(url, ENDPOINT_COOLDOWN_MS);
-			console.error("[sui-graphql] endpoint_failed", lastCode);
 		}
 	}
 
@@ -140,6 +173,8 @@ const resetSuiGraphqlClient = () => {
 };
 
 module.exports = {
+	CHECKPOINT_LAG_BACKOFF_MS,
+	CHECKPOINT_LAG_RETRIES,
 	ENDPOINT_COOLDOWN_MS,
 	PUBLIC_SUI_GRAPHQL_URL,
 	RATE_LIMIT_COOLDOWN_MS,
