@@ -89,6 +89,12 @@ const normalizeOptionalString = (value) => {
     return trimmed || undefined;
 };
 
+/** True when a key-layer password is absent or only whitespace. Non-blank passwords are not trimmed. */
+const isBlankKeyPassword = (value) => {
+    if (typeof value !== "string") return !value;
+    return value.trim() === "";
+};
+
 /**
  * Zelf ID password for ownership (decryptTag). Extension v4 often sends `masterPassword`;
  * site password on password-store rows stays in `password` and must not be used here.
@@ -691,7 +697,15 @@ const retrieveData = async (data, authToken) => {
 
     const protection = await resolveRetrieveProtection(data);
 
+    if (protectionRequiresKeyPassword(protection) && isBlankKeyPassword(resolveKeyPasswordInput(data))) {
+        throw new Error("400:ERR_MISSING_PASSWORD");
+    }
+
     decryptedParams = await decryptKeyCredentials(data, authToken);
+
+    if (isBlankKeyPassword(decryptedParams?.password)) {
+        decryptedParams.password = undefined;
+    }
 
     if (protectionRequiresKeyPassword(protection)) {
         if (!decryptedParams.password) {
