@@ -1,6 +1,7 @@
 /**
- * RPC proxy: POST /api/rpc/sui — standard JSON-RPC (no JWT); IP-based RPCCaller limits.
- * Prerequisites: API running (e.g. PORT=3003 npm start), MongoDB, Sui upstream reachable (default mainnet fullnode or SUI_RPC_URL).
+ * RPC proxy: POST /api/rpc/sui — JSON-RPC body, answered from Sui GraphQL (no JWT).
+ * Prerequisites: API running (e.g. PORT=3003 npm start), MongoDB, Sui GraphQL reachable
+ * (`${SUI_RPC_URL}/graphql` or the public mainnet endpoint).
  */
 const path = require("path");
 const request = require("supertest");

@@ -6,9 +6,12 @@ jest.mock("../../Repositories/binance/modules/binance.module", () => ({
 jest.mock("../../Repositories/Solana/modules/oklink", () => ({
     get_ApiKey: () => ({ getApiKey: () => "test-key" }),
 }));
+jest.mock("../../Repositories/sui/modules/sui-graphql.client", () => ({
+    querySuiGraphql: jest.fn(),
+}));
 
-const axios = require("axios");
 const { tonApiGet } = require("../../Repositories/TON/modules/ton-api.client");
+const { querySuiGraphql } = require("../../Repositories/sui/modules/sui-graphql.client");
 const SuiModule = require("../../Repositories/sui/modules/sui-scrapping.module");
 const TonModule = require("../../Repositories/TON/modules/ton-scrapping.module");
 
@@ -17,27 +20,27 @@ describe("chain tokens endpoint payload shape", () => {
         jest.clearAllMocks();
     });
 
-    it("sui getTokens returns { balance, total, tokens } even when upstream is empty", async () => {
-        axios.get.mockResolvedValue({ data: { data: { hits: [] } } });
+    it("sui getTokens returns { balance, total, tokens } even when the address has no coins", async () => {
+        querySuiGraphql.mockResolvedValue({
+            address: { balances: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } },
+        });
 
         const result = await SuiModule.getTokens({ id: "0xabc" }, { page: "0", show: "10" });
 
-        expect(result).toEqual({ balance: "0", total: 0, tokens: [] });
+        expect(result).toMatchObject({ balance: "0", total: 0, tokens: [] });
+        expect(Array.isArray(result.tokens)).toBe(true);
     });
 
-    it("sui getTokens maps upstream hits into tokens array", async () => {
-        axios.get.mockResolvedValue({
-            data: {
-                data: {
-                    hits: [
+    it("sui getTokens maps GraphQL coin balances into tokens array", async () => {
+        querySuiGraphql.mockResolvedValue({
+            address: {
+                balances: {
+                    pageInfo: { hasNextPage: false, endCursor: null },
+                    nodes: [
                         {
-                            usdValue: 2,
-                            tokenType: "0x2::sui::SUI",
-                            value: 1,
-                            logoUrl: "https://example.com/sui.png",
-                            coinName: "Sui",
-                            price: 2,
-                            symbol: "SUI",
+                            coinType: { repr: "0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI" },
+                            totalBalance: "1000000000",
+                            coinMetadata: { decimals: 9, name: "Sui", symbol: "SUI", iconUrl: "https://example.com/sui.png" },
                         },
                     ],
                 },
@@ -49,6 +52,8 @@ describe("chain tokens endpoint payload shape", () => {
         expect(Array.isArray(result.tokens)).toBe(true);
         expect(result.total).toBe(1);
         expect(result.tokens[0].symbol).toBe("SUI");
+        expect(result.tokens[0].decimals).toBe(9);
+        expect(result.tokens[0].amount).toBe("1");
     });
 
     it("ton getTokens returns { balance, total, tokens }", async () => {

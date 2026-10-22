@@ -2,6 +2,7 @@ const config = require("../../../Core/config");
 const { getCleanInstance } = require("../../../Core/axios");
 const RpcLog = require("../models/rpc-log.model");
 const RpcCallerModule = require("../../RPCCaller/modules/rpc-caller.module");
+const { translateSuiJsonRpc } = require("../../sui/modules/sui-jsonrpc.module");
 
 const instance = getCleanInstance(config.rpc?.timeoutMs || 15000);
 
@@ -167,6 +168,22 @@ const forwardRequest = async ({ chain, chainId, method, params = [], origin, pur
     }
 
     try {
+        if (resolvedChain.key === "sui") {
+            const result = await translateSuiJsonRpc(upstreamMethod, normalizedParams);
+            persistRpcAudit({
+                ...logContext,
+                success: true,
+                httpStatus: 200,
+            });
+            return {
+                chain: resolvedChain.key,
+                chainId: resolvedChain.chainId,
+                method: upstreamMethod,
+                result: result ?? null,
+                upstreamId: rpcId ?? 1,
+            };
+        }
+
         const { data } = await instance.post(
             resolvedChain.rpcUrl,
             {
