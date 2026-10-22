@@ -9,6 +9,7 @@ describe("ZelfKeys protection middleware", () => {
                     username: "user@example.com",
                     password: "secret",
                     faceBase64: "face",
+                    masterPassword: "vault-password",
                     protection: "face_password",
                 },
             },
@@ -21,6 +22,29 @@ describe("ZelfKeys protection middleware", () => {
 
         expect(nextCalled).toBe(true);
         expect(ctx.status).toBeUndefined();
+    });
+
+    it("returns ERR_MISSING_PASSWORD for face_password store without masterPassword", async () => {
+        const ctx = {
+            request: {
+                body: {
+                    website: "https://example.com",
+                    username: "user@example.com",
+                    password: "secret",
+                    faceBase64: "face",
+                    protection: "face_password",
+                },
+            },
+        };
+        let nextCalled = false;
+
+        await Middleware.storePasswordValidation(ctx, async () => {
+            nextCalled = true;
+        });
+
+        expect(nextCalled).toBe(false);
+        expect(ctx.status).toBe(400);
+        expect(ctx.body).toEqual({ message: "ERR_MISSING_PASSWORD", code: "ERR_MISSING_PASSWORD" });
     });
 
     it("rejects unknown protection values on store password", async () => {

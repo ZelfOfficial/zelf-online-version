@@ -21,6 +21,23 @@ const BULK_PASSWORDS_MAX = 100;
 
 const protectionField = stringEnum(PROTECTION_MODES).optional();
 
+const respondMissingMasterPassword = (ctx) => {
+	ctx.status = 400;
+	ctx.body = { message: "ERR_MISSING_PASSWORD", code: "ERR_MISSING_PASSWORD" };
+};
+
+const ensureStoreMasterPasswordForProtection = (body) => {
+	const protection = body?.protection === PROTECTION_FACE_PASSWORD ? PROTECTION_FACE_PASSWORD : PROTECTION_FACE;
+
+	if (protection !== PROTECTION_FACE_PASSWORD) {
+		return true;
+	}
+
+	const masterPassword = typeof body?.masterPassword === "string" ? body.masterPassword.trim() : "";
+
+	return masterPassword.length > 0;
+};
+
 const passwordCredentialSchema = {
 	alias: string().optional().allow("").max(50),
 	website: string().required(),
@@ -163,6 +180,11 @@ const storePasswordValidation = async (ctx, next) => {
 		return;
 	}
 
+	if (!ensureStoreMasterPasswordForProtection(ctx.request.body)) {
+		respondMissingMasterPassword(ctx);
+		return;
+	}
+
 	await next();
 };
 
@@ -175,6 +197,11 @@ const storePasswordsBulkValidation = async (ctx, next) => {
 	if (valid.error) {
 		ctx.status = 409;
 		ctx.body = { validationError: valid.error.message };
+		return;
+	}
+
+	if (!ensureStoreMasterPasswordForProtection(ctx.request.body)) {
+		respondMissingMasterPassword(ctx);
 		return;
 	}
 
@@ -218,6 +245,11 @@ const storeZOTPValidation = async (ctx, next) => {
 	ctx.request.body.digits = totpParams.digits;
 	ctx.request.body.period = totpParams.period;
 
+	if (!ensureStoreMasterPasswordForProtection(ctx.request.body)) {
+		respondMissingMasterPassword(ctx);
+		return;
+	}
+
 	await next();
 };
 
@@ -230,6 +262,11 @@ const storeNotesValidation = async (ctx, next) => {
 	if (valid.error) {
 		ctx.status = 409;
 		ctx.body = { validationError: valid.error.message };
+		return;
+	}
+
+	if (!ensureStoreMasterPasswordForProtection(ctx.request.body)) {
+		respondMissingMasterPassword(ctx);
 		return;
 	}
 
@@ -281,6 +318,11 @@ const storeCreditCardValidation = async (ctx, next) => {
 	if (valid.error) {
 		ctx.status = 409;
 		ctx.body = { validationError: valid.error.message };
+		return;
+	}
+
+	if (!ensureStoreMasterPasswordForProtection(ctx.request.body)) {
+		respondMissingMasterPassword(ctx);
 		return;
 	}
 
@@ -448,6 +490,8 @@ module.exports = {
 	PROTECTION_FACE,
 	PROTECTION_FACE_PASSWORD,
 	BULK_PASSWORDS_MAX,
+	ensureStoreMasterPasswordForProtection,
+	respondMissingMasterPassword,
 	passwordCredentialSchema,
 	storePasswordValidation,
 	storePasswordsBulkValidation,

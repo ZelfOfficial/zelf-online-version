@@ -40,6 +40,7 @@ const SUPPORTED_CATEGORIES = ["password", "notes", "credit_card", "contact", "zo
 
 const ZELF_KEY_CLIENT_ERROR_STATUS = {
     ...ZELFPROOF_CLIENT_ERROR_STATUS,
+    ERR_MISSING_PASSWORD: 400,
 };
 
 const throwZelfKeyClientError = (code) => {
@@ -192,7 +193,7 @@ const resolveRetrieveProtection = async (data) => {
 
 const assertProtectionStoreRules = (protection, keyPassword) => {
     if (protectionRequiresKeyPassword(protection) && !keyPassword) {
-        throw new Error("409:master_password_required_for_face_password_protection");
+        throw new Error("400:ERR_MISSING_PASSWORD");
     }
 };
 
@@ -490,6 +491,9 @@ const storeData = async (data, authToken) => {
     try {
         const { type, domain } = data;
 
+        const protectionHint = resolveProtection(data.protection);
+        assertProtectionStoreRules(protectionHint, normalizeOptionalString(resolveStoreKeyPassword(data)));
+
         const decryptedParams = await decryptKeyCredentials(data, authToken, { store: true });
 
         let decryptedSensitiveData = {};
@@ -608,6 +612,9 @@ const _storePasswordRecord = async (itemData, authToken, sharedContext, identifi
 const storePasswordsBulk = async (data, authToken) => {
     const { faceBase64, removePGP, passwords } = data;
 
+    const batchProtectionHint = resolveProtection(data.protection);
+    assertProtectionStoreRules(batchProtectionHint, normalizeOptionalString(resolveStoreKeyPassword(data)));
+
     const decryptedParams = await decryptKeyCredentials({ faceBase64, removePGP, ...data }, authToken);
 
     await _validateOwnership(faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
@@ -688,7 +695,7 @@ const retrieveData = async (data, authToken) => {
 
     if (protectionRequiresKeyPassword(protection)) {
         if (!decryptedParams.password) {
-            throw new Error("409:ERR_PASSWORD_REQUIRED");
+            throw new Error("400:ERR_MISSING_PASSWORD");
         }
     } else {
         decryptedParams.password = undefined;

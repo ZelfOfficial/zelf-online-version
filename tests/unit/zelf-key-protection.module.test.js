@@ -140,7 +140,7 @@ describe("ZelfKeys retrieve protection gating", () => {
                 },
                 authToken,
             ),
-        ).rejects.toThrow(/ERR_PASSWORD_REQUIRED/);
+        ).rejects.toThrow(/ERR_MISSING_PASSWORD/);
 
         expect(ZelfProofModule.decrypt).not.toHaveBeenCalled();
     });
@@ -259,9 +259,10 @@ describe("ZelfKeys store protection", () => {
                 },
                 authToken,
             ),
-        ).rejects.toThrow(/master_password_required_for_face_password_protection/);
+        ).rejects.toThrow(/ERR_MISSING_PASSWORD/);
 
         expect(ZelfProofModule.encrypt).not.toHaveBeenCalled();
+        expect(TagsPartsModule.decryptParams).not.toHaveBeenCalled();
     });
 
     it("face-only password store does not treat the stored site password as the Zelf ID password", async () => {

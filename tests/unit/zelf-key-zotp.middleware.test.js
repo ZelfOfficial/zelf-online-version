@@ -66,6 +66,45 @@ describe("ZelfKeys store ZOTP middleware", () => {
         expect(ctx.body.validationError).toMatch(/digits/i);
     });
 
+    it("returns ERR_MISSING_PASSWORD for face_password without masterPassword after TOTP validation", async () => {
+        const ctx = {
+            request: {
+                body: {
+                    ...basePayload,
+                    protection: "face_password",
+                    masterPassword: "",
+                },
+            },
+        };
+        let nextCalled = false;
+
+        await Middleware.storeZOTPValidation(ctx, async () => {
+            nextCalled = true;
+        });
+
+        expect(nextCalled).toBe(false);
+        expect(ctx.status).toBe(400);
+        expect(ctx.body.code).toBe("ERR_MISSING_PASSWORD");
+        expect(ctx.body.message).toBe("ERR_MISSING_PASSWORD");
+    });
+
+    it("still validates setup key before missing master password", async () => {
+        const ctx = {
+            request: {
+                body: {
+                    ...basePayload,
+                    setupKey: "not-valid-base32!",
+                    protection: "face_password",
+                },
+            },
+        };
+
+        await Middleware.storeZOTPValidation(ctx, async () => {});
+
+        expect(ctx.status).toBe(409);
+        expect(ctx.body.code).toBe("ERR_INVALID_SETUP_KEY");
+    });
+
     it("accepts custom TOTP parameters", async () => {
         const ctx = {
             request: {
