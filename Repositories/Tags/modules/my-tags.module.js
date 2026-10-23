@@ -972,7 +972,7 @@ const _calculateReferralRewardAmount = (friendRecord, domainConfig, rewardType =
         tagPrice = priceResult?.price ?? 0;
     }
 
-    const znsPrice = config.token?.rewardPrice || 0.05; // Cents per ZNS
+    const znsPrice = config.getTokenPriceUsd(); // USD per ZNS token
     let rewardAmount = 0;
 
     if (tagPrice > 0) {
