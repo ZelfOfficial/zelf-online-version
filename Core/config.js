@@ -43,10 +43,41 @@ const ARWEAVE_DEFAULT_GRAPHQL_GATEWAYS = [
 const ARWEAVE_DEFAULT_ARNS_GATEWAY_HOSTS = ["ar.io", "arweave.net", "ar-io.dev"];
 const ARWEAVE_DEFAULT_ARNS_GATEWAY_HOST = ARWEAVE_DEFAULT_ARNS_GATEWAY_HOSTS[0];
 
-/** Positive finite float from env; otherwise `fallback` (for USD rates and REWARD_PRICE). */
+/** Positive finite float from env; otherwise `fallback` (for USD rates such as TOKEN_PRICE_USD). */
 const parsePositiveFloat = (value, fallback) => {
     const n = parseFloat(value);
     return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+/**
+ * USD price of one ZNS token. Presale, rewards, and subscription grants all use this rate.
+ * Default matches the historical hard-coded presale and reward price.
+ */
+const DEFAULT_TOKEN_PRICE_USD = 0.05;
+
+/**
+ * Resolve the single ZNS token USD price from the environment.
+ * TOKEN_PRICE_USD is canonical. REWARD_PRICE is a legacy alias used only when
+ * TOKEN_PRICE_USD is unset or blank, so existing deployments keep their rate.
+ * A non-blank TOKEN_PRICE_USD always wins, including over REWARD_PRICE.
+ * Non-positive or non-numeric values fall back to DEFAULT_TOKEN_PRICE_USD.
+ */
+const resolveTokenPriceUsd = (env = process.env) => {
+    const canonical = env.TOKEN_PRICE_USD;
+    const hasCanonical = canonical !== undefined && String(canonical).trim() !== "";
+    return parsePositiveFloat(hasCanonical ? canonical : env.REWARD_PRICE, DEFAULT_TOKEN_PRICE_USD);
+};
+
+let tokenPriceUsd = resolveTokenPriceUsd();
+
+/**
+ * Positive USD price used to convert dollars into ZNS.
+ * Invalid runtime values use DEFAULT_TOKEN_PRICE_USD so callers do not divide by zero.
+ * Subscription grant payouts still read `token.rewardPrice` directly and skip when it is invalid.
+ */
+const getTokenPriceUsd = () => {
+    const price = Number(tokenPriceUsd);
+    return Number.isFinite(price) && price > 0 ? price : DEFAULT_TOKEN_PRICE_USD;
 };
 
 const configuration = {
@@ -123,7 +154,20 @@ const configuration = {
         pathPrefix: process.env.ZELF_PROOF_V4_PATH_PREFIX || "/zelf-v4",
     },
     token: {
-        rewardPrice: parsePositiveFloat(process.env.REWARD_PRICE, 0.05),
+        /** Same number as rewardPrice. Canonical name for the ZNS USD price. */
+        get priceUsd() {
+            return tokenPriceUsd;
+        },
+        set priceUsd(value) {
+            tokenPriceUsd = value;
+        },
+        /** Legacy alias of priceUsd. Rewards and subscription grants already read this. */
+        get rewardPrice() {
+            return tokenPriceUsd;
+        },
+        set rewardPrice(value) {
+            tokenPriceUsd = value;
+        },
         whitelist: process.env.WHITELIST || "",
         priceEnv: process.env.PRICE_ENV || "production",
     },
@@ -849,17 +893,18 @@ const configuration = {
 };
 
 /**
- * JSON for GET /api/subscription-plans (`pricingMeta`). Token counts use ceil(usd / rewardPrice).
+ * JSON for GET /api/subscription-plans (`pricingMeta`). Token counts use ceil(usd / token price).
+ * `rewardPrice` and `tokenPriceUsd` are the same ZNS USD price.
  */
 const buildSubscriptionPricingMeta = () => {
-    const rp = Number(configuration.token.rewardPrice);
-    const rewardPrice = Number.isFinite(rp) && rp > 0 ? rp : 0.05;
+    const rewardPrice = getTokenPriceUsd();
     const sp = configuration.subscriptionPricing;
     const ceilTok = (usd) => Math.ceil(Number(usd) / rewardPrice);
     const fmt = (n) => (Number.isFinite(Number(n)) ? Number(n).toFixed(2) : String(n));
 
     return {
         rewardPrice,
+        tokenPriceUsd: rewardPrice,
         rewardPriceFormatted: fmt(rewardPrice),
         encryptUsd: sp.encryptUsd,
         encryptUsdFormatted: fmt(sp.encryptUsd),
@@ -879,3 +924,6 @@ const buildSubscriptionPricingMeta = () => {
 
 module.exports = configuration;
 module.exports.buildSubscriptionPricingMeta = buildSubscriptionPricingMeta;
+module.exports.DEFAULT_TOKEN_PRICE_USD = DEFAULT_TOKEN_PRICE_USD;
+module.exports.getTokenPriceUsd = getTokenPriceUsd;
+module.exports.resolveTokenPriceUsd = resolveTokenPriceUsd;

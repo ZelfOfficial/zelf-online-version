@@ -68,35 +68,8 @@ const sendReceiptEmail = async ({ email, amount, tokens, transactionId, date }) 
 // Initialize Stripe with the secret key from config
 const stripe = Stripe(config.stripe.secretKey);
 
-// Configuration for Pre-Sale
-const PRESALE_CONFIG = {
-    tokenPrice: 0.05, // USD per token
-    bonusTiers: [
-        { minAmount: 1000, bonus: 0.5, label: "50% BONUS" },
-        { minAmount: 500, bonus: 0.25, label: "25% BONUS" },
-        { minAmount: 100, bonus: 0.1, label: "10% BONUS" },
-        { minAmount: 0, bonus: 0, label: "NO BONUS" },
-    ],
-};
-
-const getBonusTier = (amount) => {
-    return PRESALE_CONFIG.bonusTiers.find((tier) => amount >= tier.minAmount) || PRESALE_CONFIG.bonusTiers[PRESALE_CONFIG.bonusTiers.length - 1];
-};
-
 const { getPresaleLicenseExtensionYears } = require("./presale-license.util");
-
-const calculateTokens = (usdAmount) => {
-    const tier = getBonusTier(usdAmount);
-    const baseTokens = usdAmount / PRESALE_CONFIG.tokenPrice;
-    const bonusTokens = baseTokens * tier.bonus;
-
-    return {
-        baseTokens,
-        bonusTokens,
-        totalTokens: baseTokens + bonusTokens,
-        bonusPercentage: tier.bonus * 100,
-    };
-};
+const { calculateTokens, getPresaleInfo } = require("./presale-pricing.util");
 
 /**
  * Create a Stripe Checkout Session for ZNS Token Pre-Sale
@@ -112,7 +85,7 @@ const createStripeSession = async ({ amount, email, zelfName, solanaAddress }) =
         const frontendUrl = config.landingUrl;
 
         // Calculate tokens server-side for security
-        const { totalTokens, bonusPercentage } = calculateTokens(amount);
+        const { totalTokens, bonusPercentage, tokenPriceUsd } = calculateTokens(amount);
 
         const session = await stripe.checkout.sessions.create({
             payment_method_types: ["card"],
@@ -150,6 +123,7 @@ const createStripeSession = async ({ amount, email, zelfName, solanaAddress }) =
                 amount,
                 tokens: totalTokens,
                 bonus: bonusPercentage,
+                tokenPriceUsd,
             },
         };
     } catch (error) {
@@ -600,6 +574,7 @@ const getPaymentDetails = async (sessionIdOrCode) => {
 module.exports = {
     createStripeSession,
     calculateTokens,
+    getPresaleInfo,
     getPresaleLicenseExtensionYears,
     sendReceiptEmail,
     getPaymentDetails,

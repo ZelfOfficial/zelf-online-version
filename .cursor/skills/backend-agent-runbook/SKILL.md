@@ -51,6 +51,7 @@ For a test file that expects another port, export that same `PORT` before starti
 
 - `server.js` controls startup order, JWT handling, and protected vs unprotected route mounting.
 - Route registration lives in `Routes/unprotected-repositories.js` and `Routes/protected-repositories.js`.
+- ZNS token USD price is `TOKEN_PRICE_USD` (default `0.05`). `REWARD_PRICE` is honored only when `TOKEN_PRICE_USD` is unset. `GET /api/presale/info` returns the current price.
 
 ### Tags, search, and lease flows
 

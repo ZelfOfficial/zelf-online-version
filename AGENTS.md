@@ -18,6 +18,7 @@ This is a Koa backend API with MongoDB, Mongoose, and JWT-protected routes.
 -   Start the API with `npm start`.
 -   `Core/config.js` falls back to port `3000`, but `.env.example` sets `PORT=3003`. Prefer running locally with an explicit `PORT` instead of relying on fallbacks.
 -   Copy `.env.example` to `.env` and provide a working `MONGODB_URI` before running the server.
+-   ZNS token USD price is `TOKEN_PRICE_USD` (default `0.05`). `REWARD_PRICE` is a legacy alias used only when `TOKEN_PRICE_USD` is unset. Presale, rewards, and subscription token grants all read that one value (`config.token.priceUsd` / `config.token.rewardPrice`). `GET /api/presale/info` returns it.
 -   Public API documentation examples use `https://v4.zelf.world`, including Tags, v3.6 surfaces, and Zelf ID (`/api/zelf-ids`). Localhost URLs are for testing only.
 
 ## Tests

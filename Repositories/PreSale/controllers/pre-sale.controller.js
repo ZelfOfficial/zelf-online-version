@@ -76,6 +76,23 @@ const sendReceipt = async (ctx) => {
     }
 };
 
+/**
+ * Public presale snapshot, including the current ZNS token USD price.
+ */
+const getPresaleInfo = async (ctx) => {
+    try {
+        ctx.body = {
+            success: true,
+            data: Module.getPresaleInfo(),
+        };
+    } catch (error) {
+        const _exception = errorHandler(error, ctx);
+
+        ctx.status = _exception.status;
+        ctx.body = { message: _exception.message, code: _exception.code };
+    }
+};
+
 const getSessionDetails = async (ctx) => {
     try {
         const raw = ctx.query?.sessionId;
@@ -112,5 +129,6 @@ const getSessionDetails = async (ctx) => {
 module.exports = {
     createSession,
     sendReceipt,
+    getPresaleInfo,
     getSessionDetails,
 };
