@@ -105,6 +105,7 @@ const ALLOWED_BY_ACTION = {
         "protection"
     ),
     "change-master-password": withCommon("oldMasterPassword", "newMasterPassword"),
+    "daily-reward": withCommon("tagName", "domain"),
     "wallet-decrypt": withCommon(),
     "wallet-create": withCommon(),
     "wallet-import": withCommon("mnemonic"),
