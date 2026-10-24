@@ -286,14 +286,14 @@ const claimRedemption = async (coupon, { zelfId, plan, duration }) => {
  * Does not trust a client total: `signedAmount`, when passed, must match the recomputed amount.
  * @returns {Promise<{ couponId: string, code: string, amountDue: number, percentOff: number, listPrice: number, redemptionKey: string }>}
  */
-const claimForGrant = async ({ code, couponId, zelfId, plan, duration, domainConfig, tagName, signedAmount, requireZero = false }) => {
+const claimForGrant = async ({ code, couponId, zelfId, plan, duration, domainConfig, tagName, signedAmount, requireZero = false, listPrice }) => {
     let resolvedCode = normalizeCode(code);
     if (!resolvedCode && couponId) {
         const byId = await Coupon.findOne({ id: String(couponId) }).select("code").lean();
         resolvedCode = byId ? byId.code : "";
     }
-    const listPrice = licenseListPrice({ tagName: tagName || zelfId, duration, domainConfig, plan });
-    const described = await describeCoupon({ code: resolvedCode, plan, duration, zelfId, listPrice });
+    const price = listPrice != null ? Number(listPrice) : licenseListPrice({ tagName: tagName || zelfId, duration, domainConfig, plan });
+    const described = await describeCoupon({ code: resolvedCode, plan, duration, zelfId, listPrice: price });
     if (!described.valid) throw couponInvalid(described.reason);
     if (requireZero && described.amountDue !== 0) throw new Error("409:checkout_total_not_zero");
     if (signedAmount != null && Math.abs(Number(signedAmount) - described.amountDue) > 0.009) {
@@ -306,7 +306,7 @@ const claimForGrant = async ({ code, couponId, zelfId, plan, duration, domainCon
         ? await claimRedemption(coupon, { zelfId: zelfKey, plan: String(plan).toLowerCase(), duration: described.durationToken })
         : null;
     if (!claimed) {
-        const again = await describeCoupon({ code: resolvedCode, plan, duration, zelfId: zelfKey, listPrice });
+        const again = await describeCoupon({ code: resolvedCode, plan, duration, zelfId: zelfKey, listPrice: price });
         throw couponInvalid(again.reason || "max_redemptions");
     }
 

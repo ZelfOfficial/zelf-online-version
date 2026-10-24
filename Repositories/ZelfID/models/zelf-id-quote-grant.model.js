@@ -14,6 +14,7 @@ const zelfIdQuoteGrantSchema = new mongoose.Schema({
     couponId: { type: String, default: null },
     plan: { type: String, default: null },
     duration: { type: String, default: null },
+    amountPaidUsd: { type: Number, default: null },
     status: { type: String, enum: ["pending", "done"], default: "pending" },
 });
 

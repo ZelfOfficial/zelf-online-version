@@ -55,7 +55,7 @@ const unitAmountForCharge = (amountUsd, { coupon = false } = {}) => {
     return Math.max(cents, STRIPE_MINIMUM_CENTS);
 };
 
-const buildLeaseStripeMetadata = ({ tagName, domain, duration, plan, amountUsd, couponId, couponCode }) => {
+const buildLeaseStripeMetadata = ({ tagName, domain, duration, plan, amountUsd, couponId, couponCode, upgradeCreditUsd }) => {
     const metadata = {
         source: SOURCE,
         type: TYPE,
@@ -67,6 +67,7 @@ const buildLeaseStripeMetadata = ({ tagName, domain, duration, plan, amountUsd, 
     };
     if (couponId) metadata.couponId = String(couponId);
     if (couponCode) metadata.couponCode = String(couponCode);
+    if (upgradeCreditUsd != null && upgradeCreditUsd !== "") metadata.upgradeCreditUsd = String(upgradeCreditUsd);
     return metadata;
 };
 
@@ -85,7 +86,11 @@ const parseLeaseStripeMetadata = (metadata = {}) => {
         return null;
     }
 
-    return { tagName, domain, duration, plan, amountUsd };
+    const parsed = { tagName, domain, duration, plan, amountUsd };
+    if (metadata.upgradeCreditUsd != null && metadata.upgradeCreditUsd !== "") {
+        parsed.upgradeCreditUsd = Number(metadata.upgradeCreditUsd);
+    }
+    return parsed;
 };
 
 const inspectStripeLeaseSession = (session = {}) => {
@@ -195,29 +200,55 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
         });
     }
 
+    const { assertSignedUpgradeCredit, priceAfterUpgradeCredit } = require("./zelf-id-upgrade-credit.module");
+    const freshCredit =
+        !tagData.available && tagData.tagObject?.publicData
+            ? await assertSignedUpgradeCredit({
+                  tokenDecoded,
+                  publicData: tagData.tagObject.publicData,
+                  tagName: localName,
+                  domain: domainName,
+                  domainConfig: licenseConfig,
+                  targetPlan: resolvedPlan,
+              })
+            : { upgradeCreditUsd: 0 };
+
+    const Coupons = require("./zelf-ids-coupons.module");
+    const list = Coupons.licenseListPrice({
+        tagName: localName,
+        duration: expectedDuration,
+        domainConfig: licenseConfig,
+        plan: resolvedPlan,
+    });
+    const afterCredit = priceAfterUpgradeCredit(list, freshCredit.upgradeCreditUsd);
     let amountUsd = resolveQuotedUsd(tokenDecoded);
-    let unitAmount = unitAmountForCharge(amountUsd);
     let couponId;
     let couponCode;
+    const creditApplied = freshCredit.upgradeCreditUsd > 0;
     if (tokenDecoded.coupon?.valid === true && tokenDecoded.coupon.code) {
-        const Coupons = require("./zelf-ids-coupons.module");
-        const priced = await Coupons.priceCoupon({
+        const priced = await Coupons.describeCoupon({
             code: tokenDecoded.coupon.code,
             plan: resolvedPlan,
             duration: expectedDuration,
             zelfId: expectedFull,
-            tagName: localName,
-            domainConfig: licenseConfig,
+            listPrice: afterCredit,
         });
         if (!priced.valid) throw Coupons.couponInvalid(priced.reason);
         if (tokenDecoded.amountDue != null && Math.abs(Number(tokenDecoded.amountDue) - priced.amountDue) > 0.009) {
             throw Coupons.httpError(409, "Quoted total no longer matches the license price", "quote_price_changed");
         }
         amountUsd = priced.amountDue;
-        unitAmount = unitAmountForCharge(amountUsd, { coupon: true });
         couponId = priced.coupon.id;
         couponCode = priced.coupon.code;
+    } else if (creditApplied) {
+        const fraction = Number(tokenDecoded?.devPaymentAmountDiscount?.fraction);
+        const expected = Number.isFinite(fraction) && fraction > 0 ? Math.round(afterCredit * fraction * 100) / 100 : afterCredit;
+        if (Math.abs(amountUsd - expected) > 0.009) {
+            throw Coupons.httpError(409, "Quoted total no longer matches the license price", "quote_price_changed");
+        }
+        amountUsd = expected;
     }
+    const unitAmount = unitAmountForCharge(amountUsd, { coupon: Boolean(couponCode) || creditApplied });
 
     if (!(amountUsd > 0)) {
         throw new Error("409:invalid_quote_amount");
@@ -231,6 +262,7 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
         amountUsd,
         couponId,
         couponCode,
+        upgradeCreditUsd: freshCredit.upgradeCreditUsd,
     });
     const query = new URLSearchParams({
         tagname: localName,
@@ -320,6 +352,27 @@ const confirmPaidStripeSession = async (session) => {
         };
     }
 
+    const { assertSignedUpgradeCredit, priceAfterUpgradeCredit } = require("./zelf-id-upgrade-credit.module");
+    let freshCredit;
+    try {
+        freshCredit = await assertSignedUpgradeCredit({
+            tokenDecoded: {
+                tagName: `${tagName}.${domain}`,
+                duration,
+                plan,
+                upgradeCreditUsd: inspected.metadata.upgradeCreditUsd,
+            },
+            publicData: tagObject.publicData,
+            tagName,
+            domain,
+            domainConfig,
+            targetPlan: plan,
+        });
+    } catch (error) {
+        await releaseQuoteGrant(quoteKey);
+        throw error;
+    }
+
     const durationParam = duration === "lifetime" ? "lifetime" : parseInt(duration, 10);
     const price = Number(amountUsd) || (inspected.amountTotal ? inspected.amountTotal / 100 : 0);
     const metadataCoupon = session.metadata || {};
@@ -347,6 +400,7 @@ const confirmPaidStripeSession = async (session) => {
     if (metadataCoupon.couponId || metadataCoupon.couponCode) {
         const Coupons = require("./zelf-ids-coupons.module");
         try {
+            const list = Coupons.licenseListPrice({ tagName, duration, domainConfig, plan });
             claimed = await Coupons.claimForGrant({
                 code: metadataCoupon.couponCode,
                 couponId: metadataCoupon.couponId,
@@ -356,6 +410,7 @@ const confirmPaidStripeSession = async (session) => {
                 domainConfig,
                 tagName,
                 signedAmount: price,
+                listPrice: priceAfterUpgradeCredit(list, freshCredit.upgradeCreditUsd),
             });
         } catch (error) {
             await releaseQuoteGrant(quoteKey);
@@ -450,6 +505,7 @@ const confirmPaidStripeSession = async (session) => {
         couponId: claimed?.couponId,
         plan,
         duration,
+        amountPaidUsd: price,
     });
 
     return {

@@ -2,6 +2,7 @@
  * Zelf ID v4 payment confirmation. Parallel to my-tags; does not patch it.
  */
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 const config = require("../../../Core/config");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { coerceInitiatedAtUnix } = require("../../Tags/modules/tag-pay-session-tx.util");
@@ -41,6 +42,7 @@ const claimCouponAfterPayment = async ({
     txHash,
     paymentInitiatedAt,
     amountReceived,
+    listPrice,
 }) => {
     if (tokenDecoded?.coupon?.valid !== true || !tokenDecoded.coupon.code) {
         return { blocked: false, claimed: null };
@@ -70,6 +72,7 @@ const claimCouponAfterPayment = async ({
             domainConfig,
             tagName: bare,
             signedAmount: tokenDecoded.amountDue ?? tokenDecoded.billableUsdPrice ?? billableUsdPrice,
+            listPrice,
         });
         return { blocked: false, claimed };
     } catch (error) {
@@ -110,7 +113,7 @@ const claimCouponAfterPayment = async ({
  * 100% coupon: same purchase rules as a paid checkout, then the free-checkout grant.
  * The redemption is conditional and is rolled back if the grant does not stick.
  */
-const confirmCouponFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, tagObject, basePublicData) => {
+const confirmCouponFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, tagObject, basePublicData, upgradeCreditUsd = 0) => {
     const Coupons = require("./zelf-ids-coupons.module");
     const bare = tagObject.publicData[domainConfig.getTagKey()].split(".")[0];
     Coupons.assertCouponPlanRules({
@@ -138,6 +141,13 @@ const confirmCouponFreeCheckout = async (tagName, domain, tokenDecoded, domainCo
             tagObject,
             domainConfig
         );
+        const { priceAfterUpgradeCredit } = require("./zelf-id-upgrade-credit.module");
+        const licenseList = Coupons.licenseListPrice({
+            tagName: bare,
+            duration: tokenDecoded.duration,
+            domainConfig,
+            plan: tokenDecoded.plan,
+        });
         claimed = await Coupons.claimForGrant({
             code: tokenDecoded.coupon.code,
             zelfId: `${bare}.${domain}`.toLowerCase(),
@@ -147,6 +157,7 @@ const confirmCouponFreeCheckout = async (tagName, domain, tokenDecoded, domainCo
             tagName: bare,
             signedAmount: tokenDecoded.amountDue ?? 0,
             requireZero: true,
+            listPrice: priceAfterUpgradeCredit(licenseList, upgradeCreditUsd),
         });
         const extension = await addDurationToTag(
             {
@@ -249,6 +260,33 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
         };
     }
 
+    const { assertSignedUpgradeCredit, priceAfterUpgradeCredit } = require("./zelf-id-upgrade-credit.module");
+    let freshCredit;
+    try {
+        freshCredit = await assertSignedUpgradeCredit({
+            tokenDecoded,
+            publicData: tagObject.publicData,
+            tagName,
+            domain,
+            domainConfig,
+            targetPlan: tokenDecoded.plan,
+        });
+    } catch (error) {
+        await releaseQuoteGrant(quote);
+        throw error;
+    }
+    let listPrice;
+    if (tokenDecoded?.coupon?.valid === true && tokenDecoded.coupon.code) {
+        const CouponsForCredit = require("./zelf-ids-coupons.module");
+        const licenseList = CouponsForCredit.licenseListPrice({
+            tagName,
+            duration: tokenDecoded.duration,
+            domainConfig,
+            plan: tokenDecoded.plan,
+        });
+        listPrice = priceAfterUpgradeCredit(licenseList, freshCredit.upgradeCreditUsd);
+    }
+
     let couponGrant = { blocked: false, claimed: null };
     let extension;
     try {
@@ -266,6 +304,7 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
             paymentNetwork: network,
             paymentInitiatedAt: tokenDecoded.initiatedAt,
             amountReceived: paymentConfirmation.amountReceived,
+            listPrice,
         });
         if (couponGrant.blocked) {
             await releaseQuoteGrant(quote);
@@ -276,7 +315,7 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
             {
                 tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
                 price: tokenDecoded.prices?.[network]?.price ?? amountToPay,
-                billableUsdPrice: tokenDecoded.prices?.[network]?.price,
+                billableUsdPrice: tokenDecoded.amountDue ?? tokenDecoded.billableUsdPrice ?? tokenDecoded.prices?.[network]?.price,
                 cryptoSymbol: network,
                 cryptoAmount: amountToPay,
                 domain,
@@ -327,6 +366,7 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
         couponId: couponGrant.claimed?.couponId,
         plan: tokenDecoded.plan,
         duration: tokenDecoded.duration,
+        amountPaidUsd: tokenDecoded.amountDue ?? tokenDecoded.billableUsdPrice ?? tokenDecoded.prices?.[network]?.price,
     });
 
     return {
@@ -383,10 +423,34 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
         };
     }
 
+    const { assertSignedUpgradeCredit } = require("./zelf-id-upgrade-credit.module");
+    let freshCredit;
+    try {
+        freshCredit = await assertSignedUpgradeCredit({
+            tokenDecoded,
+            publicData: basePublicData,
+            tagName,
+            domain,
+            domainConfig,
+            targetPlan: tokenDecoded.plan,
+        });
+    } catch (error) {
+        await releaseQuoteGrant(quoteKey);
+        throw error;
+    }
+
     if (tokenDecoded.coupon?.valid === true && tokenDecoded.coupon?.code) {
         let granted;
         try {
-            granted = await confirmCouponFreeCheckout(tagName, domain, tokenDecoded, domainConfig, tagObject, basePublicData);
+            granted = await confirmCouponFreeCheckout(
+                tagName,
+                domain,
+                tokenDecoded,
+                domainConfig,
+                tagObject,
+                basePublicData,
+                freshCredit.upgradeCreditUsd
+            );
         } catch (error) {
             await releaseQuoteGrant(quoteKey);
             throw error;
@@ -402,6 +466,7 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
             couponId: granted.couponId,
             plan: tokenDecoded.plan,
             duration: tokenDecoded.duration,
+            amountPaidUsd: 0,
         });
         return granted;
     }
@@ -428,8 +493,11 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
         domainConfig,
         requestedPlan: tokenDecoded.plan,
     });
+    const { priceAfterUpgradeCredit } = require("./zelf-id-upgrade-credit.module");
+    const afterCredit = priceAfterUpgradeCredit(priceQuote.priceWithoutDiscount ?? priceQuote.price, freshCredit.upgradeCreditUsd);
+    const coveredByCredit = Number(priceQuote.price) !== 0 && afterCredit === 0;
 
-    if (Number(priceQuote.price) !== 0) {
+    if (Number(priceQuote.price) !== 0 && !coveredByCredit) {
         await releaseQuoteGrant(quoteKey);
         throw new Error("409:checkout_total_not_zero");
     }
@@ -449,7 +517,8 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
                 duration: tokenDecoded.duration || 1,
                 plan: tokenDecoded.plan,
                 domainConfig,
-                paymentMethod: "whitelist",
+                paymentMethod: coveredByCredit ? "free" : "whitelist",
+                billableUsdPrice: 0,
                 basePublicData,
             },
             tagObject
@@ -461,10 +530,11 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
 
     await completeQuoteGrant({
         ...quoteKey,
-        source: "whitelist",
-        paymentMethod: "whitelist",
+        source: coveredByCredit ? "upgrade_credit" : "whitelist",
+        paymentMethod: coveredByCredit ? "free" : "whitelist",
         plan: tokenDecoded.plan,
         duration: tokenDecoded.duration,
+        amountPaidUsd: 0,
     });
 
     return {
@@ -472,7 +542,7 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
         expiresAt: extension.expiresAt || tagObject.publicData?.expiresAt || null,
         confirmed: true,
         amountReceived: 0,
-        paymentMethod: "whitelist",
+        paymentMethod: coveredByCredit ? "free" : "whitelist",
         referralTagName: referralTagName || null,
         ipfsId: extension.ipfsId,
         arweaveId: extension.arweaveId,
@@ -518,12 +588,29 @@ const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata, 
         tagObject.publicData.payment = { method: "coupon", couponId: params.couponId };
     }
 
+    const { savePlanTerm } = require("./zelf-id-plan-term.module");
+    const { combineAmountPaid } = require("./zelf-id-upgrade-credit.module");
+    const PlanTerm = require("../models/zelf-id-plan-term.model");
+    const storedName = tagObject.publicData?.tagName || tagObject.publicData?.zelfName || params.tagName;
+    const explicitCharge = params.billableUsdPrice != null ? Number(params.billableUsdPrice) : params.amountPaidUsd != null ? Number(params.amountPaidUsd) : null;
+    const zeroMethods = new Set(["coupon", "whitelist", "free", "gift"]);
+    const charged = Number.isFinite(explicitCharge) ? explicitCharge : zeroMethods.has(params.paymentMethod) ? 0 : null;
+    let amountPaidUsd;
+    if (charged != null && mongoose.connection.readyState === 1) {
+        const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
+        const normalized = normalizeZelfName(storedName, params.domain || domainConfig?.name || "zelf");
+        const existing = normalized.zelfName ? await PlanTerm.findOne({ zelfName: normalized.zelfName }).lean() : null;
+        amountPaidUsd = combineAmountPaid({
+            previousPlan: existing?.plan,
+            previousAmount: existing?.amountPaidUsd,
+            nextPlan: planTerm?.plan || params.plan,
+            charged,
+        });
+    }
     if (planTerm) {
         if (planTerm.planExpiresAt) tagObject.publicData.planExpiresAt = planTerm.planExpiresAt;
         if (planTerm.paymentMethod) tagObject.publicData.paymentMethod = planTerm.paymentMethod;
         if (planTerm.duration) tagObject.publicData.planDuration = planTerm.duration;
-        const { savePlanTerm } = require("./zelf-id-plan-term.module");
-        const storedName = tagObject.publicData?.tagName || tagObject.publicData?.zelfName || params.tagName;
         await savePlanTerm({
             zelfName: storedName,
             domain: params.domain || domainConfig?.name,
@@ -531,8 +618,18 @@ const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata, 
             planExpiresAt: planTerm.planExpiresAt,
             paymentMethod: planTerm.paymentMethod,
             duration: planTerm.duration,
+            ...(amountPaidUsd !== undefined ? { amountPaidUsd } : {}),
         });
-    } else if (options.clearPlanTerm) {
+    } else if (amountPaidUsd !== undefined) {
+        await savePlanTerm({
+            zelfName: storedName,
+            domain: params.domain || domainConfig?.name,
+            plan: params.plan,
+            paymentMethod: params.paymentMethod,
+            amountPaidUsd,
+        });
+    }
+    if (!planTerm && options.clearPlanTerm) {
         const { deletePlanTerm } = require("./zelf-id-plan-term.module");
         const storedName = tagObject.publicData?.tagName || tagObject.publicData?.zelfName || params.tagName;
         await deletePlanTerm(storedName, params.domain || domainConfig?.name);

@@ -472,7 +472,13 @@ const buildMetadata = (params, tagObject, domainConfig) => {
 
     const extraParams = {
         origin: tagObject.publicData.origin || "online",
-        price: params.paymentMethod === "gift" || params.paymentMethod === "coupon" || params.paymentMethod === "whitelist" ? 0 : price,
+        price:
+            params.paymentMethod === "gift" ||
+            params.paymentMethod === "coupon" ||
+            params.paymentMethod === "whitelist" ||
+            params.paymentMethod === "free"
+                ? 0
+                : price,
         paymentMethod: params.paymentMethod || undefined,
         duration: term.duration,
         registeredAt: basePublicData.registeredAt || tagObject.publicData.registeredAt || formatLeaseDate(),
@@ -691,6 +697,18 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         reducedFeeRequested: Boolean(requestOptions.reducedFeeRequested),
     });
     const listPriceUsd = priceDetails.priceWithoutDiscount ?? priceDetails.price;
+    const { computeUpgradeCredit, priceAfterUpgradeCredit } = require("./zelf-id-upgrade-credit.module");
+    const upgrade = keepFreeQuote
+        ? { upgradeCreditUsd: 0 }
+        : await computeUpgradeCredit({
+              publicData: tagObject.publicData,
+              tagName,
+              domain,
+              targetPlan: priceDetails.plan,
+              listPriceUsd,
+          });
+    const upgradeCreditUsd = upgrade.upgradeCreditUsd;
+    const priceAfterCredit = priceAfterUpgradeCredit(listPriceUsd, upgradeCreditUsd);
     let couponQuote = null;
     if (couponCode) {
         const Coupons = require("./zelf-ids-coupons.module");
@@ -700,16 +718,21 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
             plan: keepFreeQuote ? "free" : priceDetails.plan,
             duration: normalizedDuration,
             zelfId: `${bare}.${String(domain || "").toLowerCase()}`,
-            listPrice: listPriceUsd,
+            listPrice: priceAfterCredit,
         });
     }
-    // A valid coupon replaces referral and dev-fee adjustments. The server price is the license list times percent off.
+    // A valid coupon replaces referral and dev-fee adjustments and applies after upgrade credit.
+    // Credit is subtracted from the license list. A whitelist quote (price 0) stays 0.
     const billableUsdPrice = roundBillableUsdPrice(
         couponQuote?.valid
             ? couponQuote.amountDue
-            : devAmountFraction != null
-              ? priceDetails.price * devAmountFraction
-              : priceDetails.price
+            : upgradeCreditUsd > 0 && Number(priceDetails.price) !== 0
+              ? devAmountFraction != null
+                  ? priceAfterCredit * devAmountFraction
+                  : priceAfterCredit
+              : devAmountFraction != null
+                ? priceDetails.price * devAmountFraction
+                : priceDetails.price
     );
     const zelfPayCount = tagData.ipfs?.length || tagData.arweave?.length;
 
@@ -847,6 +870,10 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         },
         referralTagName: referral.referralTagName || undefined,
         listPriceUsd,
+        listPrice: listPriceUsd,
+        upgradeCredit: upgradeCreditUsd,
+        upgradeCreditUsd,
+        amountDue: roundBillableUsdPrice(billableUsdPrice),
         billableUsdPrice,
         reward: priceDetails.reward,
         discount: priceDetails.discount,
@@ -857,9 +884,7 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
     };
 
     if (couponQuote) {
-        returnData.listPrice = couponQuote.listPrice;
         returnData.percentOff = couponQuote.percentOff;
-        returnData.amountDue = couponQuote.amountDue;
         returnData.currency = couponQuote.currency;
         returnData.coupon = couponQuote.coupon;
     }

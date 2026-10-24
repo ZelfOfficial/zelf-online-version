@@ -21,8 +21,9 @@ const normalizedName = (zelfName, domain) => {
  * @param {string|null} [params.plan]
  * @param {string|null} [params.planExpiresAt] `YYYY-MM-DD HH:mm:ss` UTC
  * @param {string|null} [params.paymentMethod]
+ * @param {number|null} [params.amountPaidUsd] USD actually charged for this term
  */
-const savePlanTerm = async ({ zelfName, domain, plan, planExpiresAt, paymentMethod, duration }) => {
+const savePlanTerm = async ({ zelfName, domain, plan, planExpiresAt, paymentMethod, duration, amountPaidUsd }) => {
     if (!mongoReady()) return null;
     const name = normalizedName(zelfName, domain);
     if (!name) return null;
@@ -32,6 +33,7 @@ const savePlanTerm = async ({ zelfName, domain, plan, planExpiresAt, paymentMeth
     if (planExpiresAt !== undefined) $set.planExpiresAt = planExpiresAt;
     if (paymentMethod !== undefined) $set.paymentMethod = paymentMethod;
     if (duration !== undefined) $set.duration = duration;
+    if (amountPaidUsd !== undefined) $set.amountPaidUsd = amountPaidUsd;
     if (Object.keys($set).length === 1) return null;
 
     return PlanTerm.findOneAndUpdate({ zelfName: name }, { $set }, { upsert: true, new: true });

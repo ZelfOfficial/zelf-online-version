@@ -75,7 +75,7 @@ const claimQuoteGrant = async ({ zelfName, domain, token, source }) => {
     }
 };
 
-const completeQuoteGrant = async ({ zelfName, domain, token, source, paymentMethod, couponId, plan, duration }) => {
+const completeQuoteGrant = async ({ zelfName, domain, token, source, paymentMethod, couponId, plan, duration, amountPaidUsd }) => {
     requireStore(token);
     const name = normalizedName(zelfName, domain);
     if (!name) throw unavailable();
@@ -85,6 +85,9 @@ const completeQuoteGrant = async ({ zelfName, domain, token, source, paymentMeth
     if (couponId !== undefined) $set.couponId = couponId;
     if (plan !== undefined) $set.plan = plan;
     if (duration !== undefined) $set.duration = duration == null ? null : String(duration);
+    if (amountPaidUsd !== undefined && amountPaidUsd !== null && Number.isFinite(Number(amountPaidUsd))) {
+        $set.amountPaidUsd = Number(amountPaidUsd);
+    }
 
     await QuoteGrant.updateOne({ zelfName: name, quoteHash: quoteHash(token) }, { $set });
 };
