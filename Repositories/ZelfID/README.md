@@ -23,7 +23,7 @@ Registered in `Routes/protected-repositories.js`.
 | GET | `/preview` | `tagName`, `domain`, `os` |
 | GET | `/wallet-balances` | optional address query fields |
 | GET | `/payment-options` | `tagName`, `domain`, `duration`; optional `plan`, `coupon` |
-| POST | `/payment-confirmation` | `tagName`, `token`; `network` required unless the signed quote is a 100% coupon (`freeCheckout`); optional `domain` |
+| POST | `/payment-confirmation` | `tagName`, `token`; `network` required unless the signed quote is a 100% coupon or other $0 quote (`freeCheckout`); a free checkout also requires identity verification for that Zelf ID (`faceBase64`, plus `masterPassword` when the wallet has one, or a session `verifiedTagName` still inside `verifiedUntil`); optional `domain` |
 | POST | `/coupons` | super-admin. `code`, `percentOff` (1–100), `plans`, `maxRedemptions`; optional `durations`, `perZelfIdLimit`, `expiresAt` |
 | GET | `/coupons` | super-admin list |
 | POST | `/coupons/:id/deactivate` | super-admin. Sets `active` false and keeps the code |

@@ -20,6 +20,10 @@ const SessionSchema = new Schema({
 	isWebExtension: requiredField(Boolean, false),
 	status: requiredEnumField(String, ["active", "used"], "active"),
 	tagName: defaultField(String, null),
+	/** Server-stamped after a successful face check. Client input never sets this. */
+	verifiedTagName: defaultField(String, null),
+	verifiedAt: { type: Date },
+	verifiedUntil: { type: Date },
 	type: requiredEnumField(String, ["createWallet", "decryptWallet", "importWallet", "general"], "createWallet"),
 	activatedAt: {
 		type: Date,

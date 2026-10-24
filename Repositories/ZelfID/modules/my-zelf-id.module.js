@@ -158,7 +158,7 @@ const confirmCouponFreeCheckout = async (tagName, domain, tokenDecoded, domainCo
     }
 };
 
-const verifyPaymentConfirmation = async (tagName, domain, network, token) => {
+const verifyPaymentConfirmation = async (tagName, domain, network, token, identity = {}) => {
     const tokenDecoded = jwt.verify(token, config.JWT_SECRET);
     const domainConfig = getDomainConfig(domain);
 
@@ -166,7 +166,7 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token) => {
 
     if (tokenDecoded.tagName !== `${tagName}.${domain}`) throw new Error("403:tag_not_owned");
 
-    if (network === "FREE") return confirmFreeCheckout(tagName, domain, tokenDecoded, domainConfig);
+    if (network === "FREE") return confirmFreeCheckout(tagName, domain, tokenDecoded, domainConfig, identity);
 
     if (network === "AVAX") {
         throw new Error("409:avax_use_smart_contract_confirmation");
@@ -296,7 +296,7 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token) => {
  * Re-quotes on the server from the license with the signed plan, duration and referral;
  * refuses unless the total is exactly $0. No Stripe or on-chain payment is involved.
  */
-const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig) => {
+const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, identity = {}) => {
     const { getZelfIdCheckoutPrice, normalizePaymentDuration } = require("./zelf-id-plan.module");
     const tagData = await ZelfIdModule.searchTag({ tagName, domain, domainConfig, environment: "all" }, {});
 
@@ -321,6 +321,18 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig) 
         }
         return cached;
     }
+
+    // Prove control of this name before a coupon redemption or a whitelist grant.
+    const { assertFreeCheckoutIdentity } = require("./zelf-id-checkout-identity.module");
+    await assertFreeCheckoutIdentity({
+        tagName,
+        domain,
+        tagObject,
+        authUser: identity.authUser,
+        faceBase64: identity.faceBase64,
+        masterPassword: identity.masterPassword,
+        password: identity.password,
+    });
 
     if (tokenDecoded.coupon?.valid === true && tokenDecoded.coupon?.code) {
         return confirmCouponFreeCheckout(tagName, domain, tokenDecoded, domainConfig, tagObject);

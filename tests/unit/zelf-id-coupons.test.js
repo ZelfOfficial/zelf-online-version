@@ -25,6 +25,10 @@ jest.mock("../../Repositories/Tags/modules/my-tags.module", () => ({
 
 jest.mock("../../Repositories/Tags/middlewares/my-tags.middleware", () => ({}));
 
+jest.mock("../../Repositories/Tags/modules/tags.module", () => ({
+    decryptTag: jest.fn(async () => ({})),
+}));
+
 jest.mock("../../Repositories/Tags/config/supported-domains", () => ({
     getDomainConfig: () => domainConfig,
 }));
@@ -61,6 +65,8 @@ const config = require("../../Core/config");
 const CouponMiddleware = require("../../Repositories/ZelfID/middlewares/zelf-ids-coupons.middleware");
 const TagsMiddleware = require("../../Repositories/Tags/middlewares/tags.middleware");
 const PaymentMiddleware = require("../../Repositories/ZelfID/middlewares/zelf-id.middleware");
+const TagsModule = require("../../Repositories/Tags/modules/tags.module");
+const Session = require("../../Repositories/Session/models/session.model");
 
 const license = () =>
     new Domain({
@@ -86,6 +92,22 @@ const tagFor = (bare, extra = {}) => ({
         ...extra,
     },
 });
+
+const allowOwner = async (bare) => {
+    const session = await Session.create({
+        identifier: `sess-${bare}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        clientIP: "127.0.0.1",
+        domain: "zelf",
+        isWebExtension: false,
+        status: "active",
+        type: "decryptWallet",
+        tagName: bare,
+        verifiedTagName: `${bare}.zelf`,
+        verifiedAt: new Date(),
+        verifiedUntil: new Date(Date.now() + 10 * 60 * 1000),
+    });
+    return { authUser: { session: String(session._id), tagName: bare, domain: "zelf" } };
+};
 
 const signQuote = (bare, coupon, extra = {}) =>
     jwt.sign(
@@ -276,6 +298,13 @@ describe("Zelf ID plan coupons", () => {
         expect(freeQuote.percentOff).toBe(100);
         expect(freeQuote.freeCheckout).toBe(true);
         expect(freeQuote.coupon.valid).toBe(true);
+
+        const freePlan = await getPaymentOptions("myname", "zelf", "1", {}, { requestedPlan: "free", coupon: "save25" });
+        expect(freePlan.plan).toBe("free");
+        expect(freePlan.coupon).toEqual({ code: "SAVE25", valid: false, reason: "plan_not_allowed" });
+        expect(freePlan.percentOff).toBe(0);
+        expect(freePlan.freeCheckout).toBe(false);
+        expect(freePlan.billableUsdPrice).not.toBe(quote.listPrice);
     });
 
     test("a 100% coupon grants on the free-checkout path and a replay does not redeem twice", async () => {
@@ -285,7 +314,8 @@ describe("Zelf ID plan coupons", () => {
         );
         const bare = "couponaa";
         const token = signQuote(bare, created, { initiatedAt: moment().subtract(5, "minutes").unix() });
-        const granted = await verifyPaymentConfirmation(bare, "zelf", "FREE", token);
+        const identity = await allowOwner(bare);
+        const granted = await verifyPaymentConfirmation(bare, "zelf", "FREE", token, identity);
         expect(granted.confirmed).toBe(true);
         expect(granted.paymentMethod).toBe("coupon");
         expect(granted.couponId).toBe(created.id);
@@ -294,7 +324,7 @@ describe("Zelf ID plan coupons", () => {
         expect(granted.tagObject.publicData.payment).toEqual({ method: "coupon", couponId: created.id });
         expect(granted.tagObject.publicData.paymentMethod).toBe("coupon");
 
-        const replay = await verifyPaymentConfirmation(bare, "zelf", "FREE", token);
+        const replay = await verifyPaymentConfirmation(bare, "zelf", "FREE", token, identity);
         expect(replay.cache).toBe(true);
         expect(replay.confirmed).toBe(true);
         expect(replay.paymentMethod).toBe("coupon");
@@ -304,12 +334,51 @@ describe("Zelf ID plan coupons", () => {
         expect(saved.redemptions[0]).toMatchObject({ zelfId: "couponaa.zelf", plan: "premium", duration: "1y" });
     });
 
+    test("free checkout requires identity for this Zelf ID and does not redeem when it fails", async () => {
+        const created = await Coupons.createCoupon(
+            { code: "idcheck", percentOff: 100, plans: ["premium"], maxRedemptions: 5 },
+            "admin@zelf.world"
+        );
+        const bare = "idcheck1";
+        const token = signQuote(bare, created);
+
+        await expect(verifyPaymentConfirmation(bare, "zelf", "FREE", token, { authUser: { tagName: "jim", domain: "zelf" } })).rejects.toMatchObject({
+            clientCode: "ERR_IDENTITY_VERIFICATION_REQUIRED",
+        });
+
+        const otherWallet = await allowOwner("jim");
+        await expect(verifyPaymentConfirmation(bare, "zelf", "FREE", token, otherWallet)).rejects.toMatchObject({
+            clientCode: "ERR_SESSION_OWNER_MISMATCH",
+        });
+
+        TagsModule.decryptTag.mockRejectedValue(new Error("invalid password"));
+        await expect(
+            verifyPaymentConfirmation(bare, "zelf", "FREE", token, {
+                authUser: { tagName: "jim", domain: "zelf" },
+                faceBase64: "face-bytes",
+                masterPassword: "wrong-secret",
+            })
+        ).rejects.toMatchObject({ clientCode: "ERR_INVALID_PASSWORD" });
+        expect(TagsModule.decryptTag).toHaveBeenCalledWith(
+            expect.objectContaining({ tagName: bare, domain: "zelf", password: "wrong-secret" }),
+            expect.any(Object)
+        );
+
+        const saved = await Coupon.findOne({ code: "IDCHECK" }).lean();
+        expect(saved.redemptions).toEqual([]);
+
+        const whitelistToken = signQuote(bare, created, { coupon: { valid: false }, freeCheckout: true });
+        await expect(verifyPaymentConfirmation(bare, "zelf", "FREE", whitelistToken)).rejects.toMatchObject({
+            clientCode: "ERR_IDENTITY_VERIFICATION_REQUIRED",
+        });
+    });
+
     test("two parallel redemptions of a max-1 coupon let only one grant succeed", async () => {
         const created = await Coupons.createCoupon(
             { code: "race", percentOff: 100, plans: ["premium", "unlimited"], maxRedemptions: 1, perZelfIdLimit: 1 },
             "admin@zelf.world"
         );
-        const attempt = (bare) => verifyPaymentConfirmation(bare, "zelf", "FREE", signQuote(bare, created));
+        const attempt = async (bare) => verifyPaymentConfirmation(bare, "zelf", "FREE", signQuote(bare, created), await allowOwner(bare));
         const settled = await Promise.allSettled([attempt("raceaa1"), attempt("racebb1")]);
         const fulfilled = settled.filter((result) => result.status === "fulfilled");
         const rejected = settled.filter((result) => result.status === "rejected");
@@ -337,7 +406,7 @@ describe("Zelf ID plan coupons", () => {
             }),
             ipfs: [],
         });
-        await expect(verifyPaymentConfirmation("downgrade", "zelf", "FREE", signQuote("downgrade", created))).rejects.toMatchObject({
+        await expect(verifyPaymentConfirmation("downgrade", "zelf", "FREE", signQuote("downgrade", created), await allowOwner("downgrade"))).rejects.toMatchObject({
             clientCode: "downgrade_not_allowed",
             clientMessage: "downgrade_not_allowed",
         });
@@ -348,7 +417,7 @@ describe("Zelf ID plan coupons", () => {
             tagObject: tagFor("ab"),
             ipfs: [],
         });
-        await expect(verifyPaymentConfirmation("ab", "zelf", "FREE", signQuote("ab", created))).rejects.toMatchObject({
+        await expect(verifyPaymentConfirmation("ab", "zelf", "FREE", signQuote("ab", created), await allowOwner("ab"))).rejects.toMatchObject({
             clientCode: "plan_not_allowed_for_name",
         });
 
@@ -362,7 +431,7 @@ describe("Zelf ID plan coupons", () => {
             }),
             ipfs: [],
         });
-        await expect(verifyPaymentConfirmation("lifetime", "zelf", "FREE", signQuote("lifetime", created))).rejects.toMatchObject({
+        await expect(verifyPaymentConfirmation("lifetime", "zelf", "FREE", signQuote("lifetime", created), await allowOwner("lifetime"))).rejects.toMatchObject({
             clientCode: "lifetime_already_owned",
         });
 

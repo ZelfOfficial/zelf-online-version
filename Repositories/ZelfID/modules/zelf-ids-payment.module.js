@@ -26,6 +26,7 @@ const {
     normalizePaymentDuration,
     getCanonicalMainnetName,
     getZelfIdCheckoutPrice,
+    getZelfIdPrice,
     FREE_EXPIRATION_YEARS,
 } = require("./zelf-id-plan.module");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
@@ -586,25 +587,52 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         referralTagName: requestOptions.referralTagName,
         authUser,
     });
-    const priceDetails = getZelfIdCheckoutPrice({
-        tagName,
-        duration: normalizedDuration,
-        referralTagName: referral.referralTagName,
-        domainConfig,
-        requestedPlan,
-    });
+    const explicitPlan = `${requestedPlan || ""}`.trim().toLowerCase();
+    const couponCode = `${requestOptions.coupon || ""}`.trim();
+    // plan=free must stay a free quote. Checkout pricing would otherwise replace it with Premium.
+    const keepFreeQuote = explicitPlan === "free" && Boolean(couponCode);
+    let priceDetails;
+    if (keepFreeQuote) {
+        try {
+            priceDetails = getZelfIdPrice({
+                tagName,
+                duration: normalizedDuration,
+                referralTagName: "",
+                domainConfig,
+                requestedPlan: "free",
+            });
+        } catch (_error) {
+            priceDetails = {
+                price: 0,
+                priceWithoutDiscount: 0,
+                plan: "free",
+                reward: 0,
+                discount: 0,
+                discountType: "percentage",
+                allowedPlans: [],
+            };
+        }
+        priceDetails = { ...priceDetails, plan: "free" };
+    } else {
+        priceDetails = getZelfIdCheckoutPrice({
+            tagName,
+            duration: normalizedDuration,
+            referralTagName: referral.referralTagName,
+            domainConfig,
+            requestedPlan,
+        });
+    }
     const devAmountFraction = resolveTagPayBillableFraction({
         reducedFeeRequested: Boolean(requestOptions.reducedFeeRequested),
     });
     const listPriceUsd = priceDetails.priceWithoutDiscount ?? priceDetails.price;
-    const couponCode = `${requestOptions.coupon || ""}`.trim();
     let couponQuote = null;
     if (couponCode) {
         const Coupons = require("./zelf-ids-coupons.module");
         const bare = `${tagName}`.split(".")[0].toLowerCase();
         couponQuote = await Coupons.describeCoupon({
             code: couponCode,
-            plan: priceDetails.plan,
+            plan: keepFreeQuote ? "free" : priceDetails.plan,
             duration: normalizedDuration,
             zelfId: `${bare}.${String(domain || "").toLowerCase()}`,
             listPrice: listPriceUsd,
@@ -726,22 +754,25 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         tagPayName: `${tagData.tagName}.${domain}pay`,
         expiresAt: tagObject.publicData.expiresAt,
         // Expiration this purchase would stamp (current `expiresAt` is unchanged above).
-        newExpiresAt: resolvePaidExpiresAt({ publicData: tagObject.publicData, duration: normalizedDuration }),
+        newExpiresAt: keepFreeQuote
+            ? tagObject.publicData.expiresAt
+            : resolvePaidExpiresAt({ publicData: tagObject.publicData, duration: normalizedDuration }),
         initiatedAt: moment().unix(),
         ttl: moment().add("2", "hours").unix(),
         duration: normalizedDuration === "lifetime" ? "lifetime" : parseInt(normalizedDuration || 1),
         count: parseInt(renewTagPayObject.publicData?.count),
         publicData: renewTagPayObject.publicData,
-        plan:
-            resolveUpgradePlan({
-                tagName,
-                requestedPlan: requestedPlan || priceDetails.plan,
-            }) ||
-            resolveV4PaymentStamp({
-                tagName,
-                encryptVersion: resolveEncryptVersion(tagObject.publicData),
-                requestedPlan: requestedPlan || priceDetails.plan,
-            }).plan,
+        plan: keepFreeQuote
+            ? "free"
+            : resolveUpgradePlan({
+                  tagName,
+                  requestedPlan: requestedPlan || priceDetails.plan,
+              }) ||
+              resolveV4PaymentStamp({
+                  tagName,
+                  encryptVersion: resolveEncryptVersion(tagObject.publicData),
+                  requestedPlan: requestedPlan || priceDetails.plan,
+              }).plan,
         allowedPlans: priceDetails.allowedPlans,
         payment: {
             registeredAt: renewTagPayObject.publicData?.registeredAt,
@@ -756,7 +787,8 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         discount: priceDetails.discount,
         discountType: priceDetails.discountType,
         // $0 after a license whitelist or a 100% plan coupon: confirm with no network (FREE), no Stripe, RevenueCat, or crypto.
-        freeCheckout: Number(billableUsdPrice) === 0,
+        // A rejected plan=free coupon is not a $0 grant.
+        freeCheckout: keepFreeQuote ? false : Number(billableUsdPrice) === 0,
     };
 
     if (couponQuote) {
