@@ -13,6 +13,7 @@ const {
     cleanExtraParamsForPinata,
     collectReservedKeyvalues,
     expandStoredExtraParams,
+    fitExtraParamsForPin,
     mergeAddressKeyvaluesIntoPublicData,
     getAllChainAddresses,
     resolveEncryptVersion,
@@ -439,12 +440,10 @@ describe("tags-addresses.module", () => {
                 zelfProof: "x".repeat(80),
             });
 
-            expect(cleaned.registeredAt).toBeUndefined();
-            expect(cleaned.couponId).toBeUndefined();
-            expect(JSON.stringify(cleaned).length).toBeLessThanOrEqual(PINATA_KEYVALUE_MAX_LENGTH);
-            expect(expandStoredExtraParams(cleaned)).toMatchObject({
+            expect(cleaned).toEqual({
                 hasPassword: "true",
                 origin: "online",
+                registeredAt: "2026-01-16 20:32:43",
                 expiresAt: "2028-11-14 23:25:33",
                 price: 1.8,
                 duration: "3",
@@ -452,6 +451,7 @@ describe("tags-addresses.module", () => {
                 v: 3,
                 st: "password",
             });
+            expect(JSON.stringify(cleaned).length).toBeLessThanOrEqual(PINATA_KEYVALUE_MAX_LENGTH);
         });
 
         test("drops a session JWT or object from st", () => {
@@ -471,6 +471,26 @@ describe("tags-addresses.module", () => {
                     st: { session: "jwt", ip: "1.1.1.1" },
                 }).st
             ).toBeUndefined();
+        });
+
+        test("still reads a short-key dev pin and writes long keys", () => {
+            const expanded = expandStoredExtraParams({
+                hp: "true",
+                o: "online",
+                e: 1861852860,
+                d: "1",
+                pl: "premium",
+                v: 4,
+            });
+            expect(expanded.expiresAt).toBe(require("moment").unix(1861852860).utc().format("YYYY-MM-DD HH:mm:ss"));
+            expect(expanded.plan).toBe("premium");
+            expect(expanded.duration).toBe("1");
+
+            const fitted = fitExtraParamsForPin(expanded);
+            expect(fitted.extraParams.expiresAt).toBe(expanded.expiresAt);
+            expect(fitted.extraParams.plan).toBe("premium");
+            expect(fitted.extraParams.e).toBeUndefined();
+            expect(fitted.extraParams.hp).toBeUndefined();
         });
 
         test("collectReservedKeyvalues throws before a value over 250 characters is pinned", () => {

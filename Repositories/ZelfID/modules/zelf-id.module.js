@@ -243,24 +243,27 @@ const searchTag = async (params, authUser) => {
             authUser
         );
 
-        const released = applyExpiredPlanDowngrade(
-            attachAvailableZelfIdPricing(
-                await releaseExpiredUnpaidReservation(result, {
-                    tagName,
-                    domain,
-                    domainConfig: _domainConfig,
-                    duration: duration || "1",
-                    plan,
-                }),
-                {
-                    tagName,
-                    duration: duration || "1",
-                    domainConfig: _domainConfig,
-                    plan,
-                }
-            ),
-            _domainConfig
+        if (result?.tagObject?.publicData) {
+            const { mergePlanTermIntoPublicData } = require("./zelf-id-plan-term.module");
+            await mergePlanTermIntoPublicData(result.tagObject.publicData);
+        }
+
+        const priced = attachAvailableZelfIdPricing(
+            await releaseExpiredUnpaidReservation(result, {
+                tagName,
+                domain,
+                domainConfig: _domainConfig,
+                duration: duration || "1",
+                plan,
+            }),
+            {
+                tagName,
+                duration: duration || "1",
+                domainConfig: _domainConfig,
+                plan,
+            }
         );
+        const released = applyExpiredPlanDowngrade(priced, _domainConfig);
 
         if (released.ipfs?.length) {
             for (let index = 0; index < released.ipfs.length; index++) {
@@ -540,14 +543,21 @@ const persistZelfIdLease = async (tagObject, referralTagObject, domainConfig, se
     });
 };
 
+/**
+ * Show the effective plan on a search result. Remember the plan that was actually pinned
+ * so a later unlock does not store this read-time value.
+ * @param {Object} result
+ * @param {Object} domainConfig
+ * @returns {Object}
+ */
 const applyExpiredPlanDowngrade = (result, domainConfig) => {
     const publicData = result?.tagObject?.publicData;
     if (!publicData) return result;
 
     const plan = effectivePlan(publicData, domainConfig);
-    if (plan === publicData.plan) return result;
+    if (!plan || plan === publicData.plan) return result;
 
-    result.tagObject.publicData = { ...publicData, plan };
+    result.tagObject.publicData = { ...publicData, plan, _pinnedPlan: publicData.plan || null };
     return result;
 };
 

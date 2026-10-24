@@ -446,7 +446,7 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
     };
 };
 
-const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata) => {
+const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata, planTerm, options = {}) => {
     await ZelfIdsPaymentModule.ensureZelfProofQRCode(tagObject);
 
     if (domainConfig.isIPFSEnabled()) {
@@ -467,8 +467,9 @@ const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata) 
             }
             if (parsed.duration != null && parsed.duration !== "") tagObject.publicData.duration = parsed.duration;
             if (parsed.planExpiresAt) tagObject.publicData.planExpiresAt = parsed.planExpiresAt;
-            else if (parsed.duration === "lifetime") delete tagObject.publicData.planExpiresAt;
+            else if (parsed.duration === "lifetime" || (planTerm && !planTerm.planExpiresAt)) delete tagObject.publicData.planExpiresAt;
             if (parsed.renewedAt) tagObject.publicData.renewedAt = parsed.renewedAt;
+            if (parsed.registeredAt) tagObject.publicData.registeredAt = parsed.registeredAt;
             if (parsed.paymentMethod) tagObject.publicData.paymentMethod = parsed.paymentMethod;
             if (parsed.price === 0 || parsed.price) tagObject.publicData.price = parsed.price;
             if (parsed.revenueCatOriginalTransactionId) {
@@ -482,6 +483,24 @@ const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata) 
     if (params.couponId) {
         tagObject.publicData.couponId = params.couponId;
         tagObject.publicData.payment = { method: "coupon", couponId: params.couponId };
+    }
+
+    if (planTerm) {
+        if (planTerm.planExpiresAt) tagObject.publicData.planExpiresAt = planTerm.planExpiresAt;
+        if (planTerm.paymentMethod) tagObject.publicData.paymentMethod = planTerm.paymentMethod;
+        const { savePlanTerm } = require("./zelf-id-plan-term.module");
+        const storedName = tagObject.publicData?.tagName || tagObject.publicData?.zelfName || params.tagName;
+        await savePlanTerm({
+            zelfName: storedName,
+            domain: params.domain || domainConfig?.name,
+            plan: planTerm.plan,
+            planExpiresAt: planTerm.planExpiresAt,
+            paymentMethod: planTerm.paymentMethod,
+        });
+    } else if (options.clearPlanTerm) {
+        const { deletePlanTerm } = require("./zelf-id-plan-term.module");
+        const storedName = tagObject.publicData?.tagName || tagObject.publicData?.zelfName || params.tagName;
+        await deletePlanTerm(storedName, params.domain || domainConfig?.name);
     }
 
     const arweaveSkipped = Boolean(tagObject.arweave?.skipped);
@@ -556,25 +575,25 @@ const addDurationToTag = async (params, tagObject) => {
         throw new Error(violation);
     }
 
-    const { metadata } = ZelfIdsPaymentModule.buildMetadata(params, tagObject, domainConfig);
+    const built = ZelfIdsPaymentModule.buildMetadata(params, tagObject, domainConfig);
 
-    return persistZelfIdMetadata(params, tagObject, domainConfig, metadata);
+    return persistZelfIdMetadata(params, tagObject, domainConfig, built.metadata, built.planTerm);
 };
 
 const revertZelfIdToFreePlan = async (params, tagObject) => {
     const { domain } = params;
     const domainConfig = params.domainConfig || getDomainConfig(domain || "zelf");
-    const { metadata } = ZelfIdsPaymentModule.buildFreePlanRevertMetadata(params, tagObject, domainConfig);
+    const built = ZelfIdsPaymentModule.buildFreePlanRevertMetadata(params, tagObject, domainConfig);
 
-    return persistZelfIdMetadata(params, tagObject, domainConfig, metadata);
+    return persistZelfIdMetadata(params, tagObject, domainConfig, built.metadata, built.planTerm, { clearPlanTerm: built.clearPlanTerm });
 };
 
 const changeZelfIdPlan = async (params, tagObject) => {
     const { domain } = params;
     const domainConfig = params.domainConfig || getDomainConfig(domain || "zelf");
-    const { metadata } = ZelfIdsPaymentModule.buildPlanChangeMetadata(params, tagObject, domainConfig);
+    const built = ZelfIdsPaymentModule.buildPlanChangeMetadata(params, tagObject, domainConfig);
 
-    return persistZelfIdMetadata(params, tagObject, domainConfig, metadata);
+    return persistZelfIdMetadata(params, tagObject, domainConfig, built.metadata, built.planTerm);
 };
 
 const getPaymentOptions = (tagName, domain, duration, authUser, requestOptions = {}) =>

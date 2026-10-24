@@ -5,9 +5,9 @@
  * continuation pins that share the same QR and point back via `_tagName` /
  * `__tagName`. Old packed `addresses*` blobs stay readable via merge only.
  *
- * Lease `extraParams` is stored with short keys and epoch-second dates so a
- * plan term fits under the 250-character value cap. Readers expand that back
- * to the long field names. `registeredAt` and `couponId` are not stored.
+ * Lease `extraParams` keeps the long field names and `YYYY-MM-DD HH:mm:ss`
+ * dates that v3 and the dashboard already parse. A few dev pins used short
+ * keys and epoch seconds; those still expand on read and are not written again.
  */
 const moment = require("moment");
 
@@ -98,9 +98,8 @@ const EXTRA_PARAMS_ALLOWED_KEYS = [
 const EXTRA_PARAMS_SECURITY_TYPES = new Set(["pin", "password"]);
 
 /**
- * Stored key → app field. Dates are epoch seconds. `registeredAt` and `couponId`
- * are omitted: registration time follows `renewedAt`, and the coupon id lives on
- * the Mongo redemption keyed by Zelf ID.
+ * Short keys from dev pins written before the long-key format was restored.
+ * Read-only: new pins use the long names below.
  */
 const EXTRA_PARAMS_SHORT_KEYS = {
     hasPassword: "hp",
@@ -121,9 +120,6 @@ const EXTRA_PARAMS_SHORT_TO_LONG = Object.fromEntries(Object.entries(EXTRA_PARAM
 
 const EXTRA_PARAMS_DATE_FIELDS = new Set(["renewedAt", "expiresAt", "planExpiresAt"]);
 
-/** Not written to the pin. */
-const EXTRA_PARAMS_OMIT_KEYS = new Set(["registeredAt", "couponId"]);
-
 const EXTRA_PARAMS_COMPACT_ORDER = [
     "hasPassword",
     "origin",
@@ -141,8 +137,26 @@ const EXTRA_PARAMS_COMPACT_ORDER = [
     "eventPrice",
 ];
 
-/** Drop only these when the compact JSON is still over 250. Plan, lease, and price stay. */
+/** Drop only these when the JSON is still over 250. Plan, lease, duration, and price stay. */
 const EXTRA_PARAMS_OPTIONAL_KEYS = ["eventID", "eventPrice"];
+
+/** Leave this many characters under the provider cap before moving new plan-term fields out of the pin. */
+const PIN_EXTRA_PARAMS_MARGIN = 20;
+const PIN_EXTRA_PARAMS_SAFE_LENGTH = PINATA_KEYVALUE_MAX_LENGTH - PIN_EXTRA_PARAMS_MARGIN;
+
+/**
+ * Value v3 already stores: `"1"` … `"5"`, `"100"`, `"lifetime"`. `1y` is the my-plan label, not the pin.
+ * @param {string|number} duration
+ * @returns {string|undefined}
+ */
+const canonicalStoredDuration = (duration) => {
+    const raw = `${duration ?? ""}`.trim().toLowerCase();
+    if (!raw) return undefined;
+    if (raw === "lifetime" || raw === "999") return "lifetime";
+    const years = raw.endsWith("y") ? raw.slice(0, -1) : raw;
+    if (/^\d+$/.test(years) && Number(years) > 0) return String(Number(years));
+    return raw;
+};
 
 const storedMetadataTooLong = () => {
     const error = new Error("409:stored_metadata_too_long");
@@ -152,21 +166,11 @@ const storedMetadataTooLong = () => {
     return error;
 };
 
-const toEpochSeconds = (value) => {
-    if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
-    const text = String(value ?? "").trim();
-    if (/^\d{9,12}$/.test(text)) return Number(text);
-    const strict = moment(text, "YYYY-MM-DD HH:mm:ss", true);
-    const parsed = strict.isValid() ? strict : moment(text);
-    if (!parsed.isValid()) return undefined;
-    return parsed.unix();
-};
-
 const fromEpochSeconds = (value) => {
-    if (typeof value === "string" && moment(value, "YYYY-MM-DD HH:mm:ss", true).isValid()) return value;
+    if (typeof value === "string" && moment.utc(value, "YYYY-MM-DD HH:mm:ss", true).isValid()) return value;
     const text = String(value ?? "").trim();
     if (typeof value !== "number" && !/^\d{9,12}$/.test(text)) return value;
-    const parsed = moment.unix(Number(text));
+    const parsed = moment.unix(Number(text)).utc();
     if (!parsed.isValid()) return value;
     return parsed.format("YYYY-MM-DD HH:mm:ss");
 };
@@ -203,28 +207,6 @@ const expandStoredExtraParams = (extraParams = {}) => {
     }
 
     return expanded;
-};
-
-/**
- * Short keys and epoch-second dates for the pin. Drops `registeredAt` and `couponId`.
- * @param {Object|string} extraParams
- * @returns {Object}
- */
-const compactStoredExtraParams = (extraParams = {}) => {
-    const expanded = expandStoredExtraParams(extraParams);
-    const compact = {};
-
-    for (const longKey of EXTRA_PARAMS_COMPACT_ORDER) {
-        if (EXTRA_PARAMS_OMIT_KEYS.has(longKey)) continue;
-        const value = expanded[longKey];
-        if (value === undefined || value === null || value === "") continue;
-        const stored = EXTRA_PARAMS_DATE_FIELDS.has(longKey) ? toEpochSeconds(value) : value;
-        if (stored === undefined || stored === null || stored === "") continue;
-        const shortKey = EXTRA_PARAMS_SHORT_KEYS[longKey] || longKey;
-        compact[shortKey] = stored;
-    }
-
-    return compact;
 };
 
 const assertPinataKeyvalue = (key, value) => {
@@ -472,24 +454,53 @@ const pickAllowedExtraParams = (extraParams = {}) => {
 };
 
 /**
- * Keep `extraParams` to the known lease schema and under Pinata's 250-char cap.
- * Addresses, referral, session JWTs, and other publicData do not belong here.
- * Over-limit values throw. They are not dropped and then pinned without a lease.
+ * Long keys and ISO dates for the pin. Short-key input is expanded first and not written back.
+ * `couponId` stays out of the pin. When the JSON would not clear the safe length, `planExpiresAt`
+ * and `paymentMethod` move to `planTerm` (saved in Mongo by the caller). `plan`, `expiresAt`,
+ * `duration`, and `registeredAt` stay in the pin for v3 and the dashboard.
+ * Throws `stored_metadata_too_long` when the pin would still exceed 250 characters.
+ * @param {Object|string} extraParams
+ * @returns {{ extraParams: Object, planTerm: { plan: string|null, planExpiresAt: string|null, paymentMethod: string|null }|null }}
+ */
+const fitExtraParamsForPin = (extraParams) => {
+    if (!extraParams || typeof extraParams !== "object") return { extraParams, planTerm: null };
+
+    const expanded = expandStoredExtraParams(extraParams);
+    if (expanded.duration != null && expanded.duration !== "") {
+        expanded.duration = canonicalStoredDuration(expanded.duration);
+    }
+
+    const picked = pickAllowedExtraParams(expanded);
+    delete picked.couponId;
+
+    let planTerm = null;
+    if (JSON.stringify(picked).length > PIN_EXTRA_PARAMS_SAFE_LENGTH) {
+        planTerm = {
+            plan: picked.plan || null,
+            planExpiresAt: picked.planExpiresAt || null,
+            paymentMethod: picked.paymentMethod || null,
+        };
+        delete picked.planExpiresAt;
+        delete picked.paymentMethod;
+    }
+
+    for (const key of EXTRA_PARAMS_OPTIONAL_KEYS) {
+        if (JSON.stringify(picked).length <= PINATA_KEYVALUE_MAX_LENGTH) break;
+        delete picked[key];
+    }
+
+    assertPinataKeyvalue("extraParams", picked);
+    return { extraParams: picked, planTerm };
+};
+
+/**
+ * Pin-ready `extraParams`. Same as {@link fitExtraParamsForPin} without the Mongo plan term.
  * @param {Object} extraParams
  * @returns {Object}
  */
 const cleanExtraParamsForPinata = (extraParams) => {
     if (!extraParams || typeof extraParams !== "object") return extraParams;
-
-    const compact = compactStoredExtraParams(pickAllowedExtraParams(extraParams));
-
-    for (const longKey of EXTRA_PARAMS_OPTIONAL_KEYS) {
-        if (JSON.stringify(compact).length <= PINATA_KEYVALUE_MAX_LENGTH) break;
-        delete compact[EXTRA_PARAMS_SHORT_KEYS[longKey] || longKey];
-    }
-
-    assertPinataKeyvalue("extraParams", compact);
-    return compact;
+    return fitExtraParamsForPin(extraParams).extraParams;
 };
 
 const serializePinataValue = (value) => (typeof value === "object" ? JSON.stringify(value) : String(value));
@@ -677,10 +688,13 @@ module.exports = {
     buildUpsertPrimarySearchableKeyvalues,
     buildSearchablePinPages,
     buildTopLevelAddressKeyvalues,
+    PIN_EXTRA_PARAMS_MARGIN,
+    PIN_EXTRA_PARAMS_SAFE_LENGTH,
     assertPinataKeyvalue,
+    canonicalStoredDuration,
     cleanExtraParamsForPinata,
-    compactStoredExtraParams,
     expandStoredExtraParams,
+    fitExtraParamsForPin,
     collectReservedKeyvalues,
     continuationPinName,
     expandPackedAddresses,

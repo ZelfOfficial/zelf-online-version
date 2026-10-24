@@ -6,7 +6,14 @@ const jwt = require("jsonwebtoken");
 const { keccak256, solidityPacked, parseUnits, getAddress } = require("ethers");
 const config = require("../../../Core/config");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
-const { cleanExtraParamsForPinata, resolveEncryptVersion, stampExtraParamsVersion } = require("../../Tags/modules/tags-addresses.module");
+const { fitExtraParamsForPin, resolveEncryptVersion, stampExtraParamsVersion } = require("../../Tags/modules/tags-addresses.module");
+
+const utcDate = () => moment.utc().format("YYYY-MM-DD HH:mm:ss");
+const utcFromNow = (amount, unit) => moment.utc().add(amount, unit).format("YYYY-MM-DD HH:mm:ss");
+const utcParse = (value) => {
+    const strict = moment.utc(value, "YYYY-MM-DD HH:mm:ss", true);
+    return strict.isValid() ? strict : moment.utc(value);
+};
 const TagsIpfsModule = require("../../Tags/modules/tags-ipfs.module");
 const TagsArweaveModule = require("../../Tags/modules/tags-arweave.module");
 const TagsSearchModule = require("../../Tags/modules/tags-search.module");
@@ -214,8 +221,8 @@ const createTagPay = async (tagPayObject, tagObject, priceDetails, currentCount,
             btcAddress: tagPayObject.publicData.btcAddress,
             [domainConfig.getTagKey()]: tagPayObject.tagPayName,
             extraParams: JSON.stringify({
-                expiresAt: moment().add(100, "year").format("YYYY-MM-DD HH:mm:ss"),
-                registeredAt: moment().format("YYYY-MM-DD HH:mm:ss"),
+                expiresAt: utcFromNow(100, "year"),
+                registeredAt: utcDate(),
                 price: priceDetails.price,
                 duration: priceDetails.duration,
                 count: `${currentCount}`,
@@ -419,9 +426,7 @@ const resolveNameAndPlanTerm = ({ basePublicData = {}, duration, plan }) => {
             return { leaseExpiresAt, planExpiresAt: undefined, duration: "lifetime" };
         }
         if (planTermOpen && samePlan) {
-            const previous = moment(basePublicData.planExpiresAt, "YYYY-MM-DD HH:mm:ss", true).isValid()
-                ? moment(basePublicData.planExpiresAt, "YYYY-MM-DD HH:mm:ss")
-                : moment(basePublicData.planExpiresAt);
+            const previous = utcParse(basePublicData.planExpiresAt);
             return {
                 leaseExpiresAt,
                 planExpiresAt: previous.add(paymentDurationYears(purchased), "year").format("YYYY-MM-DD HH:mm:ss"),
@@ -433,7 +438,7 @@ const resolveNameAndPlanTerm = ({ basePublicData = {}, duration, plan }) => {
         }
         return {
             leaseExpiresAt,
-            planExpiresAt: moment().add(paymentDurationYears(purchased), "year").format("YYYY-MM-DD HH:mm:ss"),
+            planExpiresAt: utcFromNow(paymentDurationYears(purchased), "year"),
             duration: purchased,
         };
     }
@@ -471,7 +476,8 @@ const buildMetadata = (params, tagObject, domainConfig) => {
         price: params.paymentMethod === "gift" || params.paymentMethod === "coupon" || params.paymentMethod === "whitelist" ? 0 : price,
         paymentMethod: params.paymentMethod || undefined,
         duration: term.duration,
-        renewedAt: tagObject.publicData.type === "mainnet" ? moment().format("YYYY-MM-DD HH:mm:ss") : undefined,
+        registeredAt: utcDate(),
+        renewedAt: tagObject.publicData.type === "mainnet" ? utcDate() : undefined,
         expiresAt: term.leaseExpiresAt,
         planExpiresAt: term.planExpiresAt,
         type: "mainnet",
@@ -498,9 +504,10 @@ const buildMetadata = (params, tagObject, domainConfig) => {
         metadata.referral = JSON.stringify(metadata.referral);
     }
 
-    metadata.extraParams = JSON.stringify(cleanExtraParamsForPinata(metadata.extraParams));
+    const fitted = fitExtraParamsForPin(metadata.extraParams);
+    metadata.extraParams = JSON.stringify(fitted.extraParams);
 
-    return { metadata, fullTagName: tagObject.fullTagName };
+    return { metadata, fullTagName: tagObject.fullTagName, planTerm: fitted.planTerm };
 };
 
 /**
@@ -520,9 +527,9 @@ const buildFreePlanRevertMetadata = (params, tagObject, domainConfig) => {
         origin: tagObject.publicData.origin || "online",
         price: tagObject.publicData.price,
         duration: "1",
-        registeredAt: tagObject.publicData.registeredAt || moment().format("YYYY-MM-DD HH:mm:ss"),
-        renewedAt: moment().format("YYYY-MM-DD HH:mm:ss"),
-        expiresAt: moment().add(FREE_EXPIRATION_YEARS, "year").format("YYYY-MM-DD HH:mm:ss"),
+        registeredAt: tagObject.publicData.registeredAt || utcDate(),
+        renewedAt: utcDate(),
+        expiresAt: utcFromNow(FREE_EXPIRATION_YEARS, "year"),
         type: "mainnet",
         hasPassword: tagObject.publicData.hasPassword,
         eventID: params.eventID || undefined,
@@ -536,9 +543,10 @@ const buildFreePlanRevertMetadata = (params, tagObject, domainConfig) => {
         extraParams: stampExtraParamsVersion(extraParams, encryptVersion),
     };
 
-    metadata.extraParams = JSON.stringify(cleanExtraParamsForPinata(metadata.extraParams));
+    const fitted = fitExtraParamsForPin(metadata.extraParams);
+    metadata.extraParams = JSON.stringify(fitted.extraParams);
 
-    return { metadata, fullTagName: tagObject.fullTagName };
+    return { metadata, fullTagName: tagObject.fullTagName, planTerm: null, clearPlanTerm: true };
 };
 
 /**
@@ -560,8 +568,8 @@ const buildPlanChangeMetadata = (params, tagObject, domainConfig) => {
         origin: tagObject.publicData.origin || "online",
         price: tagObject.publicData.price,
         duration: tagObject.publicData.duration,
-        registeredAt: tagObject.publicData.registeredAt || moment().format("YYYY-MM-DD HH:mm:ss"),
-        renewedAt: moment().format("YYYY-MM-DD HH:mm:ss"),
+        registeredAt: tagObject.publicData.registeredAt || utcDate(),
+        renewedAt: utcDate(),
         expiresAt: tagObject.publicData.expiresAt,
         type: "mainnet",
         hasPassword: tagObject.publicData.hasPassword,
@@ -576,9 +584,10 @@ const buildPlanChangeMetadata = (params, tagObject, domainConfig) => {
         extraParams: stampExtraParamsVersion(extraParams, encryptVersion),
     };
 
-    metadata.extraParams = JSON.stringify(cleanExtraParamsForPinata(metadata.extraParams));
+    const fitted = fitExtraParamsForPin(metadata.extraParams);
+    metadata.extraParams = JSON.stringify(fitted.extraParams);
 
-    return { metadata, fullTagName: tagObject.fullTagName };
+    return { metadata, fullTagName: tagObject.fullTagName, planTerm: fitted.planTerm };
 };
 
 /**

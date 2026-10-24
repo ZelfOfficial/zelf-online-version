@@ -298,7 +298,8 @@ const resolveComplimentaryPlan = ({ price } = {}) => {
 const normalizePaymentDuration = (duration = "1") => {
     const raw = `${duration ?? "1"}`.trim().toLowerCase();
     if (raw === "999" || raw === "lifetime") return "lifetime";
-    if (/^\d+$/.test(raw) && Number(raw) > 0) return String(Number(raw));
+    const years = raw.endsWith("y") ? raw.slice(0, -1) : raw;
+    if (/^\d+$/.test(years) && Number(years) > 0) return String(Number(years));
     return raw || "1";
 };
 
@@ -363,12 +364,14 @@ const isUnpaidReservation = (publicData = {}) => {
  * @param {Object} [publicData]
  * @returns {boolean}
  */
+const parseUtcDate = (value) => {
+    const strict = moment.utc(value, "YYYY-MM-DD HH:mm:ss", true);
+    return strict.isValid() ? strict : moment.utc(value);
+};
+
 const isExpiresAtPassed = (publicData = {}) => {
     if (!publicData.expiresAt) return false;
-
-    return moment(publicData.expiresAt, "YYYY-MM-DD HH:mm:ss", true).isValid()
-        ? moment(publicData.expiresAt, "YYYY-MM-DD HH:mm:ss").isBefore(moment())
-        : moment(publicData.expiresAt).isBefore(moment());
+    return parseUtcDate(publicData.expiresAt).isBefore(moment.utc());
 };
 
 /**
@@ -504,21 +507,20 @@ const hasActivePaidLease = (publicData = {}) => {
 const resolvePaidExpiresAt = ({ publicData = {}, duration, durationYears } = {}) => {
     const years = durationYears ?? paymentDurationYears(duration);
     const fromNow = () =>
-        moment()
+        moment
+            .utc()
             .add(isLifetimeDuration(duration) ? LIFETIME_EXPIRATION_YEARS : years || 1, "year")
             .format("YYYY-MM-DD HH:mm:ss");
 
     if (!hasActivePaidLease(publicData) || !publicData.expiresAt) return fromNow();
 
-    const parsed = moment(publicData.expiresAt, "YYYY-MM-DD HH:mm:ss", true).isValid()
-        ? moment(publicData.expiresAt, "YYYY-MM-DD HH:mm:ss")
-        : moment(publicData.expiresAt);
+    const parsed = parseUtcDate(publicData.expiresAt);
 
     // An active paid lease is never shortened: lifetime keeps its horizon, and a
     // lifetime purchase on top of a longer stored expiry keeps the longer one.
     if (isLifetimeDuration(duration)) {
         const lifetime = fromNow();
-        return moment(lifetime, "YYYY-MM-DD HH:mm:ss").isAfter(parsed) ? lifetime : parsed.format("YYYY-MM-DD HH:mm:ss");
+        return parseUtcDate(lifetime).isAfter(parsed) ? lifetime : parsed.format("YYYY-MM-DD HH:mm:ss");
     }
     if (publicData.duration === "lifetime") return parsed.format("YYYY-MM-DD HH:mm:ss");
 

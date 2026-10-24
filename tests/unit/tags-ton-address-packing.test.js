@@ -424,7 +424,7 @@ describe("TON tag address packing (publish safety)", () => {
 			});
 			expect(mainnet.plan).toBeUndefined();
 			expect(mainnet.expiresAt).toBe("2027-09-01 21:00:00");
-			expect(mainnet.registeredAt).toBeUndefined();
+			expect(mainnet.registeredAt).toBe("2026-09-01 21:00:00");
 			expect(mainnet.v).toBe(3);
 
 			const expired = buildRepinExtraParams({

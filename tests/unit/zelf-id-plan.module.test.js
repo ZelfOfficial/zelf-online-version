@@ -374,6 +374,8 @@ describe("zelf-id-plan.module", () => {
 		expect(normalizePaymentDuration(999)).toBe("lifetime");
 		expect(normalizePaymentDuration("lifetime")).toBe("lifetime");
 		expect(normalizePaymentDuration("4")).toBe("4");
+		expect(normalizePaymentDuration("1y")).toBe("1");
+		expect(normalizePaymentDuration("5y")).toBe("5");
 		expect(paymentDurationYears("lifetime")).toBe(100);
 		expect(paymentDurationYears("3")).toBe(3);
 	});

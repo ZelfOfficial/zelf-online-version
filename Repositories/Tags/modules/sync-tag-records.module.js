@@ -9,7 +9,7 @@ const TagsPartsModule = require("./tags-parts.module");
 const TagsArweaveModule = require("./tags-arweave.module");
 const TagsIPFSModule = require("./tags-ipfs.module");
 const { getDomainConfig } = require("../config/supported-domains");
-const { SEARCHABLE_ADDRESS_FIELDS, cleanExtraParamsForPinata, resolveEncryptVersion, stampExtraParamsVersion } = require("./tags-addresses.module");
+const { SEARCHABLE_ADDRESS_FIELDS, fitExtraParamsForPin, resolveEncryptVersion, stampExtraParamsVersion } = require("./tags-addresses.module");
 const { upgrade } = require("../../ZelfProof/modules/zelf-proof.module");
 const { generateQRFromZelfProof } = require("./qr-zelfproof-extractor.module");
 const { effectivePlan, isUnpaidReservation } = require("../../ZelfID/modules/zelf-id-plan.module");
@@ -56,6 +56,7 @@ const buildRepinExtraParams = (publicData = {}, options = {}) => {
             hasPassword: publicData.hasPassword,
             origin: publicData.origin || "online",
             renewedAt: keepStoredValue(publicData.renewedAt),
+            registeredAt: keepStoredValue(publicData.registeredAt),
             expiresAt: keepStoredValue(publicData.expiresAt),
             planExpiresAt: keepStoredValue(publicData.planExpiresAt),
             paymentMethod: keepStoredValue(publicData.paymentMethod),
@@ -70,8 +71,9 @@ const buildRepinExtraParams = (publicData = {}, options = {}) => {
         extraParams.st = publicData.st;
     }
 
-    if (keepStoredValue(publicData.plan) !== undefined) {
-        extraParams.plan = publicData.plan;
+    const pinnedPlan = Object.prototype.hasOwnProperty.call(publicData, "_pinnedPlan") ? publicData._pinnedPlan : publicData.plan;
+    if (keepStoredValue(pinnedPlan) !== undefined) {
+        extraParams.plan = pinnedPlan;
     }
 
     return extraParams;
@@ -179,7 +181,8 @@ const updateTags = async (tagObject, tagsToAdd, options = {}) => {
 
     const zelfProofQRCode = tagObject.zelfProofQRCode || tagObject.publicData.zelfProofQRCode;
 
-    const extraParams = cleanExtraParamsForPinata(buildRepinExtraParams(tagObject.publicData));
+    const fitted = fitExtraParamsForPin(buildRepinExtraParams(tagObject.publicData));
+    const extraParams = fitted.extraParams;
 
     const metadata = {
         [tagKey]: tagName,
@@ -205,6 +208,17 @@ const updateTags = async (tagObject, tagsToAdd, options = {}) => {
     }
 
     metadata.extraParams = JSON.stringify(metadata.extraParams);
+
+    if (fitted.planTerm && tagName) {
+        const { savePlanTerm } = require("../../ZelfID/modules/zelf-id-plan-term.module");
+        await savePlanTerm({
+            zelfName: tagName,
+            domain: tagObject.publicData.domain || "zelf",
+            plan: fitted.planTerm.plan,
+            planExpiresAt: fitted.planTerm.planExpiresAt,
+            paymentMethod: fitted.planTerm.paymentMethod,
+        });
+    }
 
     const oldPrimaryId = tagObject.id ? tagObject.ipfsId || tagObject.id : null;
     const oldContinuationIds = await TagsIPFSModule.listContinuationSiblingPinIds(tagName);

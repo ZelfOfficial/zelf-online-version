@@ -23,8 +23,8 @@ const displayDuration = (duration) => {
 
 const toIso = (value) => {
     if (!value) return null;
-    const strict = moment(value, "YYYY-MM-DD HH:mm:ss", true);
-    const parsed = strict.isValid() ? strict : moment(value);
+    const strict = moment.utc(value, "YYYY-MM-DD HH:mm:ss", true);
+    const parsed = strict.isValid() ? strict : moment.utc(value);
     if (!parsed.isValid()) return null;
     return parsed.toISOString();
 };
@@ -144,9 +144,8 @@ const buildMyPlan = async (tagObject, { zelfName, domainConfig, createBillingPor
         plan,
         planExpiresAt,
         leaseExpiresAt,
-        // Alias of the plan term when this name uses one. Otherwise the stored expiresAt
-        // (a name that was paid from the start keeps that as its only date).
-        expiresAt: planExpiresAt || leaseExpiresAt,
+        // Name lease. Older clients read this field as the name's expiry.
+        expiresAt: leaseExpiresAt,
         duration,
         paymentMethod,
         nextPlans,

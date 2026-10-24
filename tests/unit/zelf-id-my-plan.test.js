@@ -154,7 +154,8 @@ describe("Zelf ID my-plan", () => {
         expect(active.duration).toBe("1y");
         expect(active.leaseExpiresAt).toBe("2126-10-24T18:00:00.000Z");
         expect(active.planExpiresAt).toBe(moment(planExpiresAt, "YYYY-MM-DD HH:mm:ss").toISOString());
-        expect(active.expiresAt).toBe(active.planExpiresAt);
+        expect(active.expiresAt).toBe(active.leaseExpiresAt);
+        expect(active.expiresAt).toBe("2126-10-24T18:00:00.000Z");
         expect(moment(active.planExpiresAt).diff(moment(), "year", true)).toBeGreaterThan(0.9);
         expect(moment(active.planExpiresAt).diff(moment(), "year", true)).toBeLessThan(1.2);
 
@@ -171,6 +172,8 @@ describe("Zelf ID my-plan", () => {
         expect(lapsed.plan).toBe("free");
         expect(lapsed.duration).toBeNull();
         expect(lapsed.leaseExpiresAt).toBe("2126-10-24T18:00:00.000Z");
+        expect(lapsed.expiresAt).toBe(lapsed.leaseExpiresAt);
+        expect(moment.utc(lapsed.planExpiresAt).isBefore(moment.utc())).toBe(true);
         expect(lapsed.nextPlans).toEqual(["premium", "unlimited"]);
     });
 
