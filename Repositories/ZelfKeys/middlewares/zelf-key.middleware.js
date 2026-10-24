@@ -517,7 +517,9 @@ const previewValidation = async (ctx, next) => {
 	await next();
 };
 
-const summaryValidation = async (_ctx, next) => {
+const summaryValidation = async (ctx, next) => {
+	if (!(await requireVerifiedWallet(ctx))) return;
+
 	await next();
 };
 
@@ -547,7 +549,7 @@ const requireZelfIdentity = (ctx) => {
 
 /**
  * The session must carry a current server stamp for the same normalized wallet as the token.
- * Used by /limits and by reads that return item metadata (website, username, type).
+ * Used by /limits, /summary, and by reads that return item metadata (website, username, type).
  */
 const requireVerifiedWallet = async (ctx) => {
 	const authUser = ctx.state.user;

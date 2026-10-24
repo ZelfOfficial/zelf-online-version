@@ -35,56 +35,13 @@ const get = async (params, authUser = {}) => {
 };
 
 /**
+ * Every call creates a new session record and a token for that record only.
+ * Lookup by IP, tag, or identifier is intentionally not done: a second token must not
+ * share or clear another session's verification stamp.
  * @param {*} params
  */
 const insert = async (params) => {
-	const queryParams = {
-		findOne: true,
-	};
-
-	queryParams.where_clientIP = params.clientIP;
-
-	if (params.tagName) queryParams["?where_tagName"] = params.tagName;
-	if (params.identifier) queryParams["?where_identifier"] = params.identifier;
-
-	let existingSession = await get(queryParams);
-
-	if (existingSession) {
-		if (params.killSession) {
-			try {
-				await existingSession.deleteOne();
-			} catch (_) {
-				// session was already deleted by a concurrent request, which is fine
-			}
-
-			existingSession = null;
-		} else {
-			// A newly requested token must not inherit a previous face check.
-			await Model.updateOne(
-				{ _id: existingSession._id },
-				{ $set: { verifiedTagName: null, verifiedAt: null, verifiedUntil: null } }
-			);
-			existingSession.verifiedTagName = null;
-			existingSession.verifiedAt = null;
-			existingSession.verifiedUntil = null;
-
-			return {
-				token: jwt.sign(
-					{
-						domain: existingSession.domain,
-						ethAddress: existingSession.ethAddress,
-						identifier: existingSession.identifier,
-						ip: existingSession.clientIP,
-						session: existingSession._id,
-						tagName: existingSession.tagName,
-					},
-					config.JWT_SECRET
-				),
-				activatedAt: moment(existingSession.activatedAt).utc().unix(),
-				expiresAt: moment(existingSession.activatedAt).utc().add(10, "minutes").unix(),
-			};
-		}
-	}
+	await Model.ensureNonUniqueIdentifierIndex();
 
 	const session = new Model({
 		clientIP: params.clientIP,
@@ -107,8 +64,9 @@ const insert = async (params) => {
 		console.error({
 			exception,
 			identifier: params.clientIP,
-			...session,
 		});
+
+		throw exception;
 	}
 
 	return {
@@ -329,7 +287,15 @@ const walletDecrypt = async (content, walletScopeKey, password, legacyIdentifier
  * @author Miguel Trevino
  */
 const deleteSession = async (authUser) => {
-	return await Model.deleteMany({ identifier: authUser.identifier });
+	if (authUser?.session) {
+		return await Model.deleteOne({ _id: authUser.session });
+	}
+
+	if (authUser?.identifier) {
+		return await Model.deleteMany({ identifier: authUser.identifier });
+	}
+
+	return null;
 };
 
 /**
@@ -340,6 +306,7 @@ const deleteSession = async (authUser) => {
  * @param {string} [domain]
  */
 const markSessionIdentityVerified = async (authUser, tagName, domain) => {
+	// Stamp only the session id on the unlock request. Never match by IP or tag.
 	if (!authUser?.session) return null;
 
 	const normalized = normalizeZelfName(tagName, domain || authUser.domain || "zelf");

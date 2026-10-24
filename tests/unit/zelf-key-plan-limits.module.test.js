@@ -567,32 +567,169 @@ describe("GET /api/zelf-keys/limits session ownership", () => {
     });
 });
 
-describe("POST /api/sessions reuse", () => {
-    test("a reused session does not keep a previous verification stamp", async () => {
-        config.JWT_SECRET = config.JWT_SECRET || "test-session-secret";
-        const identifier = `reuse-${Date.now()}`;
-        const created = await SessionModule.insert({
-            clientIP: "203.0.113.10",
-            identifier,
-            tagName: "JimBot",
-            domain: "zelf",
+describe("POST /api/sessions one record per token", () => {
+    const sessionPayload = (suffix) => ({
+        clientIP: "203.0.113.10",
+        identifier: `pair-${suffix}`,
+        tagName: "JimBot",
+        domain: "zelf",
+    });
+
+    const continueIfAllowed = async (validation, user, query) => {
+        const ctx = {
+            request: { query: query || {} },
+            state: { user },
+            status: undefined,
+            body: undefined,
+        };
+        let continued = false;
+        await validation(ctx, async () => {
+            continued = true;
         });
+        return { ctx, continued };
+    };
+
+    beforeAll(() => {
+        config.JWT_SECRET = config.JWT_SECRET || "test-session-secret";
+    });
+
+    test("two tokens from the same IP and tag are separate sessions", async () => {
+        const payload = sessionPayload(Date.now());
+        const [first, second] = await Promise.all([SessionModule.insert(payload), SessionModule.insert(payload)]);
+        const firstId = jwt.decode(first.token).session;
+        const secondId = jwt.decode(second.token).session;
+
+        expect(String(firstId)).not.toBe(String(secondId));
+        expect(await Session.countDocuments({ identifier: payload.identifier })).toBe(2);
+
+        await SessionModule.markSessionIdentityVerified({ session: firstId, domain: "zelf" }, "JimBot", "zelf");
+
+        const firstStored = await Session.findById(firstId).lean();
+        const secondStored = await Session.findById(secondId).lean();
+        expect(firstStored.verifiedTagName).toBe("jimbot.zelf");
+        expect(secondStored.verifiedTagName).toBeFalsy();
+        expect(secondStored.verifiedAt).toBeFalsy();
+        expect(secondStored.verifiedUntil).toBeFalsy();
+
+        const owner = { domain: "zelf" };
+        const allowed = await continueIfAllowed(Middleware.limitsValidation, { ...owner, session: firstId, tagName: "JimBot" });
+        expect(allowed.continued).toBe(true);
+
+        const blockedLimits = await continueIfAllowed(Middleware.limitsValidation, { ...owner, session: secondId, tagName: "JimBot" });
+        expect(blockedLimits.continued).toBe(false);
+        expect(blockedLimits.ctx.status).toBe(403);
+        expect(blockedLimits.ctx.body.code).toBe("ERR_SESSION_NOT_VERIFIED");
+
+        const blockedList = await continueIfAllowed(Middleware.listValidation, { ...owner, session: secondId, tagName: "JimBot" }, { category: "password" });
+        expect(blockedList.continued).toBe(false);
+        expect(blockedList.ctx.status).toBe(403);
+        expect(blockedList.ctx.body.code).toBe("ERR_SESSION_NOT_VERIFIED");
+    });
+
+    test("a session create after unlock does not clear that session", async () => {
+        const payload = sessionPayload(`unlock-${Date.now()}`);
+        const created = await SessionModule.insert(payload);
         const sessionId = jwt.decode(created.token).session;
-        await SessionModule.markSessionIdentityVerified({ session: sessionId, domain: "zelf" }, "JimBot", "zelf");
+
+        const [, concurrent] = await Promise.all([
+            SessionModule.markSessionIdentityVerified({ session: sessionId, domain: "zelf" }, "JimBot", "zelf"),
+            SessionModule.insert(payload),
+        ]);
+
+        expect(String(jwt.decode(concurrent.token).session)).not.toBe(String(sessionId));
         expect((await Session.findById(sessionId).lean()).verifiedTagName).toBe("jimbot.zelf");
 
-        const again = await SessionModule.insert({
-            clientIP: "203.0.113.10",
-            identifier,
+        const later = await SessionModule.insert(payload);
+        const laterId = jwt.decode(later.token).session;
+        const unlocked = await Session.findById(sessionId).lean();
+
+        expect(String(laterId)).not.toBe(String(sessionId));
+        expect(unlocked.verifiedTagName).toBe("jimbot.zelf");
+        expect(unlocked.verifiedAt).toBeTruthy();
+        expect((await Session.findById(laterId).lean()).verifiedTagName).toBeFalsy();
+
+        const allowed = await continueIfAllowed(Middleware.limitsValidation, {
+            session: sessionId,
             tagName: "JimBot",
             domain: "zelf",
         });
-        const reused = await Session.findById(jwt.decode(again.token).session).lean();
+        expect(allowed.continued).toBe(true);
 
-        expect(String(reused._id)).toBe(String(sessionId));
-        expect(reused.verifiedTagName).toBeFalsy();
-        expect(reused.verifiedAt).toBeFalsy();
-        expect(reused.verifiedUntil).toBeFalsy();
+        const blocked = await continueIfAllowed(Middleware.limitsValidation, {
+            session: laterId,
+            tagName: "JimBot",
+            domain: "zelf",
+        });
+        expect(blocked.continued).toBe(false);
+        expect(blocked.ctx.status).toBe(403);
+        expect(blocked.ctx.body.code).toBe("ERR_SESSION_NOT_VERIFIED");
+    });
+
+    test("a legacy unique identifier index still allows a second token", async () => {
+        await Session.deleteMany({});
+        const indexes = await Session.collection.indexes();
+        const current = indexes.find((index) => index.key && index.key.identifier === 1 && Object.keys(index.key).length === 1);
+        if (current) await Session.collection.dropIndex(current.name);
+        await Session.collection.createIndex({ identifier: 1 }, { unique: true, name: "identifier_1" });
+        Session.ensureNonUniqueIdentifierIndex.reset();
+
+        const payload = sessionPayload(`legacy-${Date.now()}`);
+        const first = await SessionModule.insert(payload);
+        const second = await SessionModule.insert(payload);
+
+        expect(String(jwt.decode(first.token).session)).not.toBe(String(jwt.decode(second.token).session));
+        const after = await Session.collection.indexes();
+        const identifierIndex = after.find((index) => index.key && index.key.identifier === 1 && Object.keys(index.key).length === 1);
+        expect(identifierIndex?.unique).not.toBe(true);
+    });
+});
+
+describe("GET /api/zelf-keys/summary verified owner", () => {
+    const runSummary = async (user) => {
+        const ctx = {
+            request: { query: {} },
+            state: { user },
+            status: undefined,
+            body: undefined,
+        };
+        let continued = false;
+        await Middleware.summaryValidation(ctx, async () => {
+            continued = true;
+        });
+        return { ctx, continued };
+    };
+
+    const createSession = (tagName) =>
+        Session.create({
+            identifier: `summary-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            clientIP: "127.0.0.1",
+            domain: "zelf",
+            isWebExtension: true,
+            status: "active",
+            type: "general",
+            tagName,
+        });
+
+    test("an unverified session cannot read vault counts", async () => {
+        const session = await createSession("jimbot");
+        const { ctx, continued } = await runSummary({ session: session._id, tagName: "jimbot", domain: "zelf" });
+        expect(continued).toBe(false);
+        expect(ctx.status).toBe(403);
+        expect(ctx.body.code).toBe("ERR_SESSION_NOT_VERIFIED");
+    });
+
+    test("unlock then summary works, and wallet A cannot read wallet B", async () => {
+        const session = await createSession("jimBOT");
+        await SessionModule.markSessionIdentityVerified({ session: session._id, domain: "zelf" }, "jimBOT", "zelf");
+
+        const allowed = await runSummary({ session: session._id, tagName: "jimBOT", domain: "zelf" });
+        expect(allowed.continued).toBe(true);
+        expect(allowed.ctx.state.user.tagName).toBe("jimbot");
+
+        const other = await runSummary({ session: session._id, tagName: "alice", domain: "zelf" });
+        expect(other.continued).toBe(false);
+        expect(other.ctx.status).toBe(403);
+        expect(other.ctx.body.code).toBe("ERR_SESSION_OWNER_MISMATCH");
     });
 });
 

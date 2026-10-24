@@ -9,10 +9,11 @@ const { requiredEnumField, requiredField, refField, defaultField, addBasicPlugin
 //####################################################//
 
 const SessionSchema = new Schema({
+	// Not unique: each issued token has its own session, even when the client repeats an identifier.
 	identifier: {
 		type: String,
 		required: true,
-		unique: true,
+		index: true,
 	},
 	clientIP: requiredField(String),
 	domain: requiredField(String),
@@ -55,4 +56,67 @@ addBasicPlugins(SessionSchema);
 
 const Session = mongoose.model("Session", SessionSchema);
 
+let identifierIndexPromise = null;
+
+/**
+ * Existing databases may still have a unique `identifier_1` index.
+ * Drop it so a second token for the same client identifier can be stored.
+ * Fresh databases never create that unique index.
+ */
+const ensureNonUniqueIdentifierIndex = () => {
+	if (!identifierIndexPromise) {
+		identifierIndexPromise = applyNonUniqueIdentifierIndex().catch((error) => {
+			identifierIndexPromise = null;
+			throw error;
+		});
+	}
+
+	return identifierIndexPromise;
+};
+
+ensureNonUniqueIdentifierIndex.reset = () => {
+	identifierIndexPromise = null;
+};
+
+const applyNonUniqueIdentifierIndex = async () => {
+	let indexes = [];
+
+	try {
+		indexes = await Session.collection.indexes();
+	} catch (error) {
+		if (error && (error.code === 26 || error.codeName === "NamespaceNotFound")) {
+			identifierIndexPromise = null;
+			return;
+		}
+		throw error;
+	}
+
+	const legacy = indexes.find((index) => index.unique && index.key && Object.keys(index.key).length === 1 && index.key.identifier === 1);
+
+	if (legacy) await Session.collection.dropIndex(legacy.name);
+};
+
+const originalInit = Session.init;
+
+Session.init = function init() {
+	if (this.$init != null) return this.$init;
+
+	const pending = (async () => {
+		try {
+			await ensureNonUniqueIdentifierIndex();
+		} catch (error) {
+			console.error({ error, message: "session identifier index" });
+		}
+
+		if (this.$init === pending) this.$init = null;
+
+		return originalInit.call(this);
+	})();
+
+	this.$init = pending;
+
+	return pending;
+};
+
 module.exports = Session;
+module.exports.ensureNonUniqueIdentifierIndex = ensureNonUniqueIdentifierIndex;
