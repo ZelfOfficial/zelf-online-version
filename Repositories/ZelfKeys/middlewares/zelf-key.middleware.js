@@ -1,4 +1,6 @@
 const { string, validate, boolean, stringEnum, object, array, stringOrNumber } = require("../../../Core/JoiUtils");
+const { errorHandler } = require("../../../Core/http-handler");
+const PlanLimits = require("../modules/zelf-key-plan-limits.module");
 const ZelfKeyZotpModule = require("../modules/zelf-key-zotp.module");
 const { ZOTP_ALGORITHMS } = ZelfKeyZotpModule;
 
@@ -83,6 +85,9 @@ const passwordCredentialSchema = {
 	insideFolder: boolean().optional().allow(false),
 	notes: string().optional().allow(""),
 	protection: protectionField,
+	id: string().optional().allow(""),
+	cid: string().optional().allow(""),
+	recordId: string().optional().allow(""),
 };
 
 const schemas = {
@@ -98,6 +103,9 @@ const schemas = {
 		faceBase64: string().required(),
 		masterPassword: string().optional().allow(""),
 		protection: protectionField,
+		id: string().optional().allow(""),
+		cid: string().optional().allow(""),
+		recordId: string().optional().allow(""),
 	},
 	bulkPasswords: {
 		faceBase64: string().required(),
@@ -120,6 +128,9 @@ const schemas = {
 		faceBase64: string().required(),
 		masterPassword: string().optional().allow(""),
 		protection: protectionField,
+		id: string().optional().allow(""),
+		cid: string().optional().allow(""),
+		recordId: string().optional().allow(""),
 	},
 	notes: {
 		title: string().min(1).max(100).required(),
@@ -195,6 +206,13 @@ const schemas = {
 		type: stringEnum(SUPPORTED_CATEGORIES).optional(),
 		owner: string().optional().allow("").max(200),
 		search: string().optional().allow("").max(200),
+	},
+	purchaseSlot: {
+		kind: stringEnum(["password", "zotp", "2fa"]).required(),
+		idempotencyKey: string().min(8).max(128).pattern(/^[A-Za-z0-9._:-]+$/).required(),
+		faceBase64: string().required(),
+		password: string().optional().allow(""),
+		masterPassword: string().optional().allow(""),
 	},
 	delete: {
 		id: string().required(),
@@ -509,6 +527,57 @@ const changeMasterPasswordValidation = async (ctx, next) => {
 	await next();
 };
 
+const requireZelfIdentity = (ctx) => {
+	const tagName = typeof ctx.state.user?.tagName === "string" ? ctx.state.user.tagName.trim() : "";
+	if (tagName) return true;
+
+	ctx.status = 401;
+	ctx.body = {
+		message: "Authenticated Zelf identity is required",
+		code: "ERR_ZELF_IDENTITY_REQUIRED",
+	};
+	return false;
+};
+
+const limitsValidation = async (ctx, next) => {
+	if (!requireZelfIdentity(ctx)) return;
+	await next();
+};
+
+const sendPlanLimitError = (ctx, error) => {
+	const handled = errorHandler(error);
+	ctx.status = handled.status;
+	ctx.body = {
+		message: handled.message,
+		code: handled.code,
+		...(error?.details && typeof error.details === "object" ? error.details : {}),
+	};
+};
+
+const purchaseSlotValidation = async (ctx, next) => {
+	if (!requireZelfIdentity(ctx)) return;
+
+	const body = ctx.request.body || {};
+
+	try {
+		PlanLimits.normalizeKind(body.kind);
+		PlanLimits.assertIdempotencyKey(body.idempotencyKey);
+	} catch (error) {
+		sendPlanLimitError(ctx, error);
+		return;
+	}
+
+	const valid = validate(schemas.purchaseSlot, body);
+
+	if (valid.error) {
+		ctx.status = 409;
+		ctx.body = { validationError: valid.error.message };
+		return;
+	}
+
+	await next();
+};
+
 const deleteZelfKeyValidation = async (ctx, next) => {
 	const valid = validate(schemas.delete, {
 		id: ctx.request.params.id,
@@ -554,5 +623,7 @@ module.exports = {
 	domainListValidation,
 	summaryValidation,
 	changeMasterPasswordValidation,
+	limitsValidation,
+	purchaseSlotValidation,
 	deleteZelfKeyValidation,
 };
