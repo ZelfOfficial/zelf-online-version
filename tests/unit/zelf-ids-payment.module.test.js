@@ -113,6 +113,79 @@ describe("zelf-ids-payment.module", () => {
 		expect(moment(extra.expiresAt).diff(moment(), "year", true)).toBeLessThan(2);
 	});
 
+	test("a 1y coupon on a free name stays one year when the record was already rewritten as paid", () => {
+		const freePublic = {
+			origin: "online",
+			type: "mainnet",
+			plan: "free",
+			duration: 100,
+			hasPassword: "true",
+			v: "4",
+			expiresAt: moment().add(100, "year").format("YYYY-MM-DD HH:mm:ss"),
+		};
+		const rewritten = {
+			publicData: {
+				...freePublic,
+				plan: "unlimited",
+				duration: "1",
+				expiresAt: moment().add(1, "year").format("YYYY-MM-DD HH:mm:ss"),
+			},
+		};
+
+		const { metadata } = buildMetadata(
+			{
+				tagName: "myname",
+				domain: "zelf",
+				duration: 1,
+				price: 0,
+				plan: "unlimited",
+				paymentMethod: "coupon",
+				basePublicData: freePublic,
+			},
+			rewritten,
+			domainConfig
+		);
+		const extra = JSON.parse(metadata.extraParams);
+		expect(extra.duration).toBe("1");
+		expect(extra.paymentMethod).toBe("coupon");
+		expect(moment(extra.expiresAt).diff(moment(), "year", true)).toBeGreaterThan(0.9);
+		expect(moment(extra.expiresAt).diff(moment(), "year", true)).toBeLessThan(1.2);
+
+		const stacked = JSON.parse(
+			buildMetadata(
+				{ tagName: "myname", domain: "zelf", duration: 1, price: 0, plan: "unlimited", paymentMethod: "coupon" },
+				rewritten,
+				domainConfig
+			).metadata.extraParams
+		);
+		expect(stacked.duration).toBe("2");
+	});
+
+	test("a $0 whitelist grant stores paymentMethod whitelist", () => {
+		const tagObject = {
+			publicData: {
+				origin: "online",
+				type: "mainnet",
+				plan: "free",
+				duration: "1",
+				hasPassword: "true",
+				v: "4",
+				expiresAt: moment().add(1, "year").format("YYYY-MM-DD HH:mm:ss"),
+			},
+		};
+		const extra = JSON.parse(
+			buildMetadata(
+				{ tagName: "myname", domain: "zelf", duration: 1, price: 0, plan: "unlimited", paymentMethod: "whitelist" },
+				tagObject,
+				domainConfig
+			).metadata.extraParams
+		);
+		expect(extra.paymentMethod).toBe("whitelist");
+		expect(extra.price).toBe(0);
+		expect(extra.duration).toBe("1");
+		expect(moment(extra.expiresAt).diff(moment(), "year", true)).toBeLessThan(1.2);
+	});
+
 	test("buildMetadata adds years onto an active paid expiration", () => {
 		const stored = moment().add(8, "month").format("YYYY-MM-DD HH:mm:ss");
 		const tagObject = {

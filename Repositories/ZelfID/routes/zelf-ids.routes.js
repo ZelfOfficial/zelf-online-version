@@ -31,7 +31,12 @@ module.exports = (server) => {
 
     server.get(`${PATH}/payment-options`, Middleware.paymentOptionsValidation, Middleware.paymentOptionsReducedFeeGate, Controller.paymentOptions);
 
-    server.post(`${PATH}/payment-confirmation`, Middleware.paymentConfirmationValidation, Controller.paymentConfirmation);
+    server.post(
+        `${PATH}/payment-confirmation`,
+        Middleware.paymentConfirmationValidation,
+        FaceMiddleware.gate("payment-confirmation"),
+        Controller.paymentConfirmation
+    );
 
     server.post(
         `${PATH}/smart-contract-payment-confirmation`,

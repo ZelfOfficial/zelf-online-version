@@ -96,7 +96,7 @@ const claimCouponAfterPayment = async ({
  * 100% coupon: same purchase rules as a paid checkout, then the free-checkout grant.
  * The redemption is conditional and is rolled back if the grant does not stick.
  */
-const confirmCouponFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, tagObject) => {
+const confirmCouponFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, tagObject, basePublicData) => {
     const Coupons = require("./zelf-ids-coupons.module");
     const bare = tagObject.publicData[domainConfig.getTagKey()].split(".")[0];
     Coupons.assertCouponPlanRules({
@@ -129,6 +129,7 @@ const confirmCouponFreeCheckout = async (tagName, domain, tokenDecoded, domainCo
                 domainConfig,
                 paymentMethod: "coupon",
                 couponId: claimed.couponId,
+                basePublicData: basePublicData || tagObject.publicData,
             },
             tagObject
         );
@@ -303,6 +304,9 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
     if (tagData.available) throwPaymentConfirmationTagNotFound(tagName, domain);
 
     const tagObject = tagData.tagObject;
+    // Identity decrypt can repin the same record. Price the grant from the pre-check lease
+    // so a free name is not extended as if it were already a paid year.
+    const basePublicData = { ...(tagObject.publicData || {}) };
     const initiatedAt = tokenDecoded.initiatedAt ? moment.unix(tokenDecoded.initiatedAt) : null;
     const renewedAt = tagObject.publicData.renewedAt || tagObject.publicData.registeredAt;
 
@@ -335,7 +339,7 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
     });
 
     if (tokenDecoded.coupon?.valid === true && tokenDecoded.coupon?.code) {
-        return confirmCouponFreeCheckout(tagName, domain, tokenDecoded, domainConfig, tagObject);
+        return confirmCouponFreeCheckout(tagName, domain, tokenDecoded, domainConfig, tagObject, basePublicData);
     }
 
     const { assertPurchaseKeepsPaidValue } = require("./zelf-id-plan.module");
@@ -371,6 +375,8 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
             duration: tokenDecoded.duration || 1,
             plan: tokenDecoded.plan,
             domainConfig,
+            paymentMethod: "whitelist",
+            basePublicData,
         },
         tagObject
     );
@@ -380,6 +386,7 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
         expiresAt: extension.expiresAt || tagObject.publicData?.expiresAt || null,
         confirmed: true,
         amountReceived: 0,
+        paymentMethod: "whitelist",
         referralTagName: referralTagName || null,
         ipfsId: extension.ipfsId,
         arweaveId: extension.arweaveId,
@@ -405,6 +412,7 @@ const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata) 
             if (parsed.plan) {
                 tagObject.publicData = { ...tagObject.publicData, plan: parsed.plan, expiresAt, eventID: parsed.eventID };
             }
+            if (parsed.duration != null && parsed.duration !== "") tagObject.publicData.duration = parsed.duration;
             if (parsed.renewedAt) tagObject.publicData.renewedAt = parsed.renewedAt;
             if (parsed.registeredAt) tagObject.publicData.registeredAt = parsed.registeredAt;
             if (parsed.paymentMethod) tagObject.publicData.paymentMethod = parsed.paymentMethod;

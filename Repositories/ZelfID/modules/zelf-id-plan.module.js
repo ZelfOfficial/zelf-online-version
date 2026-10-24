@@ -445,8 +445,12 @@ const hasV36PaidEvidence = (publicData = {}) => {
  */
 const hasActivePaidLease = (publicData = {}) => {
     if (isUnpaidReservation(publicData) || isExpiresAtPassed(publicData)) return false;
-    if (publicData.plan === "premium" || publicData.plan === "unlimited") return true;
-    if (publicData.plan === "free") return false;
+    const plan = String(publicData.plan || "").toLowerCase();
+    if (plan === "premium" || plan === "unlimited") return true;
+    if (plan === "free") return false;
+    // The free-lease sentinel (100 years) is not a paid term to extend.
+    const storedYears = Number(publicData.duration);
+    if (Number.isFinite(storedYears) && storedYears >= PAID_HORIZON_YEARS) return false;
     return hasV36PaidEvidence(publicData);
 };
 

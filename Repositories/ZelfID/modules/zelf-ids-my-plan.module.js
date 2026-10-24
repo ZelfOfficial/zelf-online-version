@@ -43,6 +43,7 @@ const readPaymentMethod = (publicData = {}, plan) => {
     if (raw === "stripe_subscription") return "stripe_subscription";
     if (raw === "revenuecat" || raw === "revenue_cat") return "revenuecat";
     if (raw === "coupon") return "coupon";
+    if (raw === "whitelist" || raw === "free_checkout") return "whitelist";
     if (raw === "stripe") return "stripe";
     if (raw === "free") return "free";
     if (CRYPTO_METHODS.has(raw)) return "crypto";
@@ -65,7 +66,9 @@ const nextPlansFor = (zelfName, plan, domainConfig) => {
  */
 const checkoutUrl = (zelfName, plan) => {
     const normalized = normalizeZelfName(zelfName);
-    const origin = String(config.landingUrl || "https://zelf.world").replace(/\/$/, "");
+    // localhost:3009 is the dev landing fallback. Upgrade links stay on zelf.world unless LANDING_URL is set.
+    const configured = process.env.LANDING_URL;
+    const origin = String(configured && String(configured).trim() ? configured : "https://zelf.world").replace(/\/$/, "");
     const params = new URLSearchParams({
         tagname: normalized.tagName,
         domain: normalized.domain,

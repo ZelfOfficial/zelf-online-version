@@ -402,8 +402,9 @@ const buildMetadata = (params, tagObject, domainConfig) => {
     tagObject.fullTagName = getCanonicalMainnetName(params.tagName || tagObject.publicData.tagName || tagObject.publicData.zelfName, domain);
 
     const storageKey = domainConfig.getTagKey();
-    const price = params.price || tagObject.publicData.price;
-    const duration = normalizePaymentDuration(params.duration || tagObject.publicData.duration);
+    const basePublicData = params.basePublicData || tagObject.publicData;
+    const price = params.price || basePublicData.price;
+    const duration = normalizePaymentDuration(params.duration || basePublicData.duration);
     const encryptVersion = resolveEncryptVersion(tagObject.publicData);
     const requestedPlan = params.plan || params.requestedPlan;
 
@@ -412,19 +413,19 @@ const buildMetadata = (params, tagObject, domainConfig) => {
         encryptVersion,
         duration,
         requestedPlan,
-        publicData: tagObject.publicData,
+        publicData: basePublicData,
     });
     const plan = resolveUpgradePlan({ tagName: params.tagName || tagObject.fullTagName, requestedPlan, domainConfig }) || v4Stamp.plan;
 
     const extraParams = {
         origin: tagObject.publicData.origin || "online",
-        price: params.paymentMethod === "gift" || params.paymentMethod === "coupon" ? 0 : price,
+        price: params.paymentMethod === "gift" || params.paymentMethod === "coupon" || params.paymentMethod === "whitelist" ? 0 : price,
         paymentMethod: params.paymentMethod || undefined,
         couponId: params.couponId || undefined,
-        duration: resolvePaidDurationStamp({ publicData: tagObject.publicData, duration }),
+        duration: resolvePaidDurationStamp({ publicData: basePublicData, duration }),
         registeredAt: moment().format("YYYY-MM-DD HH:mm:ss"),
         renewedAt: tagObject.publicData.type === "mainnet" ? moment().format("YYYY-MM-DD HH:mm:ss") : undefined,
-        expiresAt: v4Stamp.expiresAt || resolvePaidExpiresAt({ publicData: tagObject.publicData, duration }),
+        expiresAt: v4Stamp.expiresAt || resolvePaidExpiresAt({ publicData: basePublicData, duration }),
         type: "mainnet",
         hasPassword: tagObject.publicData.hasPassword,
         eventID: params.eventID || undefined,

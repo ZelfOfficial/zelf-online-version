@@ -112,6 +112,28 @@ describe("Zelf ID my-plan", () => {
         expect(free.nextPlans).toEqual(["premium", "unlimited"]);
         expect(free.upgrade.action).toBe("checkout");
         expect(new URL(free.upgrade.url).searchParams.get("plan")).toBe("premium");
+
+        const whitelist = await buildMyPlan(lease({ paymentMethod: "whitelist", plan: "premium", duration: "1" }), {
+            zelfName: "myname.zelf",
+            domainConfig,
+        });
+        expect(whitelist.paymentMethod).toBe("whitelist");
+        expect(whitelist.duration).toBe("1y");
+        expect(whitelist.upgrade.action).toBe("checkout");
+    });
+
+    test("upgrade URL stays on zelf.world unless LANDING_URL is set", async () => {
+        const previous = process.env.LANDING_URL;
+        delete process.env.LANDING_URL;
+        config.landingUrl = "http://localhost:3009";
+        const plain = await buildMyPlan(lease({ paymentMethod: "coupon" }), { zelfName: "myname.zelf", domainConfig });
+        expect(plain.upgrade.url.startsWith("https://zelf.world/pricing?")).toBe(true);
+
+        process.env.LANDING_URL = "https://preview.example";
+        const custom = await buildMyPlan(lease({ paymentMethod: "coupon" }), { zelfName: "myname.zelf", domainConfig });
+        expect(custom.upgrade.url.startsWith("https://preview.example/pricing?")).toBe(true);
+        if (previous === undefined) delete process.env.LANDING_URL;
+        else process.env.LANDING_URL = previous;
     });
 
     test("stripe_subscription opens a billing portal and one-off stripe does not", async () => {
