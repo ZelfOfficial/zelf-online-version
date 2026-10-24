@@ -13,7 +13,7 @@ Shared lockout, proof-of-work, capture nonces, and request body whitelisting for
 
 See `Core/config.js` → `faceSecurity` and `.env.example` (`FACE_*` variables).
 
-PoW HMAC secret: generate on the server with `openssl rand -hex 32` — never commit or log a production value.
+PoW HMAC secret: every deploy must set `FACE_POW_HMAC_SECRET`. Generate it on the server with `openssl rand -hex 32` and do not commit or log the value. If it is unset, a face attempt that needs a proof-of-work challenge responds `503` with code `face_pow_unconfigured` and a message naming `FACE_POW_HMAC_SECRET`. Slot purchase uses that same face check.
 
 ## Middleware
 

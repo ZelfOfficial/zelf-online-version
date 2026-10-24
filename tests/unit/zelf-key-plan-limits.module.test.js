@@ -11,6 +11,7 @@ const { errorHandler } = require("../../Core/http-handler");
 const SlotAccount = require("../../Repositories/ZelfKeys/models/zelf-key-slot-account.model");
 const PlanLimits = require("../../Repositories/ZelfKeys/modules/zelf-key-plan-limits.module");
 const Middleware = require("../../Repositories/ZelfKeys/middlewares/zelf-key.middleware");
+const Session = require("../../Repositories/Session/models/session.model");
 const ZnsBalance = require("../../Repositories/ZelfNameService/modules/zns-transaction-detector.module");
 
 jest.setTimeout(120000);
@@ -461,6 +462,59 @@ describe("Zelf Keys extra-slot purchase", () => {
         const { handled } = await detailsOf(() => PlanLimits.getPlanUsage(device, { password: 1, zotp: 0 }, { plan: "free", balance: 10, domainConfig: null }));
         expect(handled.status).toBe(401);
         expect(handled.code).toBe("ERR_ZELF_IDENTITY_REQUIRED");
+    });
+});
+
+describe("GET /api/zelf-keys/limits session ownership", () => {
+    const run = async (user) => {
+        const ctx = { state: { user }, status: undefined, body: undefined };
+        let continued = false;
+        await Middleware.limitsValidation(ctx, async () => {
+            continued = true;
+        });
+        return { ctx, continued };
+    };
+
+    const createSession = (overrides) =>
+        Session.create({
+            identifier: `limits-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            clientIP: "127.0.0.1",
+            domain: "zelf",
+            isWebExtension: false,
+            status: "active",
+            type: "decryptWallet",
+            tagName: "alice",
+            ...overrides,
+        });
+
+    test("no session is 401", async () => {
+        const { ctx, continued } = await run(undefined);
+        expect(continued).toBe(false);
+        expect(ctx.status).toBe(401);
+        expect(ctx.body.code).toBe("ERR_SESSION_REQUIRED");
+    });
+
+    test("a session for another wallet is 403", async () => {
+        const session = await createSession({ tagName: "alice", type: "decryptWallet" });
+        const { ctx, continued } = await run({ session: session._id, tagName: "bob", domain: "zelf" });
+        expect(continued).toBe(false);
+        expect(ctx.status).toBe(403);
+        expect(ctx.body.code).toBe("ERR_SESSION_OWNER_MISMATCH");
+    });
+
+    test("a tagName-only session without identity verification is 403", async () => {
+        const session = await createSession({ tagName: "alice", type: "general" });
+        const { ctx, continued } = await run({ session: session._id, tagName: "alice", domain: "zelf" });
+        expect(continued).toBe(false);
+        expect(ctx.status).toBe(403);
+        expect(ctx.body.code).toBe("ERR_SESSION_NOT_VERIFIED");
+    });
+
+    test("a verified owner is allowed through", async () => {
+        const session = await createSession({ tagName: "alice.zelf", type: "createWallet" });
+        const { ctx, continued } = await run({ session: session._id, tagName: "alice", domain: "zelf" });
+        expect(continued).toBe(true);
+        expect(ctx.status).toBeUndefined();
     });
 });
 

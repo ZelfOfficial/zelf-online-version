@@ -94,6 +94,7 @@ To run the API locally, follow these steps:
 3. Configure environment variables:
    This is mainly for the Zelf Team, but if you require to run a version in your own server, ask for the .env to our team at miguel@verifik.co
    Ensure that you have the necessary credentials for IPFS, Ethereum, and other services in a `.env` file.
+   Deploys must set `FACE_POW_HMAC_SECRET` (`openssl rand -hex 32`). Face checks, including Zelf Keys slot purchase, need it before they can issue a proof-of-work challenge. See `Repositories/Face/README.md` and `.env.example`.
 
 4. Start the server:
    ```bash

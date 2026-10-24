@@ -12,6 +12,7 @@ process.env.FACE_POW_BASE_DIFFICULTY = "8";
 process.env.FACE_ATTEMPT_LOCKOUT_STEPS_SEC = "900,3600,86400";
 process.env.FACE_ATTEMPT_IDENTITY_WINDOW_SEC = "900";
 
+const config = require("../../Core/config");
 const FacePow = require("../../Repositories/Face/modules/face-pow.module");
 const FaceNonce = require("../../Repositories/Face/modules/face-nonce.module");
 const FaceAttemptLimiter = require("../../Repositories/Face/modules/face-attempt-limiter.module");
@@ -76,6 +77,41 @@ describe("face proof-of-work", () => {
             action: "decrypt",
         });
         expect(replay.ok).toBe(false);
+    });
+
+    it("returns a clear 503 when FACE_POW_HMAC_SECRET is missing after failed face attempts", async () => {
+        const original = config.faceSecurity.pow.hmacSecret;
+        config.faceSecurity.pow.hmacSecret = "";
+        try {
+            await FaceAttemptLimiter.recordFailedAttempt({
+                identityKey: "purchase-slot:alice@zelf",
+                deviceKey: "sess-pow-missing",
+                ip: "127.0.0.1",
+            });
+
+            const ctx = {
+                request: {
+                    body: { faceBase64: "ZmFjZQ==", kind: "password", idempotencyKey: "idem-key-01" },
+                    ip: "127.0.0.1",
+                },
+                state: { user: { tagName: "alice", domain: "zelf", session: "sess-pow-missing" } },
+                path: "/api/zelf-keys/slots",
+                status: undefined,
+                body: undefined,
+                set() {},
+                get() {},
+            };
+
+            await FaceMiddleware.gate("purchase-slot")(ctx, async () => {
+                ctx.status = 200;
+            });
+
+            expect(ctx.status).toBe(503);
+            expect(ctx.body.code).toBe("face_pow_unconfigured");
+            expect(ctx.body.message).toMatch(/FACE_POW_HMAC_SECRET/);
+        } finally {
+            config.faceSecurity.pow.hmacSecret = original;
+        }
     });
 
     it("rejects expired or wrong-identity challenges", async () => {
