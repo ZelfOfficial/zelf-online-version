@@ -199,7 +199,29 @@ confirmDescribe(`confirm under ${process.env.TZ || "default"}`, () => {
         const replay = await verifyPaymentConfirmation(bare, "zelf", "FREE", token, owner);
         expect(replay.cache).toBe(true);
         expect(replay.confirmed).toBe(true);
-        expect(await QuoteGrant.countDocuments({ source: "whitelist" })).toBe(1);
+        expect(await QuoteGrant.countDocuments({ source: "whitelist", status: "done" })).toBe(1);
+    });
+
+    test("three parallel whitelist confirms of one quote do not all grant", async () => {
+        const bare = "racewhite";
+        tags.set(bare, tagFor(bare, { referralTagName: "ref.zelf" }));
+        const token = sign(bare, { freeCheckout: true, referralTagName: "ref.zelf" });
+        const owner = await allowOwner(bare);
+
+        const results = await Promise.allSettled([
+            verifyPaymentConfirmation(bare, "zelf", "FREE", token, owner),
+            verifyPaymentConfirmation(bare, "zelf", "FREE", token, owner),
+            verifyPaymentConfirmation(bare, "zelf", "FREE", token, owner),
+        ]);
+        const granted = results.filter((result) => result.status === "fulfilled" && result.value.confirmed === true && !result.value.cache);
+        const replayed = results.filter((result) => result.status === "fulfilled" && result.value.cache === true);
+        const rejected = results.filter((result) => result.status === "rejected");
+
+        expect(granted.length + replayed.length).toBeLessThan(3);
+        expect(granted).toHaveLength(1);
+        expect(rejected.every((result) => result.reason.clientCode === "in_progress" || result.value)).toBe(true);
+        expect(rejected.length + replayed.length).toBe(2);
+        expect(await QuoteGrant.countDocuments({ source: "whitelist", status: "done" })).toBe(1);
     });
 
     test("crypto confirm grants once and does not treat a UTC registeredAt as already renewed", async () => {

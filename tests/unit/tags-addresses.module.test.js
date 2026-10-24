@@ -11,6 +11,8 @@ const {
     buildAddressKeyvalues,
     buildSearchablePinPages,
     cleanExtraParamsForPinata,
+    assertPinataKeyvalue,
+    collectAddressEntries,
     collectReservedKeyvalues,
     expandStoredExtraParams,
     fitExtraParamsForPin,
@@ -151,7 +153,7 @@ describe("tags-addresses.module", () => {
                 serializeAddressBundleToPinataKeyvalues({
                     btc: "x".repeat(PINATA_KEYVALUE_MAX_LENGTH + 1),
                 })
-            ).toThrow(/tags_addresses_field_too_long/);
+            ).toThrow("409:stored_metadata_too_long");
         });
 
         test("throws when more than three chunks would be required", () => {
@@ -491,6 +493,21 @@ describe("tags-addresses.module", () => {
             expect(fitted.extraParams.plan).toBe("premium");
             expect(fitted.extraParams.e).toBeUndefined();
             expect(fitted.extraParams.hp).toBeUndefined();
+        });
+
+        test("a 250-character keyvalue is kept and 251 throws before the pin", () => {
+            expect(assertPinataKeyvalue("addresses", "a".repeat(250))).toBe(250);
+            expect(assertPinataKeyvalue("referral", "b".repeat(250))).toBe(250);
+            expect(() => assertPinataKeyvalue("addresses", "a".repeat(251))).toThrow("409:stored_metadata_too_long");
+            expect(() => assertPinataKeyvalue("referral", "b".repeat(251))).toThrow("409:stored_metadata_too_long");
+
+            const overhead = JSON.stringify({ btc: "" }).length;
+            const fit = "c".repeat(PINATA_KEYVALUE_MAX_LENGTH - overhead);
+            const packed = serializeAddressBundleToPinataKeyvalues({ btc: fit });
+            expect(packed.addresses.length).toBe(PINATA_KEYVALUE_MAX_LENGTH);
+
+            expect(() => collectAddressEntries({ ethAddress: "d".repeat(251) })).toThrow("409:stored_metadata_too_long");
+            expect(collectAddressEntries({ ethAddress: "d".repeat(250) })).toEqual([["ethAddress", "d".repeat(250)]]);
         });
 
         test("collectReservedKeyvalues throws before a value over 250 characters is pinned", () => {

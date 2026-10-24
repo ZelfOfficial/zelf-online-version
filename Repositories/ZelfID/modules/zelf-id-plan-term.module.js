@@ -26,21 +26,15 @@ const savePlanTerm = async ({ zelfName, domain, plan, planExpiresAt, paymentMeth
     if (!mongoReady()) return null;
     const name = normalizedName(zelfName, domain);
     if (!name) return null;
-    if (!planExpiresAt && !paymentMethod && !duration) return null;
 
-    return PlanTerm.findOneAndUpdate(
-        { zelfName: name },
-        {
-            $set: {
-                zelfName: name,
-                plan: plan || null,
-                planExpiresAt: planExpiresAt || null,
-                paymentMethod: paymentMethod || null,
-                duration: duration || null,
-            },
-        },
-        { upsert: true, new: true }
-    );
+    const $set = { zelfName: name };
+    if (plan !== undefined) $set.plan = plan;
+    if (planExpiresAt !== undefined) $set.planExpiresAt = planExpiresAt;
+    if (paymentMethod !== undefined) $set.paymentMethod = paymentMethod;
+    if (duration !== undefined) $set.duration = duration;
+    if (Object.keys($set).length === 1) return null;
+
+    return PlanTerm.findOneAndUpdate({ zelfName: name }, { $set }, { upsert: true, new: true });
 };
 
 const deletePlanTerm = async (zelfName, domain) => {

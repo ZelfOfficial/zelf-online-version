@@ -303,9 +303,10 @@ const confirmPaidStripeSession = async (session) => {
     }
 
     const tagObject = tagData.tagObject;
-    const { findQuoteGrant, saveQuoteGrant } = require("./zelf-id-quote-grant.module");
-    const priorGrant = await findQuoteGrant({ zelfName: `${tagName}.${domain}`, token: inspected.sessionId || session.id });
-    if (priorGrant) {
+    const { claimQuoteGrant, completeQuoteGrant, releaseQuoteGrant } = require("./zelf-id-quote-grant.module");
+    const quoteKey = { zelfName: `${tagName}.${domain}`, token: inspected.sessionId || session.id };
+    const claim = await claimQuoteGrant({ ...quoteKey, source: "stripe" });
+    if (claim.state === "done") {
         return {
             status: "success",
             action: "already_extended",
@@ -323,6 +324,7 @@ const confirmPaidStripeSession = async (session) => {
     const price = Number(amountUsd) || (inspected.amountTotal ? inspected.amountTotal / 100 : 0);
     const metadataCoupon = session.metadata || {};
     const ZelfIdsPaymentModule = require("./zelf-ids-payment.module");
+    try {
     ZelfIdsPaymentModule.buildMetadata(
         {
             tagName,
@@ -337,6 +339,10 @@ const confirmPaidStripeSession = async (session) => {
         tagObject,
         domainConfig
     );
+    } catch (error) {
+        await releaseQuoteGrant(quoteKey);
+        throw error;
+    }
     let claimed = null;
     if (metadataCoupon.couponId || metadataCoupon.couponCode) {
         const Coupons = require("./zelf-ids-coupons.module");
@@ -352,6 +358,7 @@ const confirmPaidStripeSession = async (session) => {
                 signedAmount: price,
             });
         } catch (error) {
+            await releaseQuoteGrant(quoteKey);
             const { recordPurchaseManualReview } = require("./zelf-id-purchase-manual-review.module");
             await recordPurchaseManualReview({
                 tagName,
@@ -402,6 +409,7 @@ const confirmPaidStripeSession = async (session) => {
             tagObject
         );
     } catch (error) {
+        await releaseQuoteGrant(quoteKey);
         if (claimed) {
             const Coupons = require("./zelf-ids-coupons.module");
             await Coupons.releaseRedemption(claimed);
@@ -412,6 +420,10 @@ const confirmPaidStripeSession = async (session) => {
     if (result.manualReview && claimed) {
         const Coupons = require("./zelf-ids-coupons.module");
         await Coupons.releaseRedemption(claimed);
+    }
+
+    if (result.manualReview) {
+        await releaseQuoteGrant(quoteKey);
     }
 
     if (result.manualReview) {
@@ -431,9 +443,8 @@ const confirmPaidStripeSession = async (session) => {
         };
     }
 
-    await saveQuoteGrant({
-        zelfName: `${tagName}.${domain}`,
-        token: inspected.sessionId || session.id,
+    await completeQuoteGrant({
+        ...quoteKey,
         source: "stripe",
         paymentMethod: "stripe",
         couponId: claimed?.couponId,

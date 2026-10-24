@@ -209,17 +209,6 @@ const updateTags = async (tagObject, tagsToAdd, options = {}) => {
 
     metadata.extraParams = JSON.stringify(metadata.extraParams);
 
-    if (fitted.planTerm && tagName) {
-        const { savePlanTerm } = require("../../ZelfID/modules/zelf-id-plan-term.module");
-        await savePlanTerm({
-            zelfName: tagName,
-            domain: tagObject.publicData.domain || "zelf",
-            plan: fitted.planTerm.plan,
-            planExpiresAt: fitted.planTerm.planExpiresAt,
-            paymentMethod: fitted.planTerm.paymentMethod,
-        });
-    }
-
     const oldPrimaryId = tagObject.id ? tagObject.ipfsId || tagObject.id : null;
     const oldContinuationIds = await TagsIPFSModule.listContinuationSiblingPinIds(tagName);
 

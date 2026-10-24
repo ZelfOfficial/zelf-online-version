@@ -220,21 +220,6 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
 
     const paymentConfirmation = await confirmPayUniqueAddress(network, addressMapping[network], amountToPay, { initiatedAtUnix });
 
-    const { findQuoteGrant, saveQuoteGrant } = require("./zelf-id-quote-grant.module");
-    const priorGrant = await findQuoteGrant({ zelfName: `${tagName}.${domain}`, token });
-    if (priorGrant) {
-        return {
-            cache: true,
-            confirmed: true,
-            amountReceived: paymentConfirmation?.amountReceived ?? 0,
-            paymentConfirmation,
-            publicData: tagObject.publicData,
-            expiresAt: tagObject.publicData?.expiresAt || null,
-            tagObject,
-            paymentMethod: priorGrant.paymentMethod || "crypto",
-        };
-    }
-
     const paymentOk = paymentConfirmation && typeof paymentConfirmation === "object" && paymentConfirmation.confirmed === true;
 
     if (!paymentOk) {
@@ -248,25 +233,45 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
         };
     }
 
-    const couponGrant = await claimCouponAfterPayment({
-        tokenDecoded,
-        tagName,
-        domain,
-        domainConfig,
-        tagObject,
-        source: network,
-        price: tokenDecoded.prices?.[network]?.price ?? amountToPay,
-        billableUsdPrice: tokenDecoded.amountDue ?? tokenDecoded.billableUsdPrice ?? tokenDecoded.prices?.[network]?.price,
-        cryptoSymbol: network,
-        cryptoAmount: amountToPay,
-        paymentNetwork: network,
-        paymentInitiatedAt: tokenDecoded.initiatedAt,
-        amountReceived: paymentConfirmation.amountReceived,
-    });
-    if (couponGrant.blocked) return couponGrant.body;
+    const { claimQuoteGrant, completeQuoteGrant, releaseQuoteGrant } = require("./zelf-id-quote-grant.module");
+    const quote = { zelfName: `${tagName}.${domain}`, token };
+    const claim = await claimQuoteGrant({ ...quote, source: network });
+    if (claim.state === "done") {
+        return {
+            cache: true,
+            confirmed: true,
+            amountReceived: paymentConfirmation.amountReceived ?? 0,
+            paymentConfirmation,
+            publicData: tagObject.publicData,
+            expiresAt: tagObject.publicData?.expiresAt || null,
+            tagObject,
+            paymentMethod: claim.grant?.paymentMethod || "crypto",
+        };
+    }
 
+    let couponGrant = { blocked: false, claimed: null };
     let extension;
     try {
+        couponGrant = await claimCouponAfterPayment({
+            tokenDecoded,
+            tagName,
+            domain,
+            domainConfig,
+            tagObject,
+            source: network,
+            price: tokenDecoded.prices?.[network]?.price ?? amountToPay,
+            billableUsdPrice: tokenDecoded.amountDue ?? tokenDecoded.billableUsdPrice ?? tokenDecoded.prices?.[network]?.price,
+            cryptoSymbol: network,
+            cryptoAmount: amountToPay,
+            paymentNetwork: network,
+            paymentInitiatedAt: tokenDecoded.initiatedAt,
+            amountReceived: paymentConfirmation.amountReceived,
+        });
+        if (couponGrant.blocked) {
+            await releaseQuoteGrant(quote);
+            return couponGrant.body;
+        }
+
         extension = await addDurationToTag(
             {
                 tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
@@ -289,6 +294,7 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
         );
     } catch (error) {
         await releaseCouponClaim(couponGrant.claimed);
+        await releaseQuoteGrant(quote);
         throw error;
     }
 
@@ -297,6 +303,7 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
     }
 
     if (extension.manualReview) {
+        await releaseQuoteGrant(quote);
         return {
             tagObject: extension.tagObject || tagObject,
             confirmed: false,
@@ -313,9 +320,8 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
         tagObject.publicData.expiresAt = extension.expiresAt;
     }
 
-    await saveQuoteGrant({
-        zelfName: `${tagName}.${domain}`,
-        token,
+    await completeQuoteGrant({
+        ...quote,
         source: network,
         paymentMethod: "crypto",
         couponId: couponGrant.claimed?.couponId,
@@ -359,47 +365,63 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
         password: identity.password,
     });
 
-    const { findQuoteGrant, saveQuoteGrant } = require("./zelf-id-quote-grant.module");
-    const priorGrant = await findQuoteGrant({ zelfName: `${tagName}.${domain}`, token: quoteToken });
-    if (priorGrant) {
+    const { claimQuoteGrant, completeQuoteGrant, releaseQuoteGrant } = require("./zelf-id-quote-grant.module");
+    const quoteKey = { zelfName: `${tagName}.${domain}`, token: quoteToken };
+    const claim = await claimQuoteGrant({
+        ...quoteKey,
+        source: tokenDecoded.coupon?.code ? "coupon" : "whitelist",
+    });
+    if (claim.state === "done") {
         return {
             cache: true,
             confirmed: true,
             amountReceived: 0,
             tagObject,
             expiresAt: tagObject.publicData?.expiresAt || null,
-            paymentMethod: priorGrant.paymentMethod || (tokenDecoded.coupon?.code ? "coupon" : "whitelist"),
-            couponId: priorGrant.couponId || null,
+            paymentMethod: claim.grant?.paymentMethod || (tokenDecoded.coupon?.code ? "coupon" : "whitelist"),
+            couponId: claim.grant?.couponId || null,
         };
     }
 
     if (tokenDecoded.coupon?.valid === true && tokenDecoded.coupon?.code) {
-        const granted = await confirmCouponFreeCheckout(tagName, domain, tokenDecoded, domainConfig, tagObject, basePublicData);
-        if (granted.confirmed) {
-            await saveQuoteGrant({
-                zelfName: `${tagName}.${domain}`,
-                token: quoteToken,
-                source: "coupon",
-                paymentMethod: "coupon",
-                couponId: granted.couponId,
-                plan: tokenDecoded.plan,
-                duration: tokenDecoded.duration,
-            });
+        let granted;
+        try {
+            granted = await confirmCouponFreeCheckout(tagName, domain, tokenDecoded, domainConfig, tagObject, basePublicData);
+        } catch (error) {
+            await releaseQuoteGrant(quoteKey);
+            throw error;
         }
+        if (!granted.confirmed) {
+            await releaseQuoteGrant(quoteKey);
+            return granted;
+        }
+        await completeQuoteGrant({
+            ...quoteKey,
+            source: "coupon",
+            paymentMethod: "coupon",
+            couponId: granted.couponId,
+            plan: tokenDecoded.plan,
+            duration: tokenDecoded.duration,
+        });
         return granted;
     }
 
     const { assertPurchaseKeepsPaidValue } = require("./zelf-id-plan.module");
-    assertPurchaseKeepsPaidValue({
-        publicData: tagObject.publicData,
-        requestedPlan: tokenDecoded.plan,
-        tagName,
-        domainConfig,
-    });
+    try {
+        assertPurchaseKeepsPaidValue({
+            publicData: tagObject.publicData,
+            requestedPlan: tokenDecoded.plan,
+            tagName,
+            domainConfig,
+        });
+    } catch (error) {
+        await releaseQuoteGrant(quoteKey);
+        throw error;
+    }
 
     const referralTagName = tagObject.publicData.referralTagName || tokenDecoded.referralTagName || "";
     const duration = normalizePaymentDuration(tokenDecoded.duration || "1");
-    const quote = getZelfIdCheckoutPrice({
+    const priceQuote = getZelfIdCheckoutPrice({
         tagName: tokenDecoded.tagName,
         duration,
         referralTagName,
@@ -407,30 +429,38 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
         requestedPlan: tokenDecoded.plan,
     });
 
-    if (Number(quote.price) !== 0) throw new Error("409:checkout_total_not_zero");
+    if (Number(priceQuote.price) !== 0) {
+        await releaseQuoteGrant(quoteKey);
+        throw new Error("409:checkout_total_not_zero");
+    }
 
     if (referralTagName && !tagObject.publicData.referralTagName) {
         tagObject.publicData.referralTagName = referralTagName;
         tagObject.publicData.referralSolanaAddress = tokenDecoded.payment?.referralSolanaAddress || "";
     }
 
-    const extension = await addDurationToTag(
-        {
-            tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
-            price: 0,
-            domain,
-            duration: tokenDecoded.duration || 1,
-            plan: tokenDecoded.plan,
-            domainConfig,
-            paymentMethod: "whitelist",
-            basePublicData,
-        },
-        tagObject
-    );
+    let extension;
+    try {
+        extension = await addDurationToTag(
+            {
+                tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
+                price: 0,
+                domain,
+                duration: tokenDecoded.duration || 1,
+                plan: tokenDecoded.plan,
+                domainConfig,
+                paymentMethod: "whitelist",
+                basePublicData,
+            },
+            tagObject
+        );
+    } catch (error) {
+        await releaseQuoteGrant(quoteKey);
+        throw error;
+    }
 
-    await saveQuoteGrant({
-        zelfName: `${tagName}.${domain}`,
-        token: quoteToken,
+    await completeQuoteGrant({
+        ...quoteKey,
         source: "whitelist",
         paymentMethod: "whitelist",
         plan: tokenDecoded.plan,

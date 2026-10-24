@@ -16,8 +16,9 @@ jest.mock("../../Repositories/ZelfID/modules/zelf-id.module", () => ({
 }));
 
 jest.mock("../../Repositories/ZelfID/modules/zelf-id-quote-grant.module", () => ({
-    findQuoteGrant: jest.fn(async () => null),
-    saveQuoteGrant: jest.fn(async () => null),
+    claimQuoteGrant: jest.fn(async () => ({ state: "claimed", grant: { status: "pending" } })),
+    completeQuoteGrant: jest.fn(async () => null),
+    releaseQuoteGrant: jest.fn(async () => null),
 }));
 
 jest.mock("jsonwebtoken", () => ({
@@ -43,7 +44,7 @@ jest.mock("../../Repositories/ZelfID/modules/zelf-id-purchase-manual-review.modu
 
 const moment = require("moment");
 const { verifyPaymentConfirmation } = require("../../Repositories/ZelfID/modules/my-zelf-id.module");
-const { findQuoteGrant } = require("../../Repositories/ZelfID/modules/zelf-id-quote-grant.module");
+const { claimQuoteGrant } = require("../../Repositories/ZelfID/modules/zelf-id-quote-grant.module");
 const { confirmPaidStripeSession, buildLeaseStripeMetadata } = require("../../Repositories/ZelfID/modules/zelf-ids-stripe.module");
 const { addDurationToTag } = require("../../Repositories/ZelfID/modules/my-zelf-id.module");
 const ZelfIdModule = require("../../Repositories/ZelfID/modules/zelf-id.module");
@@ -147,7 +148,10 @@ describe("Zelf ID purchase guards", () => {
             amountUsd: 29,
         });
 
-        findQuoteGrant.mockResolvedValueOnce({ zelfName: "jimqatest.zelf", source: "stripe" });
+        claimQuoteGrant.mockResolvedValueOnce({
+            state: "done",
+            grant: { zelfName: "jimqatest.zelf", source: "stripe", status: "done", paymentMethod: "stripe" },
+        });
 
         const result = await confirmPaidStripeSession({
             metadata,

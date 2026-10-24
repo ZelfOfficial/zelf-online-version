@@ -294,9 +294,7 @@ const serializeAddressBundleToPinataKeyvalues = (bundle) => {
         const singleLength = JSON.stringify({ [key]: value }).length;
 
         if (singleLength > PINATA_KEYVALUE_MAX_LENGTH) {
-            const error = new Error(`tags_addresses_field_too_long:${key}:${singleLength}`);
-            error.status = 400;
-            throw error;
+            assertPinataKeyvalue(key, JSON.stringify({ [key]: value }));
         }
 
         flushCurrent();
@@ -530,7 +528,9 @@ const collectReservedKeyvalues = (reserved = {}) => {
         if (SEARCHABLE_ADDRESS_FIELDS.includes(key)) continue;
         if (ADDRESS_CHUNK_KEYS.includes(key)) continue;
         if (key === CONTINUATION_LINK_KEY || key === CONTINUATION_LINK_KEY_2) continue;
-        if (key.length > PINATA_KEYVALUE_MAX_LENGTH) continue;
+        if (key.length > PINATA_KEYVALUE_MAX_LENGTH) {
+            assertPinataKeyvalue(key, "");
+        }
 
         const serialized = serializePinataValue(value);
         assertPinataKeyvalue(key, serialized);
@@ -547,7 +547,7 @@ const collectAddressEntries = (addresses = {}) => {
 
     for (const field of SEARCHABLE_ADDRESS_FIELDS) {
         if (!normalized[field]) continue;
-        if (normalized[field].length > PINATA_KEYVALUE_MAX_LENGTH) continue;
+        assertPinataKeyvalue(field, normalized[field]);
         entries.push([field, normalized[field]]);
     }
 
@@ -695,6 +695,7 @@ module.exports = {
     cleanExtraParamsForPinata,
     expandStoredExtraParams,
     fitExtraParamsForPin,
+    collectAddressEntries,
     collectReservedKeyvalues,
     continuationPinName,
     expandPackedAddresses,
