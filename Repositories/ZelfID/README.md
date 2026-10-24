@@ -22,6 +22,7 @@ Registered in `Routes/protected-repositories.js`.
 | GET | `/search-by-domain` | `domain`, `storage` (`IPFS`\|`Arweave`\|`Walrus`); optional `name` |
 | GET | `/preview` | `tagName`, `domain`, `os` |
 | GET | `/wallet-balances` | optional address query fields |
+| GET | `/my-plan` | `zelfName`. Verified owner (`verifiedTagName` matches, inside `verifiedUntil`). Returns plan, duration, expiresAt, paymentMethod, nextPlans, and upgrade action |
 | GET | `/payment-options` | `tagName`, `domain`, `duration`; optional `plan`, `coupon` |
 | POST | `/payment-confirmation` | `tagName`, `token`; `network` required unless the signed quote is a 100% coupon or other $0 quote (`freeCheckout`); a free checkout also requires identity verification for that Zelf ID (`faceBase64`, plus `masterPassword` when the wallet has one, or a session `verifiedTagName` still inside `verifiedUntil`); optional `domain` |
 | POST | `/coupons` | super-admin. `code`, `percentOff` (1–100), `plans`, `maxRedemptions`; optional `durations`, `perZelfIdLimit`, `expiresAt` |

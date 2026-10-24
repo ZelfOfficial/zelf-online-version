@@ -1,0 +1,173 @@
+/**
+ * Current Zelf ID plan and where the verified owner should go to upgrade.
+ * Prices and the next plan come from the license planPricing. paymentMethod is what the lease stores.
+ * Zelf ID Stripe Checkout is mode "payment" (one-off). stripe_portal runs only when the lease
+ * payment method is stripe_subscription.
+ */
+const moment = require("moment");
+const config = require("../../../Core/config");
+const { getDomainConfig } = require("../../Tags/config/supported-domains");
+const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
+const { effectivePlan, licensePaidPlansForName } = require("./zelf-id-plan.module");
+
+const CRYPTO_METHODS = new Set(["crypto", "eth", "sol", "btc", "avax", "bnb", "pol", "matic", "base", "bdag", "ton"]);
+
+const displayDuration = (duration) => {
+    const raw = `${duration ?? ""}`.trim().toLowerCase();
+    if (!raw) return null;
+    if (raw === "lifetime" || raw === "999") return "lifetime";
+    if (/^\d+y$/.test(raw)) return raw;
+    if (/^\d+$/.test(raw)) return `${Number(raw)}y`;
+    return raw;
+};
+
+const toIso = (value) => {
+    if (!value) return null;
+    const strict = moment(value, "YYYY-MM-DD HH:mm:ss", true);
+    const parsed = strict.isValid() ? strict : moment(value);
+    if (!parsed.isValid()) return null;
+    return parsed.toISOString();
+};
+
+/**
+ * Map the lease record onto the public paymentMethod set.
+ * @param {Object} publicData
+ * @param {string} plan
+ * @returns {"free"|"stripe"|"stripe_subscription"|"crypto"|"coupon"|"revenuecat"}
+ */
+const readPaymentMethod = (publicData = {}, plan) => {
+    const raw = String(publicData.paymentMethod || "")
+        .trim()
+        .toLowerCase();
+
+    if (raw === "stripe_subscription") return "stripe_subscription";
+    if (raw === "revenuecat" || raw === "revenue_cat") return "revenuecat";
+    if (raw === "coupon") return "coupon";
+    if (raw === "stripe") return "stripe";
+    if (raw === "free") return "free";
+    if (CRYPTO_METHODS.has(raw)) return "crypto";
+    if (!raw && publicData.revenueCatOriginalTransactionId) return "revenuecat";
+    if (plan === "free") return "free";
+    return "free";
+};
+
+const nextPlansFor = (zelfName, plan, domainConfig) => {
+    const offered = licensePaidPlansForName(zelfName, domainConfig);
+    if (plan === "free") return offered;
+    const rank = offered.indexOf(plan);
+    if (rank < 0) return [];
+    return offered.slice(rank + 1);
+};
+
+/**
+ * Landing checkout this API already opens after Stripe (tagname, domain, duration, plan).
+ * `zelfName` is included so the documented name is on the link as well.
+ */
+const checkoutUrl = (zelfName, plan) => {
+    const normalized = normalizeZelfName(zelfName);
+    const origin = String(config.landingUrl || "https://zelf.world").replace(/\/$/, "");
+    const params = new URLSearchParams({
+        tagname: normalized.tagName,
+        domain: normalized.domain,
+        duration: "1",
+        plan,
+        zelfName: normalized.zelfName,
+    });
+    return `${origin}/pricing?${params.toString()}`;
+};
+
+const openStripePortal = async (customerId) => {
+    if (!config.stripe?.secretKey) throw new Error("500:stripe_not_configured");
+    const Stripe = require("stripe");
+    const stripe = Stripe(config.stripe.secretKey);
+    const origin = String(config.landingUrl || "https://zelf.world").replace(/\/$/, "");
+    const session = await stripe.billingPortal.sessions.create({
+        customer: customerId,
+        return_url: `${origin}/pricing`,
+    });
+    return session.url;
+};
+
+const upgradeFor = async ({ paymentMethod, plan, duration, nextPlans, zelfName, publicData, createBillingPortal }) => {
+    if (plan === "unlimited" && duration === "lifetime") {
+        return { action: "none" };
+    }
+
+    if (paymentMethod === "revenuecat") {
+        return { action: "mobile_store" };
+    }
+
+    if (paymentMethod === "stripe_subscription") {
+        const customerId = publicData.stripeCustomerId || publicData.payment?.stripeCustomerId;
+        if (!customerId) throw new Error("409:stripe_customer_missing");
+        const openPortal = createBillingPortal || openStripePortal;
+        const url = await openPortal(customerId);
+        return { action: "stripe_portal", url };
+    }
+
+    const nextPlan = nextPlans[0] || plan;
+    return { action: "checkout", url: checkoutUrl(zelfName, nextPlan === "free" ? nextPlans[0] || "premium" : nextPlan) };
+};
+
+/**
+ * @param {Object} tagObject
+ * @param {Object} params
+ * @param {string} params.zelfName normalized name.domain
+ * @param {Object} params.domainConfig
+ * @param {Function} [params.createBillingPortal]
+ */
+const buildMyPlan = async (tagObject, { zelfName, domainConfig, createBillingPortal } = {}) => {
+    const publicData = tagObject?.publicData || {};
+    const plan = effectivePlan(publicData, domainConfig) || "free";
+    const duration = displayDuration(publicData.duration);
+    const unlimitedLifetime = plan === "unlimited" && duration === "lifetime";
+    const nextPlans = unlimitedLifetime ? [] : nextPlansFor(zelfName, plan, domainConfig);
+    const paymentMethod = readPaymentMethod(publicData, plan);
+    const upgrade = await upgradeFor({
+        paymentMethod,
+        plan,
+        duration,
+        nextPlans,
+        zelfName,
+        publicData,
+        createBillingPortal,
+    });
+
+    return {
+        zelfName,
+        plan,
+        duration,
+        expiresAt: toIso(publicData.expiresAt),
+        paymentMethod,
+        nextPlans,
+        upgrade,
+    };
+};
+
+const getMyPlan = async ({ zelfName, authUser } = {}, deps = {}) => {
+    const normalized = normalizeZelfName(zelfName);
+    if (!normalized.zelfName) throw new Error("404:tag_not_found");
+
+    const domainConfig = (deps.getDomainConfig || getDomainConfig)(normalized.domain);
+    const searchTag = deps.searchTag || require("./zelf-id.module").searchTag;
+    const found = await searchTag(
+        { tagName: normalized.tagName, domain: normalized.domain, domainConfig, environment: "all" },
+        deps.authUser || authUser || {}
+    );
+
+    if (!found || found.available || !found.tagObject) throw new Error("404:tag_not_found");
+
+    return buildMyPlan(found.tagObject, {
+        zelfName: normalized.zelfName,
+        domainConfig,
+        createBillingPortal: deps.createBillingPortal,
+    });
+};
+
+module.exports = {
+    buildMyPlan,
+    checkoutUrl,
+    displayDuration,
+    getMyPlan,
+    readPaymentMethod,
+};
