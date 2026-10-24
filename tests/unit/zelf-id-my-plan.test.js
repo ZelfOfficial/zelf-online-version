@@ -152,6 +152,19 @@ describe("Zelf ID my-plan", () => {
         );
         expect(active.plan).toBe("premium");
         expect(active.duration).toBe("1y");
+        const leaseDuration = await buildMyPlan(
+            lease({
+                plan: "premium",
+                duration: "100",
+                planDuration: "1",
+                paymentMethod: "coupon",
+                expiresAt: leaseExpiresAt,
+                planExpiresAt,
+            }),
+            { zelfName: "myname.zelf", domainConfig }
+        );
+        expect(leaseDuration.duration).toBe("1y");
+        expect(leaseDuration.expiresAt).toBe(leaseDuration.leaseExpiresAt);
         expect(active.leaseExpiresAt).toBe("2126-10-24T18:00:00.000Z");
         expect(active.planExpiresAt).toBe(moment(planExpiresAt, "YYYY-MM-DD HH:mm:ss").toISOString());
         expect(active.expiresAt).toBe(active.leaseExpiresAt);

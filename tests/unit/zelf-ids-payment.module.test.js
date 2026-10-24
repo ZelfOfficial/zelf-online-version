@@ -160,7 +160,8 @@ describe("zelf-ids-payment.module", () => {
 			domainConfig
 		);
 		const extra = readExtra({ metadata, planTerm });
-		expect(extra.duration).toBe("1");
+		expect(extra.duration).toBe("100");
+		expect(planTerm.duration).toBe("1");
 		expect(extra.paymentMethod).toBe("coupon");
 		expect(extra.expiresAt).toBe(freePublic.expiresAt);
 		expect(moment(extra.planExpiresAt).diff(moment(), "year", true)).toBeGreaterThan(0.9);
@@ -448,7 +449,8 @@ describe("zelf-ids-payment.module", () => {
 				expect(String(metadata.domain).length).toBeLessThanOrEqual(PINATA_KEYVALUE_MAX_LENGTH);
 				expect(v3.expiresAt).toBe(leaseExpiresAt);
 				expect(v3.plan).toBe("unlimited");
-				expect(v3.duration).toBe(duration === "lifetime" ? "lifetime" : String(duration));
+				expect(v3.duration).toBe("100");
+				expect(planTerm.duration).toBe(duration === "lifetime" ? "lifetime" : String(duration));
 				expect(v3.registeredAt).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
 				expect(v3.planExpiresAt).toBeUndefined();
 				expect(v3.paymentMethod).toBeUndefined();
@@ -467,10 +469,10 @@ describe("zelf-ids-payment.module", () => {
 		}
 
 		expect(maxByPath).toEqual({
-			coupon: 219,
-			whitelist: 219,
-			stripe: 221,
-			crypto: 221,
+			coupon: 214,
+			whitelist: 214,
+			stripe: 216,
+			crypto: 216,
 		});
 	});
 
@@ -486,6 +488,7 @@ describe("zelf-ids-payment.module", () => {
 					duration: "100",
 					hasPassword: "true",
 					v: "4",
+					registeredAt: "2019-06-01 00:00:00",
 					expiresAt: leaseExpiresAt,
 				},
 			},
@@ -494,8 +497,9 @@ describe("zelf-ids-payment.module", () => {
 		const v3 = JSON.parse(built.metadata.extraParams);
 		expect(v3.expiresAt).toBe(leaseExpiresAt);
 		expect(v3.plan).toBe("premium");
-		expect(v3.duration).toBe("1");
-		expect(v3.registeredAt).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+		expect(v3.duration).toBe("100");
+		expect(v3.registeredAt).toBe("2019-06-01 00:00:00");
+		expect(built.planTerm.duration).toBe("1");
 		expect(built.planTerm.paymentMethod).toBe("coupon");
 		expect(built.planTerm.planExpiresAt).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
 	});

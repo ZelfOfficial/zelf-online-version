@@ -7,13 +7,7 @@ const { keccak256, solidityPacked, parseUnits, getAddress } = require("ethers");
 const config = require("../../../Core/config");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { fitExtraParamsForPin, resolveEncryptVersion, stampExtraParamsVersion } = require("../../Tags/modules/tags-addresses.module");
-
-const utcDate = () => moment.utc().format("YYYY-MM-DD HH:mm:ss");
-const utcFromNow = (amount, unit) => moment.utc().add(amount, unit).format("YYYY-MM-DD HH:mm:ss");
-const utcParse = (value) => {
-    const strict = moment.utc(value, "YYYY-MM-DD HH:mm:ss", true);
-    return strict.isValid() ? strict : moment.utc(value);
-};
+const { formatLeaseDate, parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 const TagsIpfsModule = require("../../Tags/modules/tags-ipfs.module");
 const TagsArweaveModule = require("../../Tags/modules/tags-arweave.module");
 const TagsSearchModule = require("../../Tags/modules/tags-search.module");
@@ -221,8 +215,8 @@ const createTagPay = async (tagPayObject, tagObject, priceDetails, currentCount,
             btcAddress: tagPayObject.publicData.btcAddress,
             [domainConfig.getTagKey()]: tagPayObject.tagPayName,
             extraParams: JSON.stringify({
-                expiresAt: utcFromNow(100, "year"),
-                registeredAt: utcDate(),
+                expiresAt: formatLeaseDate(100, "year"),
+                registeredAt: formatLeaseDate(),
                 price: priceDetails.price,
                 duration: priceDetails.duration,
                 count: `${currentCount}`,
@@ -420,26 +414,31 @@ const resolveNameAndPlanTerm = ({ basePublicData = {}, duration, plan }) => {
     const planTermOpen = Boolean(basePublicData.planExpiresAt) && !isExpiresAtPassed({ expiresAt: basePublicData.planExpiresAt });
     const samePlan = String(basePublicData.plan || "").toLowerCase() === String(plan || "").toLowerCase();
 
+    const leaseDuration =
+        basePublicData.duration != null && `${basePublicData.duration}` !== ""
+            ? normalizePaymentDuration(basePublicData.duration)
+            : purchased;
+
     if (freeOrigin || basePublicData.planExpiresAt) {
         const leaseExpiresAt = basePublicData.expiresAt;
-        if (lifetime) {
-            return { leaseExpiresAt, planExpiresAt: undefined, duration: "lifetime" };
-        }
-        if (planTermOpen && samePlan) {
-            const previous = utcParse(basePublicData.planExpiresAt);
-            return {
-                leaseExpiresAt,
-                planExpiresAt: previous.add(paymentDurationYears(purchased), "year").format("YYYY-MM-DD HH:mm:ss"),
-                duration: resolvePaidDurationStamp({
+        const planDuration = lifetime
+            ? "lifetime"
+            : planTermOpen && samePlan
+              ? resolvePaidDurationStamp({
                     publicData: { ...basePublicData, plan: basePublicData.plan || plan, expiresAt: basePublicData.planExpiresAt },
                     duration: purchased,
-                }),
-            };
-        }
+                })
+              : purchased;
+        const planExpiresAt = lifetime
+            ? undefined
+            : planTermOpen && samePlan
+              ? parseLeaseDate(basePublicData.planExpiresAt).add(paymentDurationYears(purchased), "year").format("YYYY-MM-DD HH:mm:ss")
+              : formatLeaseDate(paymentDurationYears(purchased), "year");
         return {
             leaseExpiresAt,
-            planExpiresAt: utcFromNow(paymentDurationYears(purchased), "year"),
-            duration: purchased,
+            planExpiresAt,
+            duration: leaseDuration,
+            planDuration,
         };
     }
 
@@ -476,8 +475,8 @@ const buildMetadata = (params, tagObject, domainConfig) => {
         price: params.paymentMethod === "gift" || params.paymentMethod === "coupon" || params.paymentMethod === "whitelist" ? 0 : price,
         paymentMethod: params.paymentMethod || undefined,
         duration: term.duration,
-        registeredAt: utcDate(),
-        renewedAt: tagObject.publicData.type === "mainnet" ? utcDate() : undefined,
+        registeredAt: basePublicData.registeredAt || tagObject.publicData.registeredAt || formatLeaseDate(),
+        renewedAt: tagObject.publicData.type === "mainnet" ? formatLeaseDate() : undefined,
         expiresAt: term.leaseExpiresAt,
         planExpiresAt: term.planExpiresAt,
         type: "mainnet",
@@ -506,8 +505,16 @@ const buildMetadata = (params, tagObject, domainConfig) => {
 
     const fitted = fitExtraParamsForPin(metadata.extraParams);
     metadata.extraParams = JSON.stringify(fitted.extraParams);
+    const planTerm = term.planDuration
+        ? {
+              plan: fitted.planTerm?.plan || plan || null,
+              planExpiresAt: fitted.planTerm?.planExpiresAt || term.planExpiresAt || null,
+              paymentMethod: fitted.planTerm?.paymentMethod || params.paymentMethod || null,
+              duration: term.planDuration,
+          }
+        : fitted.planTerm;
 
-    return { metadata, fullTagName: tagObject.fullTagName, planTerm: fitted.planTerm };
+    return { metadata, fullTagName: tagObject.fullTagName, planTerm };
 };
 
 /**
@@ -527,9 +534,9 @@ const buildFreePlanRevertMetadata = (params, tagObject, domainConfig) => {
         origin: tagObject.publicData.origin || "online",
         price: tagObject.publicData.price,
         duration: "1",
-        registeredAt: tagObject.publicData.registeredAt || utcDate(),
-        renewedAt: utcDate(),
-        expiresAt: utcFromNow(FREE_EXPIRATION_YEARS, "year"),
+        registeredAt: tagObject.publicData.registeredAt || formatLeaseDate(),
+        renewedAt: formatLeaseDate(),
+        expiresAt: formatLeaseDate(FREE_EXPIRATION_YEARS, "year"),
         type: "mainnet",
         hasPassword: tagObject.publicData.hasPassword,
         eventID: params.eventID || undefined,
@@ -568,8 +575,8 @@ const buildPlanChangeMetadata = (params, tagObject, domainConfig) => {
         origin: tagObject.publicData.origin || "online",
         price: tagObject.publicData.price,
         duration: tagObject.publicData.duration,
-        registeredAt: tagObject.publicData.registeredAt || utcDate(),
-        renewedAt: utcDate(),
+        registeredAt: tagObject.publicData.registeredAt || formatLeaseDate(),
+        renewedAt: formatLeaseDate(),
         expiresAt: tagObject.publicData.expiresAt,
         type: "mainnet",
         hasPassword: tagObject.publicData.hasPassword,

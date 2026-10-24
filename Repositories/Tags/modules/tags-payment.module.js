@@ -16,6 +16,7 @@ const WalrusModule = require("../../Walrus/modules/walrus.module");
 const TagsArweaveModule = require("./tags-arweave.module");
 const { generateQRFromZelfProof, QRZelfProofExtractor } = require("./qr-zelfproof-extractor.module");
 const { cleanExtraParamsForPinata, resolveEncryptVersion, stampExtraParamsVersion } = require("./tags-addresses.module");
+const { formatLeaseDate, parseLeaseDate } = require("./lease-date.util");
 
 const envTruthy = (v) => {
     if (v == null || v === "") return false;
@@ -971,8 +972,8 @@ const createTagPay = async (tagPayObject, tagObject, priceDetails, currentCount,
             btcAddress: tagPayObject.publicData.btcAddress,
             [domainConfig.getTagKey()]: tagPayObject.tagPayName,
             extraParams: JSON.stringify({
-                expiresAt: moment().add(100, "year").format("YYYY-MM-DD HH:mm:ss"),
-                registeredAt: moment().format("YYYY-MM-DD HH:mm:ss"),
+                expiresAt: formatLeaseDate(100, "year"),
+                registeredAt: formatLeaseDate(),
                 price: priceDetails.price,
                 duration: priceDetails.duration,
                 count: `${currentCount}`,
@@ -1035,9 +1036,9 @@ const buildMetadata = (params, tagObject, domainConfig) => {
                 origin: tagObject.publicData.origin || "online",
                 price,
                 duration: tagObject.publicData.duration ? `${Number(tagObject.publicData.duration) + Number(duration)}` : duration,
-                registeredAt: moment().format("YYYY-MM-DD HH:mm:ss"),
-                renewedAt: tagObject.publicData.type === "mainnet" ? moment().format("YYYY-MM-DD HH:mm:ss") : undefined,
-                expiresAt: moment(tagObject.publicData.expiresAt).add(duration, "year").format("YYYY-MM-DD HH:mm:ss"),
+                registeredAt: tagObject.publicData.registeredAt || formatLeaseDate(),
+                renewedAt: tagObject.publicData.type === "mainnet" ? formatLeaseDate() : undefined,
+                expiresAt: parseLeaseDate(tagObject.publicData.expiresAt).add(duration, "year").format("YYYY-MM-DD HH:mm:ss"),
                 type: "mainnet",
                 hasPassword: tagObject.publicData.hasPassword,
                 eventID: params.eventID || undefined,

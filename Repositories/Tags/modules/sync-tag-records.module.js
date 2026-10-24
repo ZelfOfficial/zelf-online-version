@@ -337,8 +337,12 @@ const upgradeLegacyProofAndRepin = async (tagObject, params = {}) => {
     if (!tagObject.publicData) tagObject.publicData = {};
     tagObject.publicData.v = 4;
 
+    const { mergePlanTermIntoPublicData } = require("../../ZelfID/modules/zelf-id-plan-term.module");
+    await mergePlanTermIntoPublicData(tagObject.publicData);
+
+    const storedPlan = tagObject.publicData.plan;
     const plan = effectivePlan(tagObject.publicData);
-    if (plan) {
+    if (!storedPlan && plan) {
         tagObject.publicData.plan = plan;
     } else if (isUnpaidReservation(tagObject.publicData)) {
         delete tagObject.publicData.plan;

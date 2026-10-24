@@ -4,11 +4,12 @@
  * Zelf ID Stripe Checkout is mode "payment" (one-off). stripe_portal runs only when the lease
  * payment method is stripe_subscription.
  */
-const moment = require("moment");
 const config = require("../../../Core/config");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
 const { effectivePlan, isExpiresAtPassed, licensePaidPlansForName } = require("./zelf-id-plan.module");
+const { parseLeaseDate } = require("../../Tags/modules/lease-date.util");
+const { mergePlanTermIntoPublicData } = require("./zelf-id-plan-term.module");
 
 const CRYPTO_METHODS = new Set(["crypto", "eth", "sol", "btc", "avax", "bnb", "pol", "matic", "base", "bdag", "ton"]);
 
@@ -23,8 +24,7 @@ const displayDuration = (duration) => {
 
 const toIso = (value) => {
     if (!value) return null;
-    const strict = moment.utc(value, "YYYY-MM-DD HH:mm:ss", true);
-    const parsed = strict.isValid() ? strict : moment.utc(value);
+    const parsed = parseLeaseDate(value);
     if (!parsed.isValid()) return null;
     return parsed.toISOString();
 };
@@ -121,9 +121,10 @@ const upgradeFor = async ({ paymentMethod, plan, duration, nextPlans, zelfName, 
  */
 const buildMyPlan = async (tagObject, { zelfName, domainConfig, createBillingPortal } = {}) => {
     const publicData = tagObject?.publicData || {};
+    await mergePlanTermIntoPublicData(publicData);
     const plan = effectivePlan(publicData, domainConfig) || "free";
     const paidTermLapsed = Boolean(publicData.planExpiresAt) && isExpiresAtPassed({ expiresAt: publicData.planExpiresAt });
-    const duration = paidTermLapsed ? null : displayDuration(publicData.duration);
+    const duration = paidTermLapsed ? null : displayDuration(publicData.planDuration || publicData.duration);
     const unlimitedLifetime = plan === "unlimited" && duration === "lifetime";
     const nextPlans = unlimitedLifetime ? [] : nextPlansFor(zelfName, plan, domainConfig);
     const paymentMethod = readPaymentMethod(publicData, plan);

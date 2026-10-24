@@ -11,6 +11,7 @@
  * active paid lease (v4 premium/unlimited, or v3.6 planless with renewedAt / price > 0).
  */
 const moment = require("moment");
+const { formatLeaseDate, parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 
 /** Unpaid short-name hold window. Override via `ZELF_ID_RESERVATION_AMOUNT` / `ZELF_ID_RESERVATION_UNIT` (e.g. `5` + `hour` to revert). */
 const ZELF_ID_RESERVATION_DURATION = {
@@ -27,10 +28,7 @@ const ZELF_ID_RESERVATION_HOURS = moment
  * UTC `expiresAt` for a new unpaid `.hold` reservation (same format as lease stamps).
  * @returns {string}
  */
-const getReservationExpiresAt = () =>
-    moment()
-        .add(ZELF_ID_RESERVATION_DURATION.amount, ZELF_ID_RESERVATION_DURATION.unit)
-        .format("YYYY-MM-DD HH:mm:ss");
+const getReservationExpiresAt = () => formatLeaseDate(ZELF_ID_RESERVATION_DURATION.amount, ZELF_ID_RESERVATION_DURATION.unit);
 const FREE_EXPIRATION_YEARS = 100;
 const LIFETIME_EXPIRATION_YEARS = 100;
 const PAID_HORIZON_YEARS = 50;
@@ -364,14 +362,9 @@ const isUnpaidReservation = (publicData = {}) => {
  * @param {Object} [publicData]
  * @returns {boolean}
  */
-const parseUtcDate = (value) => {
-    const strict = moment.utc(value, "YYYY-MM-DD HH:mm:ss", true);
-    return strict.isValid() ? strict : moment.utc(value);
-};
-
 const isExpiresAtPassed = (publicData = {}) => {
     if (!publicData.expiresAt) return false;
-    return parseUtcDate(publicData.expiresAt).isBefore(moment.utc());
+    return parseLeaseDate(publicData.expiresAt).isBefore(moment.utc());
 };
 
 /**
@@ -506,21 +499,17 @@ const hasActivePaidLease = (publicData = {}) => {
  */
 const resolvePaidExpiresAt = ({ publicData = {}, duration, durationYears } = {}) => {
     const years = durationYears ?? paymentDurationYears(duration);
-    const fromNow = () =>
-        moment
-            .utc()
-            .add(isLifetimeDuration(duration) ? LIFETIME_EXPIRATION_YEARS : years || 1, "year")
-            .format("YYYY-MM-DD HH:mm:ss");
+    const fromNow = () => formatLeaseDate(isLifetimeDuration(duration) ? LIFETIME_EXPIRATION_YEARS : years || 1, "year");
 
     if (!hasActivePaidLease(publicData) || !publicData.expiresAt) return fromNow();
 
-    const parsed = parseUtcDate(publicData.expiresAt);
+    const parsed = parseLeaseDate(publicData.expiresAt);
 
     // An active paid lease is never shortened: lifetime keeps its horizon, and a
     // lifetime purchase on top of a longer stored expiry keeps the longer one.
     if (isLifetimeDuration(duration)) {
         const lifetime = fromNow();
-        return parseUtcDate(lifetime).isAfter(parsed) ? lifetime : parsed.format("YYYY-MM-DD HH:mm:ss");
+        return parseLeaseDate(lifetime).isAfter(parsed) ? lifetime : parsed.format("YYYY-MM-DD HH:mm:ss");
     }
     if (publicData.duration === "lifetime") return parsed.format("YYYY-MM-DD HH:mm:ss");
 

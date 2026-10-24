@@ -488,6 +488,7 @@ const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata, 
     if (planTerm) {
         if (planTerm.planExpiresAt) tagObject.publicData.planExpiresAt = planTerm.planExpiresAt;
         if (planTerm.paymentMethod) tagObject.publicData.paymentMethod = planTerm.paymentMethod;
+        if (planTerm.duration) tagObject.publicData.planDuration = planTerm.duration;
         const { savePlanTerm } = require("./zelf-id-plan-term.module");
         const storedName = tagObject.publicData?.tagName || tagObject.publicData?.zelfName || params.tagName;
         await savePlanTerm({
@@ -496,6 +497,7 @@ const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata, 
             plan: planTerm.plan,
             planExpiresAt: planTerm.planExpiresAt,
             paymentMethod: planTerm.paymentMethod,
+            duration: planTerm.duration,
         });
     } else if (options.clearPlanTerm) {
         const { deletePlanTerm } = require("./zelf-id-plan-term.module");

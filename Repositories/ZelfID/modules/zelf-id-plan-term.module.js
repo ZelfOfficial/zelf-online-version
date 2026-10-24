@@ -22,11 +22,11 @@ const normalizedName = (zelfName, domain) => {
  * @param {string|null} [params.planExpiresAt] `YYYY-MM-DD HH:mm:ss` UTC
  * @param {string|null} [params.paymentMethod]
  */
-const savePlanTerm = async ({ zelfName, domain, plan, planExpiresAt, paymentMethod }) => {
+const savePlanTerm = async ({ zelfName, domain, plan, planExpiresAt, paymentMethod, duration }) => {
     if (!mongoReady()) return null;
     const name = normalizedName(zelfName, domain);
     if (!name) return null;
-    if (!planExpiresAt && !paymentMethod) return null;
+    if (!planExpiresAt && !paymentMethod && !duration) return null;
 
     return PlanTerm.findOneAndUpdate(
         { zelfName: name },
@@ -36,6 +36,7 @@ const savePlanTerm = async ({ zelfName, domain, plan, planExpiresAt, paymentMeth
                 plan: plan || null,
                 planExpiresAt: planExpiresAt || null,
                 paymentMethod: paymentMethod || null,
+                duration: duration || null,
             },
         },
         { upsert: true, new: true }
@@ -67,11 +68,29 @@ const mergePlanTermIntoPublicData = async (publicData) => {
     if (!publicData.planExpiresAt && row.planExpiresAt) publicData.planExpiresAt = row.planExpiresAt;
     if (!publicData.paymentMethod && row.paymentMethod) publicData.paymentMethod = row.paymentMethod;
     if (!publicData.plan && row.plan) publicData.plan = row.plan;
+    if (!publicData.planDuration && row.duration) publicData.planDuration = row.duration;
     return publicData;
+};
+
+/**
+ * Merge the Mongo plan term onto a search result. Tags search, Zelf ID search,
+ * my-plan, sync, and Zelf Keys `/limits` (`loadTagPublicData` → Tags `searchTag`) use this.
+ * @param {Object} result
+ * @returns {Promise<Object>}
+ */
+const readLeaseSearchResult = async (result) => {
+    if (result?.tagObject?.publicData) await mergePlanTermIntoPublicData(result.tagObject.publicData);
+    if (Array.isArray(result?.ipfs)) {
+        for (const row of result.ipfs) {
+            if (row?.publicData) await mergePlanTermIntoPublicData(row.publicData);
+        }
+    }
+    return result;
 };
 
 module.exports = {
     deletePlanTerm,
     mergePlanTermIntoPublicData,
+    readLeaseSearchResult,
     savePlanTerm,
 };

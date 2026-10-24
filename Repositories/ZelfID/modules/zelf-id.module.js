@@ -244,8 +244,8 @@ const searchTag = async (params, authUser) => {
         );
 
         if (result?.tagObject?.publicData) {
-            const { mergePlanTermIntoPublicData } = require("./zelf-id-plan-term.module");
-            await mergePlanTermIntoPublicData(result.tagObject.publicData);
+            const { readLeaseSearchResult } = require("./zelf-id-plan-term.module");
+            await readLeaseSearchResult(result);
         }
 
         const priced = attachAvailableZelfIdPricing(
