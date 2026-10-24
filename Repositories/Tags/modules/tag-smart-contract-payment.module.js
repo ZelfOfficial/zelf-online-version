@@ -3,6 +3,7 @@ const NodeCache = require("node-cache");
 const { getAddress } = require("ethers");
 const jwt = require("jsonwebtoken");
 const moment = require("moment");
+const { parseLeaseDate } = require("./lease-date.util");
 const { searchTag } = require("./tags.module");
 const { getDomainConfig } = require("../config/supported-domains");
 const { normalizeTagPayTxHash, verifyAvalancheZelfTagPayTx } = require("./avalanche-tag-pay-verify.module");
@@ -396,10 +397,10 @@ function writeScPayCache(cacheKey, sc, tagNameFull, body) {
 function renewalShortCircuitFlags(tagObject, tokenDecoded) {
     const initiatedAt = tokenDecoded.initiatedAt ? moment.unix(tokenDecoded.initiatedAt) : null;
     const renewedAtCondition = Boolean(
-        tagObject.publicData.renewedAt && initiatedAt && moment(tagObject.publicData.renewedAt).isAfter(initiatedAt),
+        tagObject.publicData.renewedAt && initiatedAt && parseLeaseDate(tagObject.publicData.renewedAt).isAfter(initiatedAt),
     );
     const registeredAtCondition = Boolean(
-        tokenDecoded.initiatedAt && moment(tagObject.publicData.registeredAt).isAfter(initiatedAt),
+        tokenDecoded.initiatedAt && parseLeaseDate(tagObject.publicData.registeredAt).isAfter(initiatedAt),
     );
     return { renewedAtCondition, registeredAtCondition };
 }

@@ -419,10 +419,7 @@ const isUnpaidExpiredReservation = (publicData = {}) => {
  */
 const remainingExpirationYears = (expiresAt) => {
     if (!expiresAt) return 0;
-    const parsed = moment(expiresAt, "YYYY-MM-DD HH:mm:ss", true).isValid()
-        ? moment(expiresAt, "YYYY-MM-DD HH:mm:ss")
-        : moment(expiresAt);
-    return parsed.diff(moment(), "years", true);
+    return parseLeaseDate(expiresAt).diff(moment.utc(), "years", true);
 };
 
 /**

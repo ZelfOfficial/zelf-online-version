@@ -303,15 +303,9 @@ const confirmPaidStripeSession = async (session) => {
     }
 
     const tagObject = tagData.tagObject;
-    const initiatedAt = inspected.created ? moment.unix(inspected.created) : null;
-    const renewedAtCondition = Boolean(
-        tagObject.publicData.renewedAt && initiatedAt && moment(tagObject.publicData.renewedAt).isAfter(initiatedAt)
-    );
-    const registeredAtCondition = Boolean(
-        initiatedAt && tagObject.publicData.registeredAt && moment(tagObject.publicData.registeredAt).isAfter(initiatedAt)
-    );
-
-    if (renewedAtCondition || registeredAtCondition) {
+    const { findQuoteGrant, saveQuoteGrant } = require("./zelf-id-quote-grant.module");
+    const priorGrant = await findQuoteGrant({ zelfName: `${tagName}.${domain}`, token: inspected.sessionId || session.id });
+    if (priorGrant) {
         return {
             status: "success",
             action: "already_extended",
@@ -322,7 +316,6 @@ const confirmPaidStripeSession = async (session) => {
             duration,
             plan,
             expiresAt: tagObject.publicData.expiresAt || null,
-            publicData: tagObject.publicData,
         };
     }
 
@@ -438,6 +431,16 @@ const confirmPaidStripeSession = async (session) => {
         };
     }
 
+    await saveQuoteGrant({
+        zelfName: `${tagName}.${domain}`,
+        token: inspected.sessionId || session.id,
+        source: "stripe",
+        paymentMethod: "stripe",
+        couponId: claimed?.couponId,
+        plan,
+        duration,
+    });
+
     return {
         status: "success",
         action: "zelf_id_lease_extended",
@@ -487,7 +490,7 @@ const callerOwnsLease = async ({ authUser, token, metadata }) => {
     return Boolean(verified && verified === expected);
 };
 
-const statusOnly = (body) => ({ status: body.status, confirmed: false });
+const statusOnly = () => ({ confirmed: false });
 
 /**
  * GET poll for a Zelf ID Stripe Checkout session.

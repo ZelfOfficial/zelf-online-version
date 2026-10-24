@@ -867,7 +867,7 @@ const _requiresUpdate = async (tagPayObject, priceDetails, tagObject) => {
     const registeredAtCondition = Boolean(
         tagObject.publicData.registeredAt &&
         tagPayObject?.publicData?.registeredAt &&
-        moment(tagObject.publicData.registeredAt).isAfter(moment(tagPayObject?.publicData?.registeredAt)),
+        parseLeaseDate(tagObject.publicData.registeredAt).isAfter(parseLeaseDate(tagPayObject?.publicData?.registeredAt)),
     );
 
     if (registeredAtCondition) return true;

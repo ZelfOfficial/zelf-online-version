@@ -3,6 +3,7 @@ const ZelfIdPartsModule = require("./zelf-id-parts.module");
 const { decrypt } = require("../../ZelfProof/modules/zelf-proof.module");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { effectivePassword, resolveSecurityType } = require("./zelf-id-password.module");
+const { parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 
 const withV4 = (data) => ({ ...data, stack: "v4" });
 
@@ -150,7 +151,7 @@ const _assertSourceNameNotActive = async (sourceName, domain, domainConfig, ethA
 
     if (publicData.ethAddress && ethAddress && publicData.ethAddress.toLowerCase() !== ethAddress.toLowerCase()) return;
 
-    const expiresAt = publicData.expiresAt ? new Date(publicData.expiresAt).getTime() : NaN;
+    const expiresAt = publicData.expiresAt ? parseLeaseDate(publicData.expiresAt).valueOf() : NaN;
 
     if (Number.isFinite(expiresAt) && expiresAt < Date.now()) return;
 

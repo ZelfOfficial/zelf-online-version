@@ -15,6 +15,11 @@ jest.mock("../../Repositories/ZelfID/modules/zelf-id.module", () => ({
     searchTag: jest.fn(),
 }));
 
+jest.mock("../../Repositories/ZelfID/modules/zelf-id-quote-grant.module", () => ({
+    findQuoteGrant: jest.fn(async () => null),
+    saveQuoteGrant: jest.fn(async () => null),
+}));
+
 jest.mock("jsonwebtoken", () => ({
     verify: jest.fn(),
 }));
@@ -38,6 +43,7 @@ jest.mock("../../Repositories/ZelfID/modules/zelf-id-purchase-manual-review.modu
 
 const moment = require("moment");
 const { verifyPaymentConfirmation } = require("../../Repositories/ZelfID/modules/my-zelf-id.module");
+const { findQuoteGrant } = require("../../Repositories/ZelfID/modules/zelf-id-quote-grant.module");
 const { confirmPaidStripeSession, buildLeaseStripeMetadata } = require("../../Repositories/ZelfID/modules/zelf-ids-stripe.module");
 const { addDurationToTag } = require("../../Repositories/ZelfID/modules/my-zelf-id.module");
 const ZelfIdModule = require("../../Repositories/ZelfID/modules/zelf-id.module");
@@ -121,10 +127,9 @@ describe("Zelf ID purchase guards", () => {
             },
         });
 
-        const result = await verifyPaymentConfirmation("jimqatest", "zelf", "FREE", "signed.jwt");
-
-        expect(result.cache).toBe(true);
-        expect(result.confirmed).toBe(true);
+        await expect(verifyPaymentConfirmation("jimqatest", "zelf", "FREE", "signed.jwt")).rejects.toMatchObject({
+            clientCode: "ERR_IDENTITY_VERIFICATION_REQUIRED",
+        });
     });
 
     test("confirmPaidStripeSession replay after lifetime purchase returns already_extended", async () => {
@@ -141,6 +146,8 @@ describe("Zelf ID purchase guards", () => {
             plan: "premium",
             amountUsd: 29,
         });
+
+        findQuoteGrant.mockResolvedValueOnce({ zelfName: "jimqatest.zelf", source: "stripe" });
 
         const result = await confirmPaidStripeSession({
             metadata,

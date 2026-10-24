@@ -1,4 +1,5 @@
 const moment = require("moment");
+const { parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 const ArweaveModule = require("../../Arweave/modules/arweave.module");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const ZNSPartsModule = require("./zns-parts.module");
@@ -263,9 +264,9 @@ const _returnFormattedArweaveRecords = async (searchResults) => {
 
 		if (hideRecordsWithoutRegisteredAt && !zelfNameObject.publicData.registeredAt) continue;
 
-		const expiresAt = moment(zelfNameObject.publicData.expiresAt).add(45, "day");
+		const expiresAt = parseLeaseDate(zelfNameObject.publicData.expiresAt).add(45, "day");
 
-		const isExpired = now.isAfter(expiresAt);
+		const isExpired = moment.utc().isAfter(expiresAt);
 
 		if (isExpired) continue;
 
@@ -294,9 +295,9 @@ const _returnFormattedIPFSRecords = async (ipfsRecords, environment, foundInArwe
 
 		const formattedIPFS = await ZNSPartsModule.formatIPFSRecord(ipfsRecord, foundInArweave);
 
-		const expiresAt = moment(formattedIPFS.publicData.expiresAt).add(formattedIPFS.publicData.type === "mainnet" ? 45 : 0, "day");
+		const expiresAt = parseLeaseDate(formattedIPFS.publicData.expiresAt).add(formattedIPFS.publicData.type === "mainnet" ? 45 : 0, "day");
 
-		const isExpired = now.isAfter(expiresAt);
+		const isExpired = moment.utc().isAfter(expiresAt);
 
 		if (isExpired) {
 			ipfsRecord.ipfs_pin_hash ? await IPFSModule.unPinFiles([ipfsRecord.ipfs_pin_hash]) : "do nothing";

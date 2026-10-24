@@ -1,7 +1,6 @@
 /**
  * Zelf ID v4 payment confirmation. Parallel to my-tags; does not patch it.
  */
-const moment = require("moment");
 const jwt = require("jsonwebtoken");
 const config = require("../../../Core/config");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
@@ -197,7 +196,7 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
 
     if (tokenDecoded.tagName !== `${tagName}.${domain}`) throw new Error("403:tag_not_owned");
 
-    if (network === "FREE") return confirmFreeCheckout(tagName, domain, tokenDecoded, domainConfig, identity);
+    if (network === "FREE") return confirmFreeCheckout(tagName, domain, tokenDecoded, domainConfig, identity, token);
 
     if (network === "AVAX") {
         throw new Error("409:avax_use_smart_contract_confirmation");
@@ -221,19 +220,18 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
 
     const paymentConfirmation = await confirmPayUniqueAddress(network, addressMapping[network], amountToPay, { initiatedAtUnix });
 
-    const initiatedAt = tokenDecoded.initiatedAt ? moment.unix(tokenDecoded.initiatedAt) : null;
-    const renewedAtCondition = Boolean(tagObject.publicData.renewedAt && initiatedAt && moment(tagObject.publicData.renewedAt).isAfter(initiatedAt));
-    const registeredAtCondition = Boolean(tokenDecoded.initiatedAt && moment(tagObject.publicData.registeredAt).isAfter(initiatedAt));
-
-    if (renewedAtCondition || registeredAtCondition) {
+    const { findQuoteGrant, saveQuoteGrant } = require("./zelf-id-quote-grant.module");
+    const priorGrant = await findQuoteGrant({ zelfName: `${tagName}.${domain}`, token });
+    if (priorGrant) {
         return {
             cache: true,
-            confirmed: paymentConfirmation.confirmed,
-            amountReceived: paymentConfirmation.amountReceived,
+            confirmed: true,
+            amountReceived: paymentConfirmation?.amountReceived ?? 0,
             paymentConfirmation,
             publicData: tagObject.publicData,
             expiresAt: tagObject.publicData?.expiresAt || null,
             tagObject,
+            paymentMethod: priorGrant.paymentMethod || "crypto",
         };
     }
 
@@ -315,6 +313,16 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
         tagObject.publicData.expiresAt = extension.expiresAt;
     }
 
+    await saveQuoteGrant({
+        zelfName: `${tagName}.${domain}`,
+        token,
+        source: network,
+        paymentMethod: "crypto",
+        couponId: couponGrant.claimed?.couponId,
+        plan: tokenDecoded.plan,
+        duration: tokenDecoded.duration,
+    });
+
     return {
         tagObject: extension.tagObject || tagObject,
         expiresAt: extension.expiresAt || tagObject.publicData?.expiresAt || null,
@@ -328,7 +336,7 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
  * Re-quotes on the server from the license with the signed plan, duration and referral;
  * refuses unless the total is exactly $0. No Stripe or on-chain payment is involved.
  */
-const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, identity = {}) => {
+const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, identity = {}, quoteToken) => {
     const { getZelfIdCheckoutPrice, normalizePaymentDuration } = require("./zelf-id-plan.module");
     const tagData = await ZelfIdModule.searchTag({ tagName, domain, domainConfig, environment: "all" }, {});
 
@@ -338,48 +346,8 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
     // Identity decrypt can repin the same record. Price the grant from the pre-check lease
     // so a free name is not extended as if it were already a paid year.
     const basePublicData = { ...(tagObject.publicData || {}) };
-    const initiatedAt = tokenDecoded.initiatedAt ? moment.unix(tokenDecoded.initiatedAt) : null;
-    const renewedAt = tagObject.publicData.renewedAt || tagObject.publicData.registeredAt;
 
-    // Same signed checkout already applied: return the record, never stamp twice.
-    if (initiatedAt && renewedAt && moment(renewedAt).isAfter(initiatedAt)) {
-        const cached = {
-            cache: true,
-            confirmed: true,
-            amountReceived: 0,
-            tagObject,
-            expiresAt: tagObject.publicData?.expiresAt || null,
-        };
-        if (tagObject.publicData.paymentMethod === "coupon" || tokenDecoded.coupon?.code) {
-            cached.paymentMethod = "coupon";
-            cached.couponId = tagObject.publicData.couponId || null;
-        }
-        return cached;
-    }
-
-    // The pin no longer carries couponId. A replay of the same signed confirm is the
-    // redemption already stored for this name after the quote was signed.
-    if (tokenDecoded.coupon?.valid === true && tokenDecoded.coupon?.code) {
-        const Coupons = require("./zelf-ids-coupons.module");
-        const prior = await Coupons.findGrantForReplay({
-            code: tokenDecoded.coupon.code,
-            zelfId: `${tagName}.${domain}`,
-            initiatedAt: tokenDecoded.initiatedAt,
-        });
-        if (prior) {
-            return {
-                cache: true,
-                confirmed: true,
-                amountReceived: 0,
-                tagObject,
-                expiresAt: tagObject.publicData?.expiresAt || null,
-                paymentMethod: "coupon",
-                couponId: prior.couponId,
-            };
-        }
-    }
-
-    // Prove control of this name before a coupon redemption or a whitelist grant.
+    // Prove control of this name before a replay response, a coupon redemption, or a whitelist grant.
     const { assertFreeCheckoutIdentity } = require("./zelf-id-checkout-identity.module");
     await assertFreeCheckoutIdentity({
         tagName,
@@ -391,8 +359,34 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
         password: identity.password,
     });
 
+    const { findQuoteGrant, saveQuoteGrant } = require("./zelf-id-quote-grant.module");
+    const priorGrant = await findQuoteGrant({ zelfName: `${tagName}.${domain}`, token: quoteToken });
+    if (priorGrant) {
+        return {
+            cache: true,
+            confirmed: true,
+            amountReceived: 0,
+            tagObject,
+            expiresAt: tagObject.publicData?.expiresAt || null,
+            paymentMethod: priorGrant.paymentMethod || (tokenDecoded.coupon?.code ? "coupon" : "whitelist"),
+            couponId: priorGrant.couponId || null,
+        };
+    }
+
     if (tokenDecoded.coupon?.valid === true && tokenDecoded.coupon?.code) {
-        return confirmCouponFreeCheckout(tagName, domain, tokenDecoded, domainConfig, tagObject, basePublicData);
+        const granted = await confirmCouponFreeCheckout(tagName, domain, tokenDecoded, domainConfig, tagObject, basePublicData);
+        if (granted.confirmed) {
+            await saveQuoteGrant({
+                zelfName: `${tagName}.${domain}`,
+                token: quoteToken,
+                source: "coupon",
+                paymentMethod: "coupon",
+                couponId: granted.couponId,
+                plan: tokenDecoded.plan,
+                duration: tokenDecoded.duration,
+            });
+        }
+        return granted;
     }
 
     const { assertPurchaseKeepsPaidValue } = require("./zelf-id-plan.module");
@@ -433,6 +427,15 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
         },
         tagObject
     );
+
+    await saveQuoteGrant({
+        zelfName: `${tagName}.${domain}`,
+        token: quoteToken,
+        source: "whitelist",
+        paymentMethod: "whitelist",
+        plan: tokenDecoded.plan,
+        duration: tokenDecoded.duration,
+    });
 
     return {
         tagObject: extension.tagObject || tagObject,

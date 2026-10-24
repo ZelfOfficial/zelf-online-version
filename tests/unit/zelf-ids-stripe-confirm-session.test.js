@@ -99,7 +99,7 @@ describe("pollStripeSession", () => {
 
 		const result = await pollStripeSession({ sessionId: VALID_SESSION_ID, authUser: {}, token: "" });
 
-		expect(result).toEqual({ status: "unpaid", confirmed: false });
+		expect(result).toEqual({ confirmed: false });
 	});
 
 	test("an unpaid poll returns the quote fields to the checkout owner", async () => {

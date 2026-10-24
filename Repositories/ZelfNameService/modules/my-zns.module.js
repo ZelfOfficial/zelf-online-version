@@ -2,6 +2,7 @@ const config = require("../../../Core/config");
 const jwt = require("jsonwebtoken");
 const { searchZelfName, createZelfPay, updateZelfPay } = require("./zns.v2.module");
 const moment = require("moment");
+const { formatLeaseDate, parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 const { getTickerPrice } = require("../../binance/modules/binance.module");
 
 const { confirmPayUniqueAddress } = require("../../purchase-zelf/modules/balance-checker.module");
@@ -61,13 +62,13 @@ const renewMyZelfName = async (params, authUser) => {
 		zelfNameObject = publicKeys.ipfs[0];
 	} else if (publicKeys.ipfs?.length > 1) {
 		zelfNameObject = publicKeys.ipfs.reduce((latest, current) => {
-			return moment(current.publicData.expiresAt).isAfter(moment(latest.publicData.expiresAt)) ? current : latest;
+			return parseLeaseDate(current.publicData.expiresAt).isAfter(parseLeaseDate(latest.publicData.expiresAt)) ? current : latest;
 		});
 	} else if (publicKeys.arweave?.length === 1) {
 		zelfNameObject = publicKeys.arweave[0];
 	} else if (publicKeys.arweave?.length > 1) {
 		zelfNameObject = publicKeys.arweave.reduce((latest, current) => {
-			return moment(current.publicData.expiresAt).isAfter(moment(latest.publicData.expiresAt)) ? current : latest;
+			return parseLeaseDate(current.publicData.expiresAt).isAfter(parseLeaseDate(latest.publicData.expiresAt)) ? current : latest;
 		});
 	}
 
@@ -75,10 +76,10 @@ const renewMyZelfName = async (params, authUser) => {
 	if (
 		(zelfNameObject.publicData.renewedAt &&
 			authUser.payment?.registeredAt &&
-			moment(zelfNameObject.publicData.renewedAt).isAfter(moment(authUser.payment.registeredAt))) ||
+			parseLeaseDate(zelfNameObject.publicData.renewedAt).isAfter(parseLeaseDate(authUser.payment.registeredAt))) ||
 		(!zelfNameObject.publicData.renewedAt &&
 			authUser.payment?.registeredAt &&
-			moment(zelfNameObject.publicData.registeredAt).isAfter(moment(authUser.payment.registeredAt)))
+			parseLeaseDate(zelfNameObject.publicData.registeredAt).isAfter(parseLeaseDate(authUser.payment.registeredAt)))
 	) {
 		return {
 			cache: true,
@@ -150,9 +151,9 @@ const _addDurationToZelfName = async (authUser, preview = {}, passedZelfNameObje
 				suiAddress,
 				origin,
 				registeredAt:
-					zelfNameObject.publicData.type === "mainnet" ? zelfNameObject.publicData.registeredAt : moment().format("YYYY-MM-DD HH:mm:ss"),
-				renewedAt: zelfNameObject.publicData.type === "mainnet" ? moment().format("YYYY-MM-DD HH:mm:ss") : undefined,
-				expiresAt: moment(zelfNameObject.publicData.expiresAt).add(duration, "year").format("YYYY-MM-DD HH:mm:ss"),
+					zelfNameObject.publicData.type === "mainnet" ? zelfNameObject.publicData.registeredAt : formatLeaseDate(),
+				renewedAt: zelfNameObject.publicData.type === "mainnet" ? formatLeaseDate() : undefined,
+				expiresAt: parseLeaseDate(zelfNameObject.publicData.expiresAt).add(duration, "year").format("YYYY-MM-DD HH:mm:ss"),
 				count: parseInt(zelfNameObject.publicData.count) + 1,
 				eventID,
 			}),
@@ -234,12 +235,12 @@ const _fetchZelfPayRecord = async (zelfNameObject, currentCount, duration = 1) =
 
 	zelfPayRecords = zelfPayRecords.ipfs?.length
 		? zelfPayRecords.ipfs.filter((record) => {
-			const comparisonDate = renewedAt ? moment(renewedAt) : moment(registeredAt);
-			return comparisonDate.isBefore(record.publicData.registeredAt);
+			const comparisonDate = renewedAt ? parseLeaseDate(renewedAt) : parseLeaseDate(registeredAt);
+			return comparisonDate.isBefore(parseLeaseDate(record.publicData.registeredAt));
 		})
 		: zelfPayRecords.arweave?.filter((record) => {
-			const comparisonDate = renewedAt ? moment(renewedAt) : moment(registeredAt);
-			return comparisonDate.isBefore(record.publicData.registeredAt);
+			const comparisonDate = renewedAt ? parseLeaseDate(renewedAt) : parseLeaseDate(registeredAt);
+			return comparisonDate.isBefore(parseLeaseDate(record.publicData.registeredAt));
 		});
 
 	let renewZelfPayObject = null;
@@ -295,13 +296,13 @@ const _updateOldZelfNameObject = async (zelfNameObject) => {
 	const expiresAt =
 		zelfNameObject.publicData.expiresAt ||
 		zelfNameObject.publicData.leaseExpiresAt ||
-		(type === "hold" ? moment().add(30, "day").format("YYYY-MM-DD HH:mm:ss") : moment().add(duration, "year").format("YYYY-MM-DD HH:mm:ss"));
+		(type === "hold" ? formatLeaseDate(30, "day") : formatLeaseDate(duration, "year"));
 
 	const registeredAt = expiresAt
-		? moment(expiresAt).isAfter("2026-01-01")
-			? moment(expiresAt).subtract(1, "year").format("YYYY-MM-DD HH:mm:ss")
-			: moment(expiresAt).subtract(1, "month").format("YYYY-MM-DD HH:mm:ss")
-		: moment().format("YYYY-MM-DD HH:mm:ss");
+		? parseLeaseDate(expiresAt).isAfter(parseLeaseDate("2026-01-01 00:00:00"))
+			? parseLeaseDate(expiresAt).subtract(1, "year").format("YYYY-MM-DD HH:mm:ss")
+			: parseLeaseDate(expiresAt).subtract(1, "month").format("YYYY-MM-DD HH:mm:ss")
+		: formatLeaseDate();
 
 	mergeAddressKeyvaluesIntoPublicData(zelfNameObject.publicData);
 
@@ -325,7 +326,7 @@ const _updateOldZelfNameObject = async (zelfNameObject) => {
 						origin: zelfNameObject.publicData.origin,
 						price: calculation.price,
 						duration: type === "hold" ? duration : undefined,
-						registeredAt: moment(registeredAt).isAfter(moment()) ? moment().format("YYYY-MM-DD HH:mm:ss") : registeredAt,
+						registeredAt: parseLeaseDate(registeredAt).isAfter(moment.utc()) ? formatLeaseDate() : registeredAt,
 						expiresAt,
 						referralZelfName: zelfNameObject.publicData.referralZelfName,
 						referralSolanaAddress: zelfNameObject.publicData.referralSolanaAddress,

@@ -5,6 +5,7 @@
  * Legacy char-bucket products (zns_char_* / zelf_name_service_char_*) remain supported.
  */
 const moment = require("moment");
+const { parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { getBareName, getBareNameLength, resolvePaidPlan } = require("./zelf-id-plan.module");
 const { parseSubscriptionProductId } = require("./zelf-ids-revenue-cat-products.module");
@@ -333,7 +334,7 @@ const alreadyAppliedToRecord = (publicData = {}, { eventId, purchasedAtMs }) => 
     if (!purchasedAtMs) return false;
 
     const purchasedAt = moment(purchasedAtMs);
-    const after = (value) => Boolean(value) && moment(value).isAfter(purchasedAt);
+    const after = (value) => Boolean(value) && parseLeaseDate(value).isAfter(purchasedAt);
 
     return after(publicData.renewedAt) || after(publicData.registeredAt);
 };
@@ -450,7 +451,7 @@ const expirationSkipReason = (publicData = {}, { originalTransactionId, expirati
 
     if (String(publicData.duration || "").toLowerCase() === "lifetime") return "extended_beyond_subscription";
 
-    const expiresAt = publicData.expiresAt ? moment(publicData.expiresAt) : null;
+    const expiresAt = publicData.expiresAt ? parseLeaseDate(publicData.expiresAt) : null;
     const periodEnd = expirationAtMs ? moment(expirationAtMs) : moment();
     if (expiresAt?.isValid() && expiresAt.valueOf() > periodEnd.valueOf() + EXPIRATION_EXTENSION_TOLERANCE_MS) {
         return "extended_beyond_subscription";

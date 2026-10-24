@@ -20,6 +20,7 @@ const AvalancheModule = require("../../Avalanche/modules/avalanche-scrapping.mod
 const BlockDAGModule = require("../../BlockDAG/modules/blockdag.module");
 const { sendCustomEmail } = require("../../../Core/mailgun");
 const { buildMetadata, ensureZelfProofQRCode, storeInIPFS, storeInWalrus, storeInArweave } = require("./tags-payment.module");
+const { parseLeaseDate } = require("./lease-date.util");
 const { expandStoredExtraParams } = require("./tags-addresses.module");
 const { parseTagPayAmount, coerceInitiatedAtUnix, filterSessionInboundTransactions } = require("./tag-pay-session-tx.util");
 const { verifySmartContractPayment, throwPaymentConfirmationTagNotFound } = require("./tag-smart-contract-payment.module");
@@ -74,9 +75,13 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token) => {
 
     const initiatedAt = tokenDecoded.initiatedAt ? moment.unix(tokenDecoded.initiatedAt) : null;
 
-    const renewedAtCondition = Boolean(tagObject.publicData.renewedAt && initiatedAt && moment(tagObject.publicData.renewedAt).isAfter(initiatedAt));
+    const renewedAtCondition = Boolean(
+        tagObject.publicData.renewedAt && initiatedAt && parseLeaseDate(tagObject.publicData.renewedAt).isAfter(initiatedAt)
+    );
 
-    const registeredAtCondition = Boolean(tokenDecoded.initiatedAt && moment(tagObject.publicData.registeredAt).isAfter(initiatedAt));
+    const registeredAtCondition = Boolean(
+        tokenDecoded.initiatedAt && parseLeaseDate(tagObject.publicData.registeredAt).isAfter(initiatedAt)
+    );
 
     if (renewedAtCondition || registeredAtCondition) {
         return {
@@ -483,8 +488,8 @@ const sendEmailReceipt = async (tagName, domain, network, email, token) => {
         tokenDecoded.prices.AVAX?.price;
 
     // Format dates for better readability
-    const transactionDate = moment(tagObject.publicData.registeredAt).format("YYYY-MM-DD HH:mm:ss");
-    const expiresDate = moment(tagObject.publicData.expiresAt).format("YYYY-MM-DD HH:mm:ss");
+    const transactionDate = parseLeaseDate(tagObject.publicData.registeredAt).format("YYYY-MM-DD HH:mm:ss");
+    const expiresDate = parseLeaseDate(tagObject.publicData.expiresAt).format("YYYY-MM-DD HH:mm:ss");
     const yearLabel = tokenDecoded.duration === 1 ? "1 YEAR" : `${tokenDecoded.duration} YEARS`;
 
     return await sendCustomEmail(
@@ -932,8 +937,8 @@ const _findReferralRecordInStorage = async (referralTagName, friendFullTagName, 
  */
 const _durationFromRegisteredAndExpires = (registeredAt, expiresAt) => {
     if (!registeredAt || !expiresAt) return "1";
-    const start = moment(registeredAt);
-    const end = moment(expiresAt);
+    const start = parseLeaseDate(registeredAt);
+    const end = parseLeaseDate(expiresAt);
     if (!start.isValid() || !end.isValid() || end.isSameOrBefore(start)) return "1";
     const years = end.diff(start, "years", true);
     if (years >= 5) return "lifetime";
