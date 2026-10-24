@@ -46,8 +46,60 @@ const requireStore = (token) => {
     if (!mongoReady() || !token) throw unavailable();
 };
 
+/** A pending claim older than this can be taken again. */
+const PENDING_LEASE_MS = 3 * 60 * 1000;
+
+const leaseExpired = (grant, now = Date.now()) => {
+    if (!grant?.claimedAt) return true;
+    return new Date(grant.claimedAt).getTime() <= now - PENDING_LEASE_MS;
+};
+
+/**
+ * A grant whose plan term or coupon redemption already recorded this quote.
+ * Used when `status: done` was never written.
+ */
+const findGrantEvidence = async (zelfName, hash) => {
+    const PlanTerm = require("../models/zelf-id-plan-term.model");
+    const term = await PlanTerm.findOne({ zelfName, quoteHash: hash }).lean();
+    if (term) {
+        return {
+            plan: term.plan,
+            duration: term.duration,
+            paymentMethod: term.paymentMethod,
+            couponId: term.couponId || null,
+            amountPaidUsd: term.amountPaidUsd,
+        };
+    }
+
+    const Coupon = require("../models/zelf-id-coupon.model");
+    const coupon = await Coupon.findOne({ redemptions: { $elemMatch: { zelfId: zelfName, quoteHash: hash } } }).lean();
+    if (!coupon) return null;
+    const hit = (coupon.redemptions || []).find((redemption) => redemption.zelfId === zelfName && redemption.quoteHash === hash);
+    if (!hit) return null;
+    return {
+        plan: hit.plan,
+        duration: hit.duration,
+        paymentMethod: "coupon",
+        couponId: coupon.id,
+        amountPaidUsd: 0,
+    };
+};
+
+const markDoneFromEvidence = async (existing, evidence) => {
+    const $set = { status: "done" };
+    if (evidence.plan != null) $set.plan = evidence.plan;
+    if (evidence.duration != null) $set.duration = String(evidence.duration);
+    if (evidence.paymentMethod != null) $set.paymentMethod = evidence.paymentMethod;
+    if (evidence.couponId != null) $set.couponId = evidence.couponId;
+    if (typeof evidence.amountPaidUsd === "number") $set.amountPaidUsd = evidence.amountPaidUsd;
+    await QuoteGrant.updateOne({ _id: existing._id, status: "pending" }, { $set });
+    return { ...existing, ...$set };
+};
+
 /**
  * Insert the pending claim, or report an existing done/pending row.
+ * A pending row past its lease can be claimed again. If the grant already
+ * landed on the plan term or a redemption, the row is marked done instead.
  * @returns {Promise<{ state: "claimed"|"done", grant: Object }>}
  */
 const claimQuoteGrant = async ({ zelfName, domain, token, source }) => {
@@ -63,15 +115,36 @@ const claimQuoteGrant = async ({ zelfName, domain, token, source }) => {
             quoteHash: hash,
             source: source || "confirm",
             status: "pending",
+            claimedAt: new Date(),
         });
         return { state: "claimed", grant };
     } catch (error) {
         if (!isDuplicateKey(error)) throw error;
         const existing = await QuoteGrant.findOne({ zelfName: name, quoteHash: hash }).lean();
-        if (existing && (existing.status === "done" || existing.status == null)) {
+        if (!existing) throw inProgress();
+        if (existing.status === "done" || existing.status == null) {
             return { state: "done", grant: existing };
         }
-        throw inProgress();
+
+        const evidence = await findGrantEvidence(name, hash);
+        if (evidence) {
+            const grant = await markDoneFromEvidence(existing, evidence);
+            return { state: "done", grant };
+        }
+
+        if (!leaseExpired(existing)) throw inProgress();
+
+        const reclaimed = await QuoteGrant.findOneAndUpdate(
+            {
+                _id: existing._id,
+                status: "pending",
+                $or: [{ claimedAt: { $lte: new Date(Date.now() - PENDING_LEASE_MS) } }, { claimedAt: null }, { claimedAt: { $exists: false } }],
+            },
+            { $set: { claimedAt: new Date(), source: source || existing.source || "confirm" } },
+            { new: true }
+        ).lean();
+        if (!reclaimed) throw inProgress();
+        return { state: "claimed", grant: reclaimed };
     }
 };
 
@@ -100,8 +173,10 @@ const releaseQuoteGrant = async ({ zelfName, domain, token }) => {
 };
 
 module.exports = {
+    PENDING_LEASE_MS,
     claimQuoteGrant,
     completeQuoteGrant,
+    findGrantEvidence,
     quoteHash,
     releaseQuoteGrant,
 };

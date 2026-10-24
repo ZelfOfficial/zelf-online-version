@@ -16,6 +16,7 @@ const zelfIdQuoteGrantSchema = new mongoose.Schema({
     duration: { type: String, default: null },
     amountPaidUsd: { type: Number, default: null },
     status: { type: String, enum: ["pending", "done"], default: "pending" },
+    claimedAt: { type: Date, default: null },
 });
 
 zelfIdQuoteGrantSchema.index({ zelfName: 1, quoteHash: 1 }, { unique: true });

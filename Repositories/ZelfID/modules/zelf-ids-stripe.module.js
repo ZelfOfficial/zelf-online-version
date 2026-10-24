@@ -335,7 +335,7 @@ const confirmPaidStripeSession = async (session) => {
     }
 
     const tagObject = tagData.tagObject;
-    const { claimQuoteGrant, completeQuoteGrant, releaseQuoteGrant } = require("./zelf-id-quote-grant.module");
+    const { claimQuoteGrant, completeQuoteGrant, quoteHash, releaseQuoteGrant } = require("./zelf-id-quote-grant.module");
     const quoteKey = { zelfName: `${tagName}.${domain}`, token: inspected.sessionId || session.id };
     const claim = await claimQuoteGrant({ ...quoteKey, source: "stripe" });
     if (claim.state === "done") {
@@ -411,6 +411,7 @@ const confirmPaidStripeSession = async (session) => {
                 tagName,
                 signedAmount: price,
                 listPrice: priceAfterUpgradeCredit(list, freshCredit.upgradeCreditUsd),
+                quoteHash: quoteHash(quoteKey.token),
             });
         } catch (error) {
             await releaseQuoteGrant(quoteKey);
@@ -460,6 +461,7 @@ const confirmPaidStripeSession = async (session) => {
                 sessionId: inspected.sessionId,
                 billableUsdPrice: price,
                 couponId: claimed?.couponId,
+                quoteToken: quoteKey.token,
             },
             tagObject
         );
@@ -521,7 +523,10 @@ const confirmPaidStripeSession = async (session) => {
     };
 };
 
-const confirmFromCheckoutEvent = async (event) => confirmPaidStripeSession(event?.data?.object || {});
+const { guardGrant } = require("./zelf-id-grant-error.module");
+const confirmPaidStripeSessionGuarded = guardGrant(confirmPaidStripeSession);
+
+const confirmFromCheckoutEvent = async (event) => confirmPaidStripeSessionGuarded(event?.data?.object || {});
 
 const confirmFromSessionId = async (sessionId) => {
     const id = String(sessionId || "").trim();
@@ -532,7 +537,7 @@ const confirmFromSessionId = async (sessionId) => {
 
     const session = await retrieveCheckoutSession(getStripeClient(), id);
 
-    return confirmPaidStripeSession(session);
+    return confirmPaidStripeSessionGuarded(session);
 };
 
 /**
@@ -593,7 +598,7 @@ const pollStripeSession = async ({ sessionId, authUser, token }) => {
         throw error;
     }
 
-    return confirmPaidStripeSession(session);
+    return confirmPaidStripeSessionGuarded(session);
 };
 
 module.exports = {
@@ -605,7 +610,7 @@ module.exports = {
     parseLeaseStripeMetadata,
     inspectStripeLeaseSession,
     createStripeCheckout,
-    confirmPaidStripeSession,
+    confirmPaidStripeSession: confirmPaidStripeSessionGuarded,
     confirmFromCheckoutEvent,
     confirmFromSessionId,
     callerOwnsLease,

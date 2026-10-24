@@ -13,6 +13,7 @@ const zelfIdPlanTermSchema = new mongoose.Schema({
     paymentMethod: { type: String, default: null },
     duration: { type: String, default: null },
     amountPaidUsd: { type: Number, default: null },
+    quoteHash: { type: String, default: null },
 });
 
 addBasicPlugins(zelfIdPlanTermSchema);

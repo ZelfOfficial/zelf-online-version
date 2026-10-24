@@ -614,4 +614,23 @@ describe("Zelf ID plan coupons", () => {
         expect(deactivated.redemptions).toEqual([]);
         await expect(Coupons.deactivateCoupon("missing-id")).rejects.toMatchObject({ clientCode: "coupon_not_found" });
     });
+
+    test("mongo dropping during identity returns 503 and does not redeem", async () => {
+        const created = await Coupons.createCoupon({ code: "mongodown", percentOff: 100, plans: ["premium"], maxRedemptions: 2 }, "admin@zelf.world");
+        const token = signQuote("mongodown", created);
+        const spy = jest.spyOn(Session, "findById").mockReturnValue({
+            lean: () => Promise.reject(Object.assign(new Error("Connection was force closed"), { name: "MongoNetworkError" })),
+        });
+
+        await expect(
+            verifyPaymentConfirmation("mongodown", "zelf", "FREE", token, { authUser: { session: "session-id", tagName: "mongodown", domain: "zelf" } })
+        ).rejects.toMatchObject({
+            status: 503,
+            clientCode: "quote_store_unavailable",
+            message: "503:quote_store_unavailable",
+        });
+
+        spy.mockRestore();
+        expect((await Coupon.findOne({ code: created.code }).lean()).redemptions).toHaveLength(0);
+    });
 });

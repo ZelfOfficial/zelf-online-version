@@ -242,7 +242,7 @@ const deactivateCoupon = async (id) => {
     return toPublic(coupon);
 };
 
-const claimRedemption = async (coupon, { zelfId, plan, duration }) => {
+const claimRedemption = async (coupon, { zelfId, plan, duration, quoteHash }) => {
     const key = crypto.randomUUID();
     const redeemedAt = new Date();
     const updated = await Coupon.findOneAndUpdate(
@@ -272,7 +272,7 @@ const claimRedemption = async (coupon, { zelfId, plan, duration }) => {
         },
         {
             $push: {
-                redemptions: { zelfId, plan, duration, redeemedAt, key },
+                redemptions: { zelfId, plan, duration, redeemedAt, key, ...(quoteHash ? { quoteHash } : {}) },
             },
         },
         { new: true }
@@ -286,7 +286,7 @@ const claimRedemption = async (coupon, { zelfId, plan, duration }) => {
  * Does not trust a client total: `signedAmount`, when passed, must match the recomputed amount.
  * @returns {Promise<{ couponId: string, code: string, amountDue: number, percentOff: number, listPrice: number, redemptionKey: string }>}
  */
-const claimForGrant = async ({ code, couponId, zelfId, plan, duration, domainConfig, tagName, signedAmount, requireZero = false, listPrice }) => {
+const claimForGrant = async ({ code, couponId, zelfId, plan, duration, domainConfig, tagName, signedAmount, requireZero = false, listPrice, quoteHash }) => {
     let resolvedCode = normalizeCode(code);
     if (!resolvedCode && couponId) {
         const byId = await Coupon.findOne({ id: String(couponId) }).select("code").lean();
@@ -303,7 +303,12 @@ const claimForGrant = async ({ code, couponId, zelfId, plan, duration, domainCon
     const coupon = await Coupon.findOne({ code: resolvedCode });
     const zelfKey = normalizeZelfId(zelfId);
     const claimed = coupon
-        ? await claimRedemption(coupon, { zelfId: zelfKey, plan: String(plan).toLowerCase(), duration: described.durationToken })
+        ? await claimRedemption(coupon, {
+              zelfId: zelfKey,
+              plan: String(plan).toLowerCase(),
+              duration: described.durationToken,
+              quoteHash,
+          })
         : null;
     if (!claimed) {
         const again = await describeCoupon({ code: resolvedCode, plan, duration, zelfId: zelfKey, listPrice: price });

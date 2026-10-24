@@ -23,7 +23,7 @@ const normalizedName = (zelfName, domain) => {
  * @param {string|null} [params.paymentMethod]
  * @param {number|null} [params.amountPaidUsd] USD actually charged for this term
  */
-const savePlanTerm = async ({ zelfName, domain, plan, planExpiresAt, paymentMethod, duration, amountPaidUsd }) => {
+const savePlanTerm = async ({ zelfName, domain, plan, planExpiresAt, paymentMethod, duration, amountPaidUsd, quoteHash }) => {
     if (!mongoReady()) return null;
     const name = normalizedName(zelfName, domain);
     if (!name) return null;
@@ -34,6 +34,7 @@ const savePlanTerm = async ({ zelfName, domain, plan, planExpiresAt, paymentMeth
     if (paymentMethod !== undefined) $set.paymentMethod = paymentMethod;
     if (duration !== undefined) $set.duration = duration;
     if (amountPaidUsd !== undefined) $set.amountPaidUsd = amountPaidUsd;
+    if (quoteHash !== undefined) $set.quoteHash = quoteHash;
     if (Object.keys($set).length === 1) return null;
 
     return PlanTerm.findOneAndUpdate({ zelfName: name }, { $set }, { upsert: true, new: true });

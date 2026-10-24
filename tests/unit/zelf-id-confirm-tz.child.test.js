@@ -213,14 +213,13 @@ confirmDescribe(`confirm under ${process.env.TZ || "default"}`, () => {
             verifyPaymentConfirmation(bare, "zelf", "FREE", token, owner),
             verifyPaymentConfirmation(bare, "zelf", "FREE", token, owner),
         ]);
-        const granted = results.filter((result) => result.status === "fulfilled" && result.value.confirmed === true && !result.value.cache);
-        const replayed = results.filter((result) => result.status === "fulfilled" && result.value.cache === true);
+        const fulfilled = results.filter((result) => result.status === "fulfilled" && result.value.confirmed === true);
+        const granted = fulfilled.filter((result) => !result.value.cache);
         const rejected = results.filter((result) => result.status === "rejected");
 
-        expect(granted.length + replayed.length).toBeLessThan(3);
         expect(granted).toHaveLength(1);
-        expect(rejected.every((result) => result.reason.clientCode === "in_progress" || result.value)).toBe(true);
-        expect(rejected.length + replayed.length).toBe(2);
+        expect(fulfilled.length + rejected.length).toBe(3);
+        expect(rejected.every((result) => result.reason.clientCode === "in_progress")).toBe(true);
         expect(await QuoteGrant.countDocuments({ source: "whitelist", status: "done" })).toBe(1);
     });
 

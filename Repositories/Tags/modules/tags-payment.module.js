@@ -15,7 +15,7 @@ const config = require("../../../Core/config");
 const WalrusModule = require("../../Walrus/modules/walrus.module");
 const TagsArweaveModule = require("./tags-arweave.module");
 const { generateQRFromZelfProof, QRZelfProofExtractor } = require("./qr-zelfproof-extractor.module");
-const { cleanExtraParamsForPinata, resolveEncryptVersion, stampExtraParamsVersion } = require("./tags-addresses.module");
+const { buildSearchablePinPages, cleanExtraParamsForPinata, resolveEncryptVersion, stampExtraParamsVersion } = require("./tags-addresses.module");
 const { formatLeaseDate, parseLeaseDate } = require("./lease-date.util");
 
 const envTruthy = (v) => {
@@ -1126,19 +1126,30 @@ const storeInWalrus = async (tagObject, domainConfig, metadata) => {
 };
 
 const storeInIPFS = async (tagObject, domainConfig, metadata) => {
-    await TagsIpfsModule.unpinContinuationSiblings(tagObject.fullTagName);
-    await TagsIpfsModule.deleteFiles([tagObject.ipfsId || tagObject.id]);
+    const fullName = tagObject.fullTagName;
+    buildSearchablePinPages({
+        reserved: metadata,
+        addresses: tagObject.publicData,
+        tagName: fullName,
+    });
+
+    const previousPrimaryId = tagObject.ipfsId || tagObject.id;
+    const previousSiblingIds = (await TagsIpfsModule.listContinuationSiblingPinIds(fullName)) || [];
 
     tagObject.ipfs = await TagsIpfsModule.insertSearchablePins(
         {
             base64: tagObject.zelfProofQRCode,
-            name: tagObject.fullTagName,
+            name: fullName,
             reserved: metadata,
             addresses: tagObject.publicData,
             pinIt: true,
         },
         { pro: true },
     );
+
+    const newId = tagObject.ipfs?.id != null ? String(tagObject.ipfs.id) : "";
+    const staleIds = [...new Set([previousPrimaryId, ...previousSiblingIds].filter((id) => id != null && String(id) !== "" && String(id) !== newId).map(String))];
+    if (staleIds.length) await TagsIpfsModule.deleteFiles(staleIds);
 
     const ipfsRec = tagObject.ipfs;
     if (ipfsRec?.id != null && ipfsRec.id !== "") {

@@ -10,6 +10,7 @@ const redemptionSchema = new mongoose.Schema(
         redeemedAt: { type: Date, required: true },
         // Internal id so a failed grant can pull this redemption back. Not part of the public coupon.
         key: { type: String, required: true },
+        quoteHash: { type: String, default: null },
     },
     { _id: false }
 );
