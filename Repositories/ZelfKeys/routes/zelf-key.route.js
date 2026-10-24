@@ -24,6 +24,9 @@ module.exports = (server) => {
     server.post(`${PATH}/add/notes`, Middleware.storeNotesValidation, FaceMiddleware.gate("store-notes"), Controller.storeNotes);
     server.post(`${PATH}/add/credit-card`, Middleware.storeCreditCardValidation, FaceMiddleware.gate("store-credit-card"), Controller.storeCreditCard);
 
+    server.get(`${PATH}/limits`, Middleware.limitsValidation, Controller.getVaultLimits);
+    server.post(`${PATH}/slots`, Middleware.purchaseSlotValidation, Controller.purchaseExtraSlot);
+
     server.get(`${PATH}/list`, Middleware.listValidation, Controller.listData);
     server.get(`${PATH}/proof`, Middleware.proofValidation, Controller.getProof);
     server.get(`${PATH}/list-all`, Middleware.listAllValidation, Controller.listAllData);

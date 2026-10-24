@@ -83,6 +83,9 @@ const passwordCredentialSchema = {
 	insideFolder: boolean().optional().allow(false),
 	notes: string().optional().allow(""),
 	protection: protectionField,
+	id: string().optional().allow(""),
+	cid: string().optional().allow(""),
+	recordId: string().optional().allow(""),
 };
 
 const schemas = {
@@ -98,6 +101,9 @@ const schemas = {
 		faceBase64: string().required(),
 		masterPassword: string().optional().allow(""),
 		protection: protectionField,
+		id: string().optional().allow(""),
+		cid: string().optional().allow(""),
+		recordId: string().optional().allow(""),
 	},
 	bulkPasswords: {
 		faceBase64: string().required(),
@@ -120,6 +126,9 @@ const schemas = {
 		faceBase64: string().required(),
 		masterPassword: string().optional().allow(""),
 		protection: protectionField,
+		id: string().optional().allow(""),
+		cid: string().optional().allow(""),
+		recordId: string().optional().allow(""),
 	},
 	notes: {
 		title: string().min(1).max(100).required(),
@@ -195,6 +204,10 @@ const schemas = {
 		type: stringEnum(SUPPORTED_CATEGORIES).optional(),
 		owner: string().optional().allow("").max(200),
 		search: string().optional().allow("").max(200),
+	},
+	purchaseSlot: {
+		kind: stringEnum(["password", "zotp", "2fa"]).required(),
+		idempotencyKey: string().min(8).max(128).pattern(/^[A-Za-z0-9._:-]+$/).required(),
 	},
 	delete: {
 		id: string().required(),
@@ -509,6 +522,37 @@ const changeMasterPasswordValidation = async (ctx, next) => {
 	await next();
 };
 
+const requireZelfIdentity = (ctx) => {
+	const tagName = typeof ctx.state.user?.tagName === "string" ? ctx.state.user.tagName.trim() : "";
+	if (tagName) return true;
+
+	ctx.status = 401;
+	ctx.body = {
+		message: "Authenticated Zelf identity is required",
+		code: "ERR_ZELF_IDENTITY_REQUIRED",
+	};
+	return false;
+};
+
+const limitsValidation = async (ctx, next) => {
+	if (!requireZelfIdentity(ctx)) return;
+	await next();
+};
+
+const purchaseSlotValidation = async (ctx, next) => {
+	if (!requireZelfIdentity(ctx)) return;
+
+	const valid = validate(schemas.purchaseSlot, ctx.request.body);
+
+	if (valid.error) {
+		ctx.status = 409;
+		ctx.body = { validationError: valid.error.message };
+		return;
+	}
+
+	await next();
+};
+
 const deleteZelfKeyValidation = async (ctx, next) => {
 	const valid = validate(schemas.delete, {
 		id: ctx.request.params.id,
@@ -554,5 +598,7 @@ module.exports = {
 	domainListValidation,
 	summaryValidation,
 	changeMasterPasswordValidation,
+	limitsValidation,
+	purchaseSlotValidation,
 	deleteZelfKeyValidation,
 };

@@ -34,6 +34,7 @@ const {
     normalizeSetupKey,
     createZotpValidationError,
 } = require("./zelf-key-zotp.module");
+const PlanLimits = require("./zelf-key-plan-limits.module");
 
 const TYPES_REQUIRING_TRANSPORT_ENCRYPTION = new Set(["password", "notes", "note", "credit_card", "payment-card"]);
 const SUPPORTED_CATEGORIES = ["password", "notes", "credit_card", "contact", "zotp"];
@@ -527,7 +528,11 @@ const storeData = async (data, authToken) => {
 
         const faceBase64 = decryptedParams.face;
 
-        await _validateOwnership(data.faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
+        const ownership = await _validateOwnership(data.faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
+
+        if (type === "password" || type === "zotp") {
+            await assertVaultCapacity(type, data, authToken, ownership?.publicData);
+        }
 
         const { metadata, publicData, fullTagName, protection } = await createMetadataAndPublicData(
             type,
@@ -568,6 +573,48 @@ const formatStoreError = (error) => {
     return {
         message: handled.message,
         code: handled.code,
+        ...(error?.details && typeof error.details === "object" ? error.details : {}),
+    };
+};
+
+const assertVaultCapacity = async (kind, item, authToken, tagPublicData) => {
+    const listed = await listData({ category: kind }, authToken);
+    await PlanLimits.assertCanAdd({
+        authUser: authToken,
+        kind,
+        used: listed.totalCount || 0,
+        items: listed.data || [],
+        item,
+        tagPublicData,
+    });
+};
+
+const openPasswordCapacity = async (authToken, tagPublicData) => {
+    const listed = await listData({ category: "password" }, authToken);
+    const items = listed.data || [];
+    let used = listed.totalCount || items.length;
+    const entitlement = await PlanLimits.resolveEntitlement(authToken, {
+        tagPublicData: tagPublicData ?? null,
+        skipTagLookup: true,
+    });
+    const account = await PlanLimits.loadAccount(entitlement.identity.zelfName);
+
+    return {
+        take(item) {
+            const decision = PlanLimits.evaluateLimit({
+                plan: entitlement.plan,
+                kind: "password",
+                used,
+                slots: account.slots,
+                isUpdate: PlanLimits.isItemUpdate("password", item, items),
+                domainConfig: entitlement.domainConfig,
+            });
+            if (!decision.allowed) throw PlanLimits.limitReachedError(decision);
+            return decision;
+        },
+        commit(decision) {
+            if (!decision.isUpdate) used += 1;
+        },
     };
 };
 
@@ -623,7 +670,8 @@ const storePasswordsBulk = async (data, authToken) => {
 
     const decryptedParams = await decryptKeyCredentials({ faceBase64, removePGP, ...data }, authToken);
 
-    await _validateOwnership(faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
+    const ownership = await _validateOwnership(faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
+    const capacity = await openPasswordCapacity(authToken, ownership?.publicData);
 
     const batchProtection = resolveProtection(data.protection);
     assertProtectionStoreRules(batchProtection, decryptedParams.password);
@@ -655,7 +703,9 @@ const storePasswordsBulk = async (data, authToken) => {
         }
 
         try {
+            const decision = capacity.take(item);
             const stored = await _storePasswordRecord(item, authToken, sharedContext, `${batchTag}_${index}`);
+            capacity.commit(decision);
             success.push({
                 index,
                 ...stored,
@@ -1146,7 +1196,7 @@ const _validateOwnership = async (faceBase64, zelfIdPassword, authToken, extraPa
     };
 
     // this will throw an error if the tag is not found or the password is incorrect or the face is incorrect
-    await TagsModule.decryptTag(sessionParams, authToken);
+    return TagsModule.decryptTag(sessionParams, authToken);
 };
 
 /**
@@ -1450,6 +1500,19 @@ const changeMasterPassword = async (data, authToken) => {
     };
 };
 
+const getVaultLimits = async (authUser) => {
+    PlanLimits.requireZelfIdentity(authUser);
+    const [passwords, zotp] = await Promise.all([
+        listData({ category: "password" }, authUser),
+        listData({ category: "zotp" }, authUser),
+    ]);
+
+    return PlanLimits.getPlanUsage(authUser, {
+        password: passwords.totalCount || 0,
+        zotp: zotp.totalCount || 0,
+    });
+};
+
 const summarizeData = async (_data, authToken) => {
     const identifier = authToken.tagName || authToken.identifier;
     const domain = authToken.domain || "zelf";
@@ -1492,6 +1555,7 @@ module.exports = {
     listDataForDashboard,
     listAllDataForDashboard,
     summarizeData,
+    getVaultLimits,
     deleteZelfKey,
     changeMasterPassword,
     resolveProtection,
