@@ -4,7 +4,7 @@ const mongoose = require("mongoose");
 
 const config = require("../../../Core/config");
 const { effectivePlan } = require("../../ZelfID/modules/zelf-id-plan.module");
-const TagsPartsModule = require("../../Tags/modules/tags-parts.module");
+const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
 const SlotAccount = require("../models/zelf-key-slot-account.model");
 
 const PLAN_RANK = { free: 0, premium: 1, unlimited: 2 };
@@ -128,23 +128,15 @@ const resolveOwner = (authUser, { requireTagName = false } = {}) => {
     }
 
     const domain = trimmed(authUser?.domain) || "zelf";
-    let zelfName;
-    try {
-        zelfName = TagsPartsModule.getFullTagName(raw, domain);
-    } catch (_error) {
+    const normalized = normalizeZelfName(raw, domain);
+    if (!normalized.zelfName) {
         if (requireTagName) {
             throw planError(401, "ERR_ZELF_IDENTITY_REQUIRED", "Authenticated Zelf identity is required");
         }
         return null;
     }
 
-    const bare = zelfName.endsWith(`.${domain}`) ? zelfName.slice(0, -(domain.length + 1)) : zelfName.split(".")[0];
-
-    return {
-        tagName: bare,
-        domain,
-        zelfName,
-    };
+    return normalized;
 };
 
 /** Zelf `tagName` is required. Device `identifier` is not an owner for limits or slot purchase. */

@@ -8,7 +8,11 @@ const config = require("../../../Core/config");
 const PGPKeyModule = require("../../PGP/modules/pgp-keys.module");
 const MongoORM = require("../../../Core/mongo-orm");
 const moment = require("moment");
+const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
 const populates = [];
+
+/** Same 10-minute window as the session TTL (`activatedAt` expires after 600s). */
+const IDENTITY_VERIFIED_WINDOW_MS = 10 * 60 * 1000;
 
 /**
  * @param {*} params
@@ -80,8 +84,12 @@ const insert = async (params) => {
 		identifier: params.identifier || params.clientIP,
 		isWebExtension: params.isWebExtension || false,
 		status: "active",
+		// Client tagName and type are stored for compatibility. They do not prove a face check.
 		tagName: params.tagName || null,
 		type: params.type || "general",
+		verifiedTagName: null,
+		verifiedAt: null,
+		verifiedUntil: null,
 	});
 
 	try {
@@ -315,6 +323,36 @@ const deleteSession = async (authUser) => {
 	return await Model.deleteMany({ identifier: authUser.identifier });
 };
 
+/**
+ * Stamp the current session after a successful face check (and master password when the wallet has one).
+ * The name stored is the normalized tag, not whatever the client sent at session create.
+ * @param {Object} authUser
+ * @param {string} tagName
+ * @param {string} [domain]
+ */
+const markSessionIdentityVerified = async (authUser, tagName, domain) => {
+	if (!authUser?.session) return null;
+
+	const normalized = normalizeZelfName(tagName, domain || authUser.domain || "zelf");
+	if (!normalized.zelfName) return null;
+
+	const verifiedAt = new Date();
+	const verifiedUntil = new Date(verifiedAt.getTime() + IDENTITY_VERIFIED_WINDOW_MS);
+
+	await Model.updateOne(
+		{ _id: authUser.session },
+		{
+			$set: {
+				verifiedTagName: normalized.zelfName,
+				verifiedAt,
+				verifiedUntil,
+			},
+		}
+	);
+
+	return { ...normalized, verifiedAt, verifiedUntil };
+};
+
 module.exports = {
 	get,
 	insert,
@@ -328,4 +366,7 @@ module.exports = {
 	walletEncrypt,
 	walletDecrypt,
 	deleteSession,
+	markSessionIdentityVerified,
+	IDENTITY_VERIFIED_WINDOW_MS,
+	normalizeZelfName,
 };

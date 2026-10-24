@@ -187,6 +187,9 @@ const leaseTag = async (params, authUser) => {
         password
     );
 
+    const SessionModule = require("../../Session/modules/session.module");
+    await SessionModule.markSessionIdentityVerified(authUser, tagName, domain);
+
     return {
         ipfs: [tagObject.ipfs],
         available: false,
@@ -361,6 +364,13 @@ const decryptTag = async (params, authUser) => {
             tagObject.publicData[tag.name] = tag.value;
         }
     }
+
+    const SessionModule = require("../../Session/modules/session.module");
+    await SessionModule.markSessionIdentityVerified(
+        authUser,
+        tagObject.publicData[tagKey] || tagObject.publicData.tagName || tagObject.publicData.zelfName || tagName,
+        domain
+    );
 
     return {
         ...tagObject,

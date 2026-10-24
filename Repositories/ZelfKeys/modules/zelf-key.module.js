@@ -20,6 +20,7 @@ const { resolveEncryptVersion } = require("../../Tags/modules/tags-addresses.mod
 const { ZELFPROOF_CLIENT_ERROR_STATUS } = require("../../ZelfProof/modules/zelf-proof.module");
 
 const config = require("../../../Core/config");
+const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
 const { errorHandler } = require("../../../Core/http-handler");
 const { validate } = require("../../../Core/JoiUtils");
 const {
@@ -35,6 +36,16 @@ const {
     createZotpValidationError,
 } = require("./zelf-key-zotp.module");
 const PlanLimits = require("./zelf-key-plan-limits.module");
+
+const ownerParts = (authToken) => {
+    const domain = authToken?.domain || "zelf";
+    const raw = authToken?.tagName || authToken?.identifier;
+    const normalized = normalizeZelfName(raw, domain);
+    return {
+        identifier: normalized.tagName || raw,
+        domain: normalized.domain || domain,
+    };
+};
 
 const TYPES_REQUIRING_TRANSPORT_ENCRYPTION = new Set(["password", "notes", "note", "credit_card", "payment-card"]);
 const SUPPORTED_CATEGORIES = ["password", "notes", "credit_card", "contact", "zotp"];
@@ -241,8 +252,7 @@ const stampV4PublicData = (publicData) =>
     });
 
 const createMetadataAndPublicData = async (type, data, authToken) => {
-    const identifier = authToken.tagName || authToken.identifier;
-    const domain = authToken.domain || "zelf";
+    const { identifier, domain } = ownerParts(authToken);
 
     const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
     const protection = resolveProtection(data.protection);
@@ -1032,17 +1042,18 @@ const _listCategoryPrefixesForOwner = (identifier, domain) => {
 const listData = async (data, authToken) => {
     try {
         const { category, tagName: queryTagName } = data;
-        let identifier = authToken.tagName || authToken.identifier;
+        const owned = ownerParts(authToken);
+        let identifier = owned.identifier;
+        let domain = owned.domain;
 
         // Allow tagName override only for staff or when it matches the authenticated user
-        let domain = authToken.domain || "zelf";
         if (queryTagName && queryTagName.trim()) {
             const isStaff = authToken.accountType === "staff";
-            const userTagName = TagsPartsModule.getFullTagName(identifier, domain);
-            if (isStaff || queryTagName === userTagName) {
-                const parts = queryTagName.split(".");
-                identifier = parts[0] || queryTagName;
-                domain = parts[1] || domain;
+            const requested = normalizeZelfName(queryTagName, domain);
+            const userTagName = identifier ? `${identifier}.${domain}` : "";
+            if (isStaff || requested.zelfName === userTagName) {
+                identifier = requested.tagName;
+                domain = requested.domain;
             }
         }
         const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
@@ -1114,14 +1125,20 @@ const listDataForDashboard = async (identifier, category, authToken) => {
     const accountType = authToken.accountType || authToken.publicData?.accountType || "";
     const isPrivileged = ["staff", "staff_account", "lawyer", "lawyer_account"].includes(accountType);
     const userIdentifier = authToken.tagName || authToken.identifier;
+    const requestedOwner = normalizeZelfName(identifier, domainPart);
     if (!isPrivileged && userIdentifier) {
-        const userTagName = TagsPartsModule.getFullTagName(userIdentifier, authToken.domain || "zelf");
-        if (identifier !== userTagName) {
+        const userTagName = normalizeZelfName(userIdentifier, authToken.domain || domainPart).zelfName;
+        if (requestedOwner.zelfName !== userTagName) {
             throw new Error("403:Not authorized to query ZelfKeys for this identifier");
         }
     }
 
-    const syntheticAuthToken = { ...authToken, tagName: identifierPart, identifier: identifierPart, domain: domainPart };
+    const syntheticAuthToken = {
+        ...authToken,
+        tagName: requestedOwner.tagName,
+        identifier: requestedOwner.tagName,
+        domain: requestedOwner.domain,
+    };
 
     if (category) {
         return listData({ category }, syntheticAuthToken);
@@ -1180,8 +1197,7 @@ const listAllData = async (data, authToken) => {
 };
 
 const _assertKeyRecordBelongsToCaller = async (id, authToken) => {
-    const identifier = authToken.tagName || authToken.identifier;
-    const domain = authToken.domain || "zelf";
+    const { identifier, domain } = ownerParts(authToken);
     const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
 
     let item;
@@ -1227,11 +1243,12 @@ const deleteZelfKey = async (data, authToken) => {
 };
 
 const _validateOwnership = async (faceBase64, zelfIdPassword, authToken, extraParams) => {
+    const owner = ownerParts(authToken);
     const sessionParams = {
-        domain: authToken.domain,
+        domain: owner.domain,
         faceBase64,
         password: zelfIdPassword,
-        tagName: authToken.tagName || authToken.identifier,
+        tagName: owner.identifier,
         removePGP: extraParams.removePGP || false,
     };
 
@@ -1281,8 +1298,7 @@ const _isValidCreditCard = (cardNumber) => {
  * @param {Object} authToken
  */
 const getProof = async (data, authToken) => {
-    const identifier = authToken.tagName || authToken.identifier;
-    const domain = authToken.domain || "zelf";
+    const { identifier, domain } = ownerParts(authToken);
     const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
 
     let item;
@@ -1324,8 +1340,7 @@ const getProof = async (data, authToken) => {
 };
 
 const _listOwnedKeyItems = async (authToken) => {
-    const identifier = authToken.tagName || authToken.identifier;
-    const domain = authToken.domain || "zelf";
+    const { identifier, domain } = ownerParts(authToken);
     const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
     const items = [];
     const seenIds = new Set();
@@ -1559,8 +1574,7 @@ const getVaultLimits = async (authUser) => {
 };
 
 const summarizeData = async (_data, authToken) => {
-    const identifier = authToken.tagName || authToken.identifier;
-    const domain = authToken.domain || "zelf";
+    const { identifier, domain } = ownerParts(authToken);
     const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
     const counts = {
         password: 0,

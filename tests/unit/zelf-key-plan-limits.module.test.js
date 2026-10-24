@@ -12,6 +12,8 @@ const SlotAccount = require("../../Repositories/ZelfKeys/models/zelf-key-slot-ac
 const PlanLimits = require("../../Repositories/ZelfKeys/modules/zelf-key-plan-limits.module");
 const Middleware = require("../../Repositories/ZelfKeys/middlewares/zelf-key.middleware");
 const Session = require("../../Repositories/Session/models/session.model");
+const SessionModule = require("../../Repositories/Session/modules/session.module");
+const { normalizeZelfName } = require("../../Repositories/Tags/modules/zelf-name.util");
 const ZnsBalance = require("../../Repositories/ZelfNameService/modules/zns-transaction-detector.module");
 
 jest.setTimeout(120000);
@@ -224,6 +226,27 @@ describe("Zelf Keys extra-slot purchase", () => {
             user,
             { ...purchaseOptions, ...overrides.options },
         );
+
+    test("mixed-case tag names share one slot account", async () => {
+        const first = await PlanLimits.purchaseExtraSlot({ kind: "password", idempotencyKey: "idem-jim-1" }, { tagName: "JimBot", domain: "zelf" }, {
+            plan: "free",
+            balance: 30,
+            domainConfig: null,
+            now: "2026-01-15T00:00:00.000Z",
+        });
+        const second = await PlanLimits.purchaseExtraSlot({ kind: "password", idempotencyKey: "idem-jim-2" }, { tagName: "Jimbot.Zelf", domain: "Zelf" }, {
+            plan: "free",
+            balance: 30,
+            domainConfig: null,
+            now: "2026-01-15T00:00:00.000Z",
+        });
+        const accounts = await SlotAccount.find({}).lean();
+
+        expect(first.zelfName).toBe("jimbot.zelf");
+        expect(second.zelfName).toBe("jimbot.zelf");
+        expect(accounts).toHaveLength(1);
+        expect(accounts[0].spent).toBe(20);
+    });
 
     test("debits the authenticated Zelf identity and ignores a tag name in the body", async () => {
         const result = await buy();
@@ -482,7 +505,7 @@ describe("GET /api/zelf-keys/limits session ownership", () => {
             domain: "zelf",
             isWebExtension: false,
             status: "active",
-            type: "decryptWallet",
+            type: "general",
             tagName: "alice",
             ...overrides,
         });
@@ -494,15 +517,26 @@ describe("GET /api/zelf-keys/limits session ownership", () => {
         expect(ctx.body.code).toBe("ERR_SESSION_REQUIRED");
     });
 
-    test("a session for another wallet is 403", async () => {
-        const session = await createSession({ tagName: "alice", type: "decryptWallet" });
+    test("a forged createWallet or decryptWallet session without a face is rejected", async () => {
+        for (const type of ["createWallet", "decryptWallet"]) {
+            const session = await createSession({ tagName: "alice", type, verifiedTagName: null });
+            const { ctx, continued } = await run({ session: session._id, tagName: "alice", domain: "zelf" });
+            expect(continued).toBe(false);
+            expect(ctx.status).toBe(403);
+            expect(ctx.body.code).toBe("ERR_SESSION_NOT_VERIFIED");
+        }
+    });
+
+    test("a session for wallet A cannot read wallet B", async () => {
+        const session = await createSession({ tagName: "alice", type: "general" });
+        await SessionModule.markSessionIdentityVerified({ session: session._id, domain: "zelf" }, "alice", "zelf");
         const { ctx, continued } = await run({ session: session._id, tagName: "bob", domain: "zelf" });
         expect(continued).toBe(false);
         expect(ctx.status).toBe(403);
         expect(ctx.body.code).toBe("ERR_SESSION_OWNER_MISMATCH");
     });
 
-    test("a tagName-only session without identity verification is 403", async () => {
+    test("a tagName-only general session is not verified", async () => {
         const session = await createSession({ tagName: "alice", type: "general" });
         const { ctx, continued } = await run({ session: session._id, tagName: "alice", domain: "zelf" });
         expect(continued).toBe(false);
@@ -510,11 +544,25 @@ describe("GET /api/zelf-keys/limits session ownership", () => {
         expect(ctx.body.code).toBe("ERR_SESSION_NOT_VERIFIED");
     });
 
-    test("a verified owner is allowed through", async () => {
-        const session = await createSession({ tagName: "alice.zelf", type: "createWallet" });
-        const { ctx, continued } = await run({ session: session._id, tagName: "alice", domain: "zelf" });
+    test("a successful face decrypt marks the session and /limits allows that wallet", async () => {
+        const session = await createSession({ tagName: "Alice", type: "general" });
+        const stamped = await SessionModule.markSessionIdentityVerified({ session: session._id, domain: "zelf" }, "Alice", "zelf");
+        const stored = await Session.findById(session._id).lean();
+
+        expect(stamped.zelfName).toBe("alice.zelf");
+        expect(stored.verifiedTagName).toBe("alice.zelf");
+        expect(stored.verifiedAt).toBeTruthy();
+        expect(new Date(stored.verifiedUntil).getTime()).toBeGreaterThan(Date.now());
+
+        const { ctx, continued } = await run({ session: session._id, tagName: "Alice", domain: "zelf" });
         expect(continued).toBe(true);
-        expect(ctx.status).toBeUndefined();
+        expect(ctx.state.user.tagName).toBe("alice");
+    });
+
+    test("mixed-case names share one normalized vault", () => {
+        expect(normalizeZelfName("JimBot", "zelf")).toEqual({ tagName: "jimbot", domain: "zelf", zelfName: "jimbot.zelf" });
+        expect(normalizeZelfName("Jimbot.Zelf", "zelf").zelfName).toBe("jimbot.zelf");
+        expect(normalizeZelfName("Jimbot.Zelf.zelf", "zelf").zelfName).toBe("jimbot.zelf");
     });
 });
 

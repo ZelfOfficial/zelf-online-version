@@ -232,6 +232,9 @@ const decryptWallet = async (params, authUser) => {
 		image = await encryptQR({ ...decryptedWallet, faceBase64: face, password });
 	}
 
+	const SessionModule = require("../../Session/modules/session.module");
+	await SessionModule.markSessionIdentityVerified(authUser, zelfName || decryptedWallet?.publicData?.zelfName, params.domain);
+
 	return {
 		...decryptedWallet,
 		image,
@@ -352,7 +355,10 @@ const importWallet = async (params, authUser) => {
 		addServerPassword: Boolean(params.addServerPassword),
 	};
 
-	return _saveImportedWallet(wallet, params, dataToEncrypt, password, authUser);
+	const saved = await _saveImportedWallet(wallet, params, dataToEncrypt, password, authUser);
+	const SessionModule = require("../../Session/modules/session.module");
+	await SessionModule.markSessionIdentityVerified(authUser, zelfName, params.domain);
+	return saved;
 };
 
 /**

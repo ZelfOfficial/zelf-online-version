@@ -133,6 +133,9 @@ const leaseTag = async (params, authUser) => {
         password
     );
 
+    const SessionModule = require("../../Session/modules/session.module");
+    await SessionModule.markSessionIdentityVerified(authUser, tagName, domain);
+
     return {
         ipfs: [tagObject.ipfs],
         available: false,
@@ -257,6 +260,13 @@ const decryptTag = async (params, authUser) => {
     if (decryptedZelfProof.error) {
         throwMappedZelfProofError(decryptedZelfProof.error);
     }
+
+    const SessionModule = require("../../Session/modules/session.module");
+    await SessionModule.markSessionIdentityVerified(
+        authUser,
+        tagObject.publicData?.tagName || tagObject.publicData?.zelfName || tagName,
+        domain
+    );
 
     const { mnemonic, zkProof, solanaSecretKey } = decryptedZelfProof.metadata;
 

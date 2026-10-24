@@ -54,7 +54,7 @@ const handleFaceSecurityError = (ctx, err) => {
     if (err?.clientCode === "face_pow_unconfigured" || /face_pow_unconfigured/.test(String(err?.message || ""))) {
         ctx.status = 503;
         ctx.body = {
-            message: err.clientMessage || "Face proof of work is not configured. Set FACE_POW_HMAC_SECRET on the server.",
+            message: "Face verification is temporarily unavailable",
             code: "face_pow_unconfigured",
         };
         return true;

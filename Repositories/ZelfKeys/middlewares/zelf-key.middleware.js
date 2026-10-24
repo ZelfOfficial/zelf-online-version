@@ -2,6 +2,7 @@ const { string, validate, boolean, stringEnum, object, array, stringOrNumber } =
 const { errorHandler } = require("../../../Core/http-handler");
 const PlanLimits = require("../modules/zelf-key-plan-limits.module");
 const Session = require("../../Session/models/session.model");
+const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
 const ZelfKeyZotpModule = require("../modules/zelf-key-zotp.module");
 const { ZOTP_ALGORITHMS } = ZelfKeyZotpModule;
 
@@ -540,16 +541,6 @@ const requireZelfIdentity = (ctx) => {
 	return false;
 };
 
-/** Session types created for wallet identity verification (create, decrypt, import). */
-const IDENTITY_SESSION_TYPES = new Set(["createWallet", "decryptWallet", "importWallet"]);
-
-const walletKey = (tagName, domain = "zelf") => {
-	const raw = typeof tagName === "string" ? tagName.trim().toLowerCase() : "";
-	const tld = typeof domain === "string" && domain.trim() ? domain.trim().toLowerCase() : "zelf";
-	if (!raw) return "";
-	return raw.endsWith(`.${tld}`) ? raw : `${raw}.${tld}`;
-};
-
 const limitsValidation = async (ctx, next) => {
 	const authUser = ctx.state.user;
 	if (!authUser?.session) {
@@ -557,8 +548,6 @@ const limitsValidation = async (ctx, next) => {
 		ctx.body = { message: "A verified session is required", code: "ERR_SESSION_REQUIRED" };
 		return;
 	}
-
-	if (!requireZelfIdentity(ctx)) return;
 
 	const session = await Session.findById(authUser.session).lean();
 	if (!session || session.status !== "active") {
@@ -568,23 +557,30 @@ const limitsValidation = async (ctx, next) => {
 	}
 
 	const domain = authUser.domain || session.domain || "zelf";
-	const sessionWallet = walletKey(session.tagName, session.domain || domain);
-	const requestWallet = walletKey(authUser.tagName, domain);
+	const verified = normalizeZelfName(session.verifiedTagName, domain);
+	const tokenWallet = normalizeZelfName(authUser.tagName, domain);
+	const expired = session.verifiedUntil && new Date(session.verifiedUntil).getTime() <= Date.now();
 
-	if (!sessionWallet || sessionWallet !== requestWallet) {
+	if (!verified.zelfName || expired) {
+		ctx.status = 403;
+		ctx.body = {
+			message: "Session is not verified for this wallet",
+			code: "ERR_SESSION_NOT_VERIFIED",
+		};
+		return;
+	}
+
+	if (tokenWallet.zelfName && tokenWallet.zelfName !== verified.zelfName) {
 		ctx.status = 403;
 		ctx.body = { message: "Session is not the owner of this wallet", code: "ERR_SESSION_OWNER_MISMATCH" };
 		return;
 	}
 
-	if (!IDENTITY_SESSION_TYPES.has(session.type)) {
-		ctx.status = 403;
-		ctx.body = {
-			message: "Session was not created with identity verification for this wallet",
-			code: "ERR_SESSION_NOT_VERIFIED",
-		};
-		return;
-	}
+	ctx.state.user = {
+		...authUser,
+		tagName: verified.tagName,
+		domain: verified.domain,
+	};
 
 	await next();
 };

@@ -29,7 +29,8 @@ const signPayload = (parts) => {
         const error = new Error("503:face_pow_unconfigured");
         error.status = 503;
         error.clientCode = "face_pow_unconfigured";
-        error.clientMessage = "Face proof of work is not configured. Set FACE_POW_HMAC_SECRET on the server.";
+        error.clientMessage = "Face verification is temporarily unavailable";
+        console.error("[face-security] FACE_POW_HMAC_SECRET is not configured");
         throw error;
     }
     const message = parts.join("|");

@@ -102,13 +102,23 @@ describe("face proof-of-work", () => {
                 get() {},
             };
 
-            await FaceMiddleware.gate("purchase-slot")(ctx, async () => {
-                ctx.status = 200;
+            let loggedSecret = false;
+            const logged = jest.spyOn(console, "error").mockImplementation((...args) => {
+                if (args.some((part) => String(part).includes("FACE_POW_HMAC_SECRET"))) loggedSecret = true;
             });
+            try {
+                await FaceMiddleware.gate("purchase-slot")(ctx, async () => {
+                    ctx.status = 200;
+                });
+            } finally {
+                logged.mockRestore();
+            }
 
             expect(ctx.status).toBe(503);
             expect(ctx.body.code).toBe("face_pow_unconfigured");
-            expect(ctx.body.message).toMatch(/FACE_POW_HMAC_SECRET/);
+            expect(ctx.body.message).toBe("Face verification is temporarily unavailable");
+            expect(JSON.stringify(ctx.body)).not.toMatch(/FACE_POW_HMAC_SECRET/);
+            expect(loggedSecret).toBe(true);
         } finally {
             config.faceSecurity.pow.hmacSecret = original;
         }
