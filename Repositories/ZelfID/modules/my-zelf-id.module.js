@@ -413,6 +413,8 @@ const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata) 
                 tagObject.publicData = { ...tagObject.publicData, plan: parsed.plan, expiresAt, eventID: parsed.eventID };
             }
             if (parsed.duration != null && parsed.duration !== "") tagObject.publicData.duration = parsed.duration;
+            if (parsed.planExpiresAt) tagObject.publicData.planExpiresAt = parsed.planExpiresAt;
+            else if (parsed.duration === "lifetime") delete tagObject.publicData.planExpiresAt;
             if (parsed.renewedAt) tagObject.publicData.renewedAt = parsed.renewedAt;
             if (parsed.registeredAt) tagObject.publicData.registeredAt = parsed.registeredAt;
             if (parsed.paymentMethod) tagObject.publicData.paymentMethod = parsed.paymentMethod;

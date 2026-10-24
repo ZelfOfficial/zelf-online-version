@@ -27,6 +27,9 @@ const {
     getCanonicalMainnetName,
     getZelfIdCheckoutPrice,
     getZelfIdPrice,
+    isFreeOriginLease,
+    paymentDurationYears,
+    isExpiresAtPassed,
     FREE_EXPIRATION_YEARS,
 } = require("./zelf-id-plan.module");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
@@ -397,6 +400,51 @@ const attachEvmPayQuote = ({
     }
 };
 
+/**
+ * Lease expiry stays on `expiresAt`. A Free name that buys a term stores that term on `planExpiresAt`
+ * and does not move the 100-year lease. A name that was paid from the start has no `planExpiresAt`;
+ * its plan end remains `expiresAt` (unchanged behaviour).
+ * @returns {{ leaseExpiresAt: string|undefined, planExpiresAt: string|undefined, duration: string }}
+ */
+const resolveNameAndPlanTerm = ({ basePublicData = {}, duration, plan }) => {
+    const purchased = normalizePaymentDuration(duration);
+    const lifetime = purchased === "lifetime";
+    const freeOrigin = isFreeOriginLease(basePublicData);
+    const planTermOpen = Boolean(basePublicData.planExpiresAt) && !isExpiresAtPassed({ expiresAt: basePublicData.planExpiresAt });
+    const samePlan = String(basePublicData.plan || "").toLowerCase() === String(plan || "").toLowerCase();
+
+    if (freeOrigin || basePublicData.planExpiresAt) {
+        const leaseExpiresAt = basePublicData.expiresAt;
+        if (lifetime) {
+            return { leaseExpiresAt, planExpiresAt: undefined, duration: "lifetime" };
+        }
+        if (planTermOpen && samePlan) {
+            const previous = moment(basePublicData.planExpiresAt, "YYYY-MM-DD HH:mm:ss", true).isValid()
+                ? moment(basePublicData.planExpiresAt, "YYYY-MM-DD HH:mm:ss")
+                : moment(basePublicData.planExpiresAt);
+            return {
+                leaseExpiresAt,
+                planExpiresAt: previous.add(paymentDurationYears(purchased), "year").format("YYYY-MM-DD HH:mm:ss"),
+                duration: resolvePaidDurationStamp({
+                    publicData: { ...basePublicData, plan: basePublicData.plan || plan, expiresAt: basePublicData.planExpiresAt },
+                    duration: purchased,
+                }),
+            };
+        }
+        return {
+            leaseExpiresAt,
+            planExpiresAt: moment().add(paymentDurationYears(purchased), "year").format("YYYY-MM-DD HH:mm:ss"),
+            duration: purchased,
+        };
+    }
+
+    return {
+        leaseExpiresAt: resolvePaidExpiresAt({ publicData: basePublicData, duration: purchased }),
+        planExpiresAt: undefined,
+        duration: resolvePaidDurationStamp({ publicData: basePublicData, duration: purchased }),
+    };
+};
+
 const buildMetadata = (params, tagObject, domainConfig) => {
     const domain = tagObject.publicData.domain || params.domain || "zelf";
     tagObject.fullTagName = getCanonicalMainnetName(params.tagName || tagObject.publicData.tagName || tagObject.publicData.zelfName, domain);
@@ -416,16 +464,18 @@ const buildMetadata = (params, tagObject, domainConfig) => {
         publicData: basePublicData,
     });
     const plan = resolveUpgradePlan({ tagName: params.tagName || tagObject.fullTagName, requestedPlan, domainConfig }) || v4Stamp.plan;
+    const term = resolveNameAndPlanTerm({ basePublicData, duration, plan });
 
     const extraParams = {
         origin: tagObject.publicData.origin || "online",
         price: params.paymentMethod === "gift" || params.paymentMethod === "coupon" || params.paymentMethod === "whitelist" ? 0 : price,
         paymentMethod: params.paymentMethod || undefined,
         couponId: params.couponId || undefined,
-        duration: resolvePaidDurationStamp({ publicData: basePublicData, duration }),
+        duration: term.duration,
         registeredAt: moment().format("YYYY-MM-DD HH:mm:ss"),
         renewedAt: tagObject.publicData.type === "mainnet" ? moment().format("YYYY-MM-DD HH:mm:ss") : undefined,
-        expiresAt: v4Stamp.expiresAt || resolvePaidExpiresAt({ publicData: basePublicData, duration }),
+        expiresAt: term.leaseExpiresAt,
+        planExpiresAt: term.planExpiresAt,
         type: "mainnet",
         hasPassword: tagObject.publicData.hasPassword,
         eventID: params.eventID || undefined,

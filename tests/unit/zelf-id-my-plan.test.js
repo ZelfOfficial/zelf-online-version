@@ -1,6 +1,7 @@
 /**
  * GET /api/zelf-ids/my-plan: verified owner, and an upgrade link per payment method.
  */
+const moment = require("moment");
 const mongoose = require("mongoose");
 const { MongoMemoryServer } = require("mongodb-memory-server");
 const { Domain } = require("../../Repositories/Tags/modules/domain.class");
@@ -134,6 +135,43 @@ describe("Zelf ID my-plan", () => {
         expect(custom.upgrade.url.startsWith("https://preview.example/pricing?")).toBe(true);
         if (previous === undefined) delete process.env.LANDING_URL;
         else process.env.LANDING_URL = previous;
+    });
+
+    test("a free name that bought Premium 1y keeps the 2126 lease and drops to free caps after the plan term", async () => {
+        const leaseExpiresAt = "2126-10-24 18:00:00";
+        const planExpiresAt = moment().add(1, "year").format("YYYY-MM-DD HH:mm:ss");
+        const active = await buildMyPlan(
+            lease({
+                plan: "premium",
+                duration: "1",
+                paymentMethod: "coupon",
+                expiresAt: leaseExpiresAt,
+                planExpiresAt,
+            }),
+            { zelfName: "myname.zelf", domainConfig }
+        );
+        expect(active.plan).toBe("premium");
+        expect(active.duration).toBe("1y");
+        expect(active.leaseExpiresAt).toBe("2126-10-24T18:00:00.000Z");
+        expect(active.planExpiresAt).toBe(moment(planExpiresAt, "YYYY-MM-DD HH:mm:ss").toISOString());
+        expect(active.expiresAt).toBe(active.planExpiresAt);
+        expect(moment(active.planExpiresAt).diff(moment(), "year", true)).toBeGreaterThan(0.9);
+        expect(moment(active.planExpiresAt).diff(moment(), "year", true)).toBeLessThan(1.2);
+
+        const lapsed = await buildMyPlan(
+            lease({
+                plan: "premium",
+                duration: "1",
+                paymentMethod: "stripe",
+                expiresAt: leaseExpiresAt,
+                planExpiresAt: moment().subtract(2, "day").format("YYYY-MM-DD HH:mm:ss"),
+            }),
+            { zelfName: "myname.zelf", domainConfig }
+        );
+        expect(lapsed.plan).toBe("free");
+        expect(lapsed.duration).toBeNull();
+        expect(lapsed.leaseExpiresAt).toBe("2126-10-24T18:00:00.000Z");
+        expect(lapsed.nextPlans).toEqual(["premium", "unlimited"]);
     });
 
     test("stripe_subscription opens a billing portal and one-off stripe does not", async () => {

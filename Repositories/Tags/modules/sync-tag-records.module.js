@@ -60,6 +60,9 @@ const buildRepinExtraParams = (publicData = {}, options = {}) => {
             expiresAt: publicData.expiresAt
                 ? moment(publicData.expiresAt).add(30, "second").format("YYYY-MM-DD HH:mm:ss")
                 : undefined,
+            planExpiresAt: publicData.planExpiresAt || undefined,
+            paymentMethod: publicData.paymentMethod || undefined,
+            couponId: publicData.couponId || undefined,
             price: publicData.price || undefined,
             duration: publicData.duration || undefined,
             type: publicData.type || undefined,

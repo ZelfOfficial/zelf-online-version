@@ -77,6 +77,7 @@ const EXTRA_PARAMS_ALLOWED_KEYS = [
     "registeredAt",
     "renewedAt",
     "expiresAt",
+    "planExpiresAt",
     "price",
     "duration",
     "type",

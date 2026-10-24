@@ -8,7 +8,7 @@ const moment = require("moment");
 const config = require("../../../Core/config");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
-const { effectivePlan, licensePaidPlansForName } = require("./zelf-id-plan.module");
+const { effectivePlan, isExpiresAtPassed, licensePaidPlansForName } = require("./zelf-id-plan.module");
 
 const CRYPTO_METHODS = new Set(["crypto", "eth", "sol", "btc", "avax", "bnb", "pol", "matic", "base", "bdag", "ton"]);
 
@@ -122,7 +122,8 @@ const upgradeFor = async ({ paymentMethod, plan, duration, nextPlans, zelfName, 
 const buildMyPlan = async (tagObject, { zelfName, domainConfig, createBillingPortal } = {}) => {
     const publicData = tagObject?.publicData || {};
     const plan = effectivePlan(publicData, domainConfig) || "free";
-    const duration = displayDuration(publicData.duration);
+    const paidTermLapsed = Boolean(publicData.planExpiresAt) && isExpiresAtPassed({ expiresAt: publicData.planExpiresAt });
+    const duration = paidTermLapsed ? null : displayDuration(publicData.duration);
     const unlimitedLifetime = plan === "unlimited" && duration === "lifetime";
     const nextPlans = unlimitedLifetime ? [] : nextPlansFor(zelfName, plan, domainConfig);
     const paymentMethod = readPaymentMethod(publicData, plan);
@@ -135,12 +136,18 @@ const buildMyPlan = async (tagObject, { zelfName, domainConfig, createBillingPor
         publicData,
         createBillingPortal,
     });
+    const planExpiresAt = publicData.planExpiresAt ? toIso(publicData.planExpiresAt) : null;
+    const leaseExpiresAt = publicData.expiresAt ? toIso(publicData.expiresAt) : null;
 
     return {
         zelfName,
         plan,
+        planExpiresAt,
+        leaseExpiresAt,
+        // Alias of the plan term when this name uses one. Otherwise the stored expiresAt
+        // (a name that was paid from the start keeps that as its only date).
+        expiresAt: planExpiresAt || leaseExpiresAt,
         duration,
-        expiresAt: toIso(publicData.expiresAt),
         paymentMethod,
         nextPlans,
         upgrade,

@@ -322,7 +322,8 @@ describe("Zelf ID plan coupons", () => {
         expect(granted.amountReceived).toBe(0);
         expect(granted.tagObject.publicData.plan).toBe("premium");
         expect(String(granted.tagObject.publicData.duration)).toBe("1");
-        expect(moment(granted.tagObject.publicData.expiresAt).diff(moment(), "year", true)).toBeLessThan(1.2);
+        expect(moment(granted.tagObject.publicData.expiresAt).diff(moment(), "year", true)).toBeGreaterThan(40);
+        expect(moment(granted.tagObject.publicData.planExpiresAt).diff(moment(), "year", true)).toBeLessThan(1.2);
         expect(granted.tagObject.publicData.payment).toEqual({ method: "coupon", couponId: created.id });
         expect(granted.tagObject.publicData.paymentMethod).toBe("coupon");
 

@@ -50,7 +50,8 @@ describe("zelf-ids-payment.module", () => {
 		expect(extra.type).toBe("mainnet");
 		expect(Number(extra.v)).toBe(4);
 		expect(extra.origin).toBe("online");
-		expect(moment(extra.expiresAt).diff(moment(), "month")).toBeGreaterThanOrEqual(11);
+		expect(extra.expiresAt).toBeUndefined();
+		expect(moment(extra.planExpiresAt).diff(moment(), "month")).toBeGreaterThanOrEqual(11);
 	});
 
 	test("buildMetadata can stamp a long name as unlimited when requested", () => {
@@ -110,7 +111,9 @@ describe("zelf-ids-payment.module", () => {
 		);
 		const extra = JSON.parse(metadata.extraParams);
 		expect(extra.duration).toBe("1");
-		expect(moment(extra.expiresAt).diff(moment(), "year", true)).toBeLessThan(2);
+		expect(extra.expiresAt).toBe(tagObject.publicData.expiresAt);
+		expect(moment(extra.planExpiresAt).diff(moment(), "year", true)).toBeGreaterThan(0.9);
+		expect(moment(extra.planExpiresAt).diff(moment(), "year", true)).toBeLessThan(1.2);
 	});
 
 	test("a 1y coupon on a free name stays one year when the record was already rewritten as paid", () => {
@@ -148,8 +151,9 @@ describe("zelf-ids-payment.module", () => {
 		const extra = JSON.parse(metadata.extraParams);
 		expect(extra.duration).toBe("1");
 		expect(extra.paymentMethod).toBe("coupon");
-		expect(moment(extra.expiresAt).diff(moment(), "year", true)).toBeGreaterThan(0.9);
-		expect(moment(extra.expiresAt).diff(moment(), "year", true)).toBeLessThan(1.2);
+		expect(extra.expiresAt).toBe(freePublic.expiresAt);
+		expect(moment(extra.planExpiresAt).diff(moment(), "year", true)).toBeGreaterThan(0.9);
+		expect(moment(extra.planExpiresAt).diff(moment(), "year", true)).toBeLessThan(1.2);
 
 		const stacked = JSON.parse(
 			buildMetadata(
@@ -183,7 +187,8 @@ describe("zelf-ids-payment.module", () => {
 		expect(extra.paymentMethod).toBe("whitelist");
 		expect(extra.price).toBe(0);
 		expect(extra.duration).toBe("1");
-		expect(moment(extra.expiresAt).diff(moment(), "year", true)).toBeLessThan(1.2);
+		expect(extra.expiresAt).toBe(tagObject.publicData.expiresAt);
+		expect(moment(extra.planExpiresAt).diff(moment(), "year", true)).toBeLessThan(1.2);
 	});
 
 	test("buildMetadata adds years onto an active paid expiration", () => {
@@ -278,8 +283,9 @@ describe("zelf-ids-payment.module", () => {
 		);
 		expect(freeExtra.plan).toBe("premium");
 		expect(freeExtra.duration).toBe("1");
-		expect(moment(freeExtra.expiresAt).diff(moment(), "year", true)).toBeLessThan(2);
-		expect(moment(freeExtra.expiresAt).format("YYYY-MM-DD")).not.toBe("2028-09-01");
+		expect(freeExtra.expiresAt).toBe(leftover);
+		expect(moment(freeExtra.planExpiresAt).diff(moment(), "year", true)).toBeGreaterThan(0.9);
+		expect(moment(freeExtra.planExpiresAt).diff(moment(), "year", true)).toBeLessThan(1.2);
 
 		const planlessObject = {
 			publicData: {

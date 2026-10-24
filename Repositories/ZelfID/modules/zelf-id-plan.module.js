@@ -380,7 +380,15 @@ const isExpiresAtPassed = (publicData = {}) => {
 const effectivePlan = (publicData = {}, domainConfig) => {
     if (isUnpaidReservation(publicData)) return publicData.plan;
 
-    if ((publicData.type === "mainnet" || !publicData.type) && isExpiresAtPassed(publicData)) return "free";
+    // A Free name that bought a term keeps the 100-year lease in `expiresAt`.
+    // The paid plan ends at `planExpiresAt`. Read time only; no cron.
+    if (publicData.planExpiresAt) {
+        if (isExpiresAtPassed({ expiresAt: publicData.planExpiresAt })) return "free";
+        const active = String(publicData.plan || "").toLowerCase();
+        if (active === "premium" || active === "unlimited") return active;
+    }
+
+    if ((publicData.type === "mainnet" || !publicData.type) && isExpiresAtPassed(publicData) && !publicData.planExpiresAt) return "free";
 
     const tagName = publicData.tagName || publicData.zelfName;
     const offered = licensePaidPlansForName(tagName, domainConfig);
@@ -443,6 +451,34 @@ const hasV36PaidEvidence = (publicData = {}) => {
  * @param {Object} [publicData]
  * @returns {boolean}
  */
+/**
+ * A Free registration (plan `free`, or a 100-year sentinel with no paid plan).
+ * Buying a term must not move `expiresAt`. Paid-from-the-start names have no `planExpiresAt`
+ * and are not matched here.
+ * @param {Object} [publicData]
+ * @returns {boolean}
+ */
+const isFreeOriginLease = (publicData = {}) => {
+    if (publicData.planExpiresAt) return false;
+    const plan = String(publicData.plan || "").toLowerCase();
+    if (plan === "free") return true;
+    if (plan === "premium" || plan === "unlimited") return false;
+    const years = Number(publicData.duration);
+    return Number.isFinite(years) && years >= FREE_EXPIRATION_YEARS;
+};
+
+/**
+ * Plan Zelf Keys `/limits` should use. #207 `vaultPlanFromTag` already calls `effectivePlan`;
+ * keep that call. An elapsed `planExpiresAt` reads as `free`, so free caps apply without a migration.
+ * @param {Object} [publicData]
+ * @param {Object} [domainConfig]
+ * @returns {"free"|"premium"|"unlimited"}
+ */
+const planForLimits = (publicData, domainConfig) => {
+    const plan = effectivePlan(publicData, domainConfig);
+    return plan === "premium" || plan === "unlimited" ? plan : "free";
+};
+
 const hasActivePaidLease = (publicData = {}) => {
     if (isUnpaidReservation(publicData) || isExpiresAtPassed(publicData)) return false;
     const plan = String(publicData.plan || "").toLowerCase();
@@ -589,6 +625,8 @@ module.exports = {
     resolveComplimentaryPlan,
     resolveUpgradePlan,
     effectivePlan,
+    isFreeOriginLease,
+    planForLimits,
     isHoldName,
     isUnpaidReservation,
     isExpiresAtPassed,
