@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 
 const config = require("../../../Core/config");
 const { effectivePlan } = require("../../ZelfID/modules/zelf-id-plan.module");
+const TagsPartsModule = require("../../Tags/modules/tags-parts.module");
 const SlotAccount = require("../models/zelf-key-slot-account.model");
 
 const PLAN_RANK = { free: 0, premium: 1, unlimited: 2 };
@@ -105,31 +106,49 @@ const emptyAccount = (zelfName) => ({
     purchases: [],
 });
 
+const trimmed = (value) => (typeof value === "string" ? value.trim() : "");
+
 /**
- * Authenticated Zelf name. The device/session `identifier` is never the owner.
+ * Owner key used by Zelf Keys list/save: JWT `tagName`, or `identifier` when the session has no tagName.
+ * `/limits` and `/slots` pass `requireTagName` and reject identifier-only sessions.
  * @param {Object} authUser
- * @returns {{ tagName: string, domain: string, zelfName: string }}
+ * @param {{ requireTagName?: boolean }} [options]
+ * @returns {{ tagName: string, domain: string, zelfName: string }|null}
  */
-const requireZelfIdentity = (authUser) => {
-    const raw = typeof authUser?.tagName === "string" ? authUser.tagName.trim() : "";
+const resolveOwner = (authUser, { requireTagName = false } = {}) => {
+    const tagNameClaim = trimmed(authUser?.tagName);
+    const identifier = trimmed(authUser?.identifier);
+    const raw = tagNameClaim || (requireTagName ? "" : identifier);
+
     if (!raw) {
-        throw planError(401, "ERR_ZELF_IDENTITY_REQUIRED", "Authenticated Zelf identity is required");
+        if (requireTagName) {
+            throw planError(401, "ERR_ZELF_IDENTITY_REQUIRED", "Authenticated Zelf identity is required");
+        }
+        return null;
     }
 
-    const domain = (typeof authUser.domain === "string" && authUser.domain.trim()) || "zelf";
-    const bare = raw.toLowerCase().endsWith(`.${domain.toLowerCase()}`) ? raw.slice(0, -(domain.length + 1)) : raw.split(".")[0];
-    const tagName = String(bare || "").trim();
-
-    if (!tagName || tagName.length > 64) {
-        throw planError(401, "ERR_ZELF_IDENTITY_REQUIRED", "Authenticated Zelf identity is required");
+    const domain = trimmed(authUser?.domain) || "zelf";
+    let zelfName;
+    try {
+        zelfName = TagsPartsModule.getFullTagName(raw, domain);
+    } catch (_error) {
+        if (requireTagName) {
+            throw planError(401, "ERR_ZELF_IDENTITY_REQUIRED", "Authenticated Zelf identity is required");
+        }
+        return null;
     }
+
+    const bare = zelfName.endsWith(`.${domain}`) ? zelfName.slice(0, -(domain.length + 1)) : zelfName.split(".")[0];
 
     return {
-        tagName,
-        domain: domain.toLowerCase(),
-        zelfName: `${tagName}.${domain}`.toLowerCase(),
+        tagName: bare,
+        domain,
+        zelfName,
     };
 };
+
+/** Zelf `tagName` is required. Device `identifier` is not an owner for limits or slot purchase. */
+const requireZelfIdentity = (authUser) => resolveOwner(authUser, { requireTagName: true });
 
 const limitField = (override, key, fallback) => {
     if (!override || typeof override !== "object" || !Object.prototype.hasOwnProperty.call(override, key)) return fallback;
@@ -272,7 +291,10 @@ const loadTagPublicData = async (identity, authUser) => {
  * @returns {Promise<{ identity: Object, plan: string, publicData: Object, domainConfig: Object|null }>}
  */
 const resolveEntitlement = async (authUser, options = {}) => {
-    const identity = requireZelfIdentity(authUser);
+    const identity = options.allowIdentifierOwner
+        ? resolveOwner(authUser, { requireTagName: false })
+        : requireZelfIdentity(authUser);
+    if (!identity) return null;
     let domainConfig = options.domainConfig;
     if (domainConfig === undefined) {
         try {
@@ -318,12 +340,38 @@ const loadAccount = async (zelfName) => {
     return doc || emptyAccount(zelfName);
 };
 
-const isItemUpdate = (kind, item, existingItems) => {
-    normalizeKind(kind);
-    const id = item?.id || item?.cid || item?.recordId;
-    if (!id || !Array.isArray(existingItems)) return false;
-    return existingItems.some((row) => row && (row.id === id || row.cid === id));
+/**
+ * Which client field names the record being replaced.
+ * Precedence is `id`, then `cid`, then `recordId`. The first non-empty field wins
+ * even when it does not match; later fields are not a fallback.
+ * @param {Object} item
+ * @returns {{ field: "id"|"cid"|"recordId", value: string }|null}
+ */
+const editReference = (item) => {
+    for (const field of ["id", "cid", "recordId"]) {
+        const value = trimmed(item?.[field]);
+        if (value) return { field, value };
+    }
+    return null;
 };
+
+const rowMatchesReference = (row, value) => Boolean(row) && (row.id === value || row.cid === value);
+
+/**
+ * Owned row a save should replace, or null when the winning reference is absent or not owned.
+ * @param {string} kind
+ * @param {Object} item
+ * @param {Array} existingItems
+ * @returns {Object|null}
+ */
+const findEditTarget = (kind, item, existingItems) => {
+    normalizeKind(kind);
+    const reference = editReference(item);
+    if (!reference || !Array.isArray(existingItems)) return null;
+    return existingItems.find((row) => rowMatchesReference(row, reference.value)) || null;
+};
+
+const isItemUpdate = (kind, item, existingItems) => Boolean(findEditTarget(kind, item, existingItems));
 
 /**
  * @returns {Object} decision including allowed, kind, count, limit, plan, tokenCost
@@ -369,23 +417,44 @@ const assertCanAdd = async ({ authUser, kind, used, items, item, tagPublicData, 
         domainConfig,
         subscriptionPlan,
         skipTagLookup: true,
+        allowIdentifierOwner: true,
     });
+    if (!entitlement) {
+        return { allowed: true, isUpdate: false, replacedId: null };
+    }
+
     const account = await loadAccount(entitlement.identity.zelfName);
+    const target = findEditTarget(kind, item, items);
     const decision = evaluateLimit({
         plan: entitlement.plan,
         kind,
         used,
         slots: account.slots,
-        isUpdate: isItemUpdate(kind, item, items),
+        isUpdate: Boolean(target),
         now,
         domainConfig: entitlement.domainConfig,
     });
 
     if (!decision.allowed) throw limitReachedError(decision);
-    return decision;
+    return {
+        ...decision,
+        replacedId: target ? target.id || target.cid : null,
+    };
 };
 
-const buildUsage = ({ plan, counts = {}, slots, balance, onChainBalance, spent, domainConfig, priceUsd, now, zelfName }) => {
+const buildUsage = ({
+    plan,
+    counts = {},
+    slots,
+    balance,
+    onChainBalance,
+    spent,
+    domainConfig,
+    priceUsd,
+    now,
+    zelfName,
+    balanceAvailable = true,
+}) => {
     const normalizedPlan = normalizePlan(plan);
     const price = tokenPrice(priceUsd);
     const kinds = {};
@@ -414,13 +483,16 @@ const buildUsage = ({ plan, counts = {}, slots, balance, onChainBalance, spent, 
         };
     }
 
+    const available = balanceAvailable ? spendableBalance(balance, 0) : null;
+
     return {
         zelfName,
         plan: normalizedPlan,
-        tokenBalance: balance == null ? null : spendableBalance(balance, 0),
-        onChainBalance: onChainBalance == null ? null : roundTokens(onChainBalance),
+        tokenBalance: available,
+        onChainBalance: balanceAvailable && onChainBalance != null ? roundTokens(onChainBalance) : null,
         tokensSpent: roundTokens(spent || 0),
         tokenPriceUsd: price,
+        balanceAvailable: Boolean(balanceAvailable),
         kinds,
     };
 };
@@ -429,8 +501,14 @@ const readOnChainBalance = async (publicData) => {
     const address = publicData?.solanaAddress;
     if (!address || typeof address !== "string") return 0;
 
-    const detector = require("../../ZelfNameService/modules/zns-transaction-detector.module");
-    const result = await detector.getZNSBalance(address);
+    let result;
+    try {
+        const detector = require("../../ZelfNameService/modules/zns-transaction-detector.module");
+        result = await detector.getZNSBalance(address);
+    } catch (_error) {
+        throw planError(503, "ERR_TOKEN_BALANCE_UNAVAILABLE", "Token balance is unavailable");
+    }
+
     if (result?.error) {
         const missing = /could not find|does not exist|invalid param|account not found/i.test(String(result.error));
         if (!missing) {
@@ -446,25 +524,26 @@ const readOnChainBalance = async (publicData) => {
     return balance;
 };
 
-const ensureAccount = async (identity) => {
-    try {
-        await SlotAccount.findOneAndUpdate(
-            { zelfName: identity.zelfName },
-            {
-                $setOnInsert: {
-                    zelfName: identity.zelfName,
-                    domain: identity.domain,
-                    tagName: identity.tagName,
-                    spent: 0,
-                    slots: [],
-                    purchases: [],
-                },
-            },
-            { upsert: true, new: true, setDefaultsOnInsert: true },
-        );
-    } catch (error) {
-        if (error?.code !== 11000) throw error;
+const readBalanceForUsage = async (publicData, options) => {
+    if (options.balance != null) {
+        return { onChain: Number(options.balance), balanceAvailable: true };
     }
+
+    try {
+        return { onChain: await readOnChainBalance(publicData), balanceAvailable: true };
+    } catch (error) {
+        if (error?.clientCode === "ERR_TOKEN_BALANCE_UNAVAILABLE") {
+            return { onChain: null, balanceAvailable: false };
+        }
+        throw error;
+    }
+};
+
+const duplicateKey = (error) => {
+    const code = error?.code ?? error?.cause?.code;
+    if (code === 11000) return true;
+    const message = `${error?.message || ""} ${error?.cause?.message || ""}`;
+    return message.includes("E11000") || message.includes("duplicate key") || /must be unique/i.test(message);
 };
 
 const findPurchase = (account, idempotencyKey) =>
@@ -472,9 +551,25 @@ const findPurchase = (account, idempotencyKey) =>
 
 const findSlot = (account, slotId) => (account?.slots || []).find((row) => row && row.slotId === slotId) || null;
 
+const insufficientTokens = (kind, onChain, spent, cost) =>
+    planError(409, "ERR_INSUFFICIENT_TOKENS", "Insufficient tokens", {
+        kind,
+        balance: spendableBalance(onChain, spent),
+        cost,
+    });
+
+const purchaseResult = ({ idempotent, kind, tokenCost, onChain, spent, slot }) => ({
+    idempotent,
+    kind,
+    tokenCost,
+    balance: spendableBalance(onChain, spent),
+    slot: slot ? presentSlot(slot) : null,
+    spent,
+});
+
 /**
  * Reserve `cost` tokens and append one slot, or return the earlier purchase for the same key.
- * The conditional update is a single document write: spent + cost must stay within the observed on-chain balance.
+ * The account document is created only when the debit succeeds.
  */
 const debitAndGrant = async ({ identity, kind, cost, idempotencyKey, balance, now }) => {
     if (mongoose.connection.readyState !== 1) {
@@ -486,42 +581,61 @@ const debitAndGrant = async ({ identity, kind, cost, idempotencyKey, balance, no
         throw planError(503, "ERR_TOKEN_BALANCE_UNAVAILABLE", "Token balance is unavailable");
     }
 
-    await ensureAccount(identity);
-
     const purchasedAt = toDate(now);
     const expiresAt = addSlotMonths(purchasedAt, config.zelfKeysVault?.slotDurationMonths);
     const slotId = crypto.randomUUID();
+    const slot = { slotId, kind, purchasedAt, expiresAt, tokenCost: cost, idempotencyKey };
+    const purchase = { idempotencyKey, kind, tokenCost: cost, slotId, purchasedAt };
 
-    const updated = await SlotAccount.findOneAndUpdate(
-        {
-            zelfName: identity.zelfName,
-            purchases: { $not: { $elemMatch: { idempotencyKey } } },
-            $expr: { $lte: [{ $add: ["$spent", cost] }, onChain] },
-        },
-        {
-            $inc: { spent: cost },
-            $push: {
-                purchases: { idempotencyKey, kind, tokenCost: cost, slotId, purchasedAt },
-                slots: { slotId, kind, purchasedAt, expiresAt, tokenCost: cost, idempotencyKey },
+    const debitExisting = () =>
+        SlotAccount.findOneAndUpdate(
+            {
+                zelfName: identity.zelfName,
+                purchases: { $not: { $elemMatch: { idempotencyKey } } },
+                $expr: { $lte: [{ $add: ["$spent", cost] }, onChain] },
             },
-        },
-        { new: true },
-    ).lean();
+            {
+                $inc: { spent: cost },
+                $push: { purchases: purchase, slots: slot },
+            },
+            { new: true },
+        ).lean();
 
-    if (updated) {
-        const slot = findSlot(updated, slotId);
-        return {
-            idempotent: false,
+    const fromDocument = (doc, idempotent, tokenCost, slotRow) =>
+        purchaseResult({
+            idempotent,
             kind,
-            tokenCost: cost,
-            balance: spendableBalance(onChain, updated.spent),
-            slot: presentSlot(slot),
-            slots: updated.slots,
-            spent: updated.spent,
-        };
+            tokenCost,
+            onChain,
+            spent: doc.spent,
+            slot: slotRow,
+        });
+
+    let updated = await debitExisting();
+    if (updated) return fromDocument(updated, false, cost, findSlot(updated, slotId));
+
+    let current = await SlotAccount.findOne({ zelfName: identity.zelfName }).lean();
+    if (!current) {
+        if (onChain < cost) throw insufficientTokens(kind, onChain, 0, cost);
+
+        try {
+            const created = await SlotAccount.create({
+                zelfName: identity.zelfName,
+                domain: identity.domain,
+                tagName: identity.tagName,
+                spent: cost,
+                slots: [slot],
+                purchases: [purchase],
+            });
+            return fromDocument(created, false, cost, slot);
+        } catch (error) {
+            if (!duplicateKey(error)) throw error;
+            updated = await debitExisting();
+            if (updated) return fromDocument(updated, false, cost, findSlot(updated, slotId));
+            current = await SlotAccount.findOne({ zelfName: identity.zelfName }).lean();
+        }
     }
 
-    const current = await SlotAccount.findOne({ zelfName: identity.zelfName }).lean();
     const prior = findPurchase(current, idempotencyKey);
     if (prior) {
         if (prior.kind !== kind) {
@@ -530,23 +644,10 @@ const debitAndGrant = async ({ identity, kind, cost, idempotencyKey, balance, no
                 existingKind: prior.kind,
             });
         }
-        const slot = findSlot(current, prior.slotId);
-        return {
-            idempotent: true,
-            kind,
-            tokenCost: prior.tokenCost,
-            balance: spendableBalance(onChain, current.spent),
-            slot: slot ? presentSlot(slot) : null,
-            slots: current.slots,
-            spent: current.spent,
-        };
+        return fromDocument(current, true, prior.tokenCost, findSlot(current, prior.slotId));
     }
 
-    throw planError(409, "ERR_INSUFFICIENT_TOKENS", "Insufficient tokens", {
-        kind,
-        balance: spendableBalance(onChain, current?.spent),
-        cost,
-    });
+    throw insufficientTokens(kind, onChain, current?.spent, cost);
 };
 
 const assertIdempotencyKey = (value) => {
@@ -599,19 +700,21 @@ const purchaseExtraSlot = async (body, authUser, options = {}) => {
 const getPlanUsage = async (authUser, counts, options = {}) => {
     const entitlement = await resolveEntitlement(authUser, options);
     const account = await loadAccount(entitlement.identity.zelfName);
-    const onChain = options.balance != null ? Number(options.balance) : await readOnChainBalance(entitlement.publicData);
+    const { onChain, balanceAvailable } = await readBalanceForUsage(entitlement.publicData, options);
+    const spent = account.spent || 0;
 
     return buildUsage({
         plan: entitlement.plan,
         counts,
         slots: account.slots,
-        balance: spendableBalance(onChain, account.spent),
-        onChainBalance: onChain,
-        spent: account.spent,
+        balance: balanceAvailable ? spendableBalance(onChain, spent) : null,
+        onChainBalance: balanceAvailable ? onChain : null,
+        spent,
         domainConfig: entitlement.domainConfig,
         priceUsd: options.priceUsd,
         now: options.now,
         zelfName: entitlement.identity.zelfName,
+        balanceAvailable,
     });
 };
 
@@ -623,10 +726,13 @@ module.exports = {
     assertIdempotencyKey,
     buildUsage,
     debitAndGrant,
+    editReference,
     evaluateLimit,
+    findEditTarget,
     getPlanUsage,
     isItemUpdate,
     limitReachedError,
+    normalizeKind,
     limitsForPlan,
     loadAccount,
     planError,

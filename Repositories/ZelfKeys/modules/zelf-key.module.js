@@ -530,8 +530,9 @@ const storeData = async (data, authToken) => {
 
         const ownership = await _validateOwnership(data.faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
 
+        let capacityDecision = null;
         if (type === "password" || type === "zotp") {
-            await assertVaultCapacity(type, data, authToken, ownership?.publicData);
+            capacityDecision = await assertVaultCapacity(type, data, authToken, ownership?.publicData);
         }
 
         const { metadata, publicData, fullTagName, protection } = await createMetadataAndPublicData(
@@ -556,9 +557,12 @@ const storeData = async (data, authToken) => {
             decryptedParams.password,
         );
 
+        await retireReplacedRecord(capacityDecision?.replacedId, result);
+
         return {
             ...result,
             type,
+            replacedId: capacityDecision?.replacedId || null,
             message: "Data stored successfully",
         };
     } catch (error) {
@@ -579,7 +583,7 @@ const formatStoreError = (error) => {
 
 const assertVaultCapacity = async (kind, item, authToken, tagPublicData) => {
     const listed = await listData({ category: kind }, authToken);
-    await PlanLimits.assertCanAdd({
+    return PlanLimits.assertCanAdd({
         authUser: authToken,
         kind,
         used: listed.totalCount || 0,
@@ -589,6 +593,24 @@ const assertVaultCapacity = async (kind, item, authToken, tagPublicData) => {
     });
 };
 
+const retireReplacedRecord = async (replacedId, stored) => {
+    if (!replacedId) return;
+    const newId = stored?.ipfs?.id;
+    if (!newId || newId === replacedId) return;
+
+    try {
+        await IPFS.deleteFiles([replacedId]);
+    } catch (error) {
+        try {
+            await IPFS.deleteFiles([newId]);
+        } catch (rollbackError) {
+            console.error("ZelfKey replace rollback failed", rollbackError);
+        }
+        console.error("ZelfKey replace failed", error);
+        throw new Error("409:failed_to_replace_zelf_key");
+    }
+};
+
 const openPasswordCapacity = async (authToken, tagPublicData) => {
     const listed = await listData({ category: "password" }, authToken);
     const items = listed.data || [];
@@ -596,24 +618,40 @@ const openPasswordCapacity = async (authToken, tagPublicData) => {
     const entitlement = await PlanLimits.resolveEntitlement(authToken, {
         tagPublicData: tagPublicData ?? null,
         skipTagLookup: true,
+        allowIdentifierOwner: true,
     });
+
+    if (!entitlement) {
+        return {
+            take() {
+                return { allowed: true, isUpdate: false, replacedId: null };
+            },
+            commit() {},
+        };
+    }
+
     const account = await PlanLimits.loadAccount(entitlement.identity.zelfName);
+    const replacedIds = new Set();
 
     return {
         take(item) {
+            const target = PlanLimits.findEditTarget("password", item, items);
+            const replacedId = target ? target.id || target.cid : null;
+            const isUpdate = Boolean(replacedId) && !replacedIds.has(replacedId);
             const decision = PlanLimits.evaluateLimit({
                 plan: entitlement.plan,
                 kind: "password",
                 used,
                 slots: account.slots,
-                isUpdate: PlanLimits.isItemUpdate("password", item, items),
+                isUpdate,
                 domainConfig: entitlement.domainConfig,
             });
             if (!decision.allowed) throw PlanLimits.limitReachedError(decision);
-            return decision;
+            return { ...decision, isUpdate, replacedId: isUpdate ? replacedId : null };
         },
         commit(decision) {
-            if (!decision.isUpdate) used += 1;
+            if (decision.isUpdate && decision.replacedId) replacedIds.add(decision.replacedId);
+            else if (!decision.isUpdate) used += 1;
         },
     };
 };
@@ -705,10 +743,12 @@ const storePasswordsBulk = async (data, authToken) => {
         try {
             const decision = capacity.take(item);
             const stored = await _storePasswordRecord(item, authToken, sharedContext, `${batchTag}_${index}`);
+            await retireReplacedRecord(decision.replacedId, stored);
             capacity.commit(decision);
             success.push({
                 index,
                 ...stored,
+                replacedId: decision.replacedId || null,
             });
         } catch (error) {
             failed.push({
@@ -1500,6 +1540,11 @@ const changeMasterPassword = async (data, authToken) => {
     };
 };
 
+const purchaseExtraSlot = async (data, authUser) => {
+    await _validateOwnership(data.faceBase64, resolveZelfIdPasswordForOwnership(data), authUser, data);
+    return PlanLimits.purchaseExtraSlot(data, authUser);
+};
+
 const getVaultLimits = async (authUser) => {
     PlanLimits.requireZelfIdentity(authUser);
     const [passwords, zotp] = await Promise.all([
@@ -1556,6 +1601,7 @@ module.exports = {
     listAllDataForDashboard,
     summarizeData,
     getVaultLimits,
+    purchaseExtraSlot,
     deleteZelfKey,
     changeMasterPassword,
     resolveProtection,

@@ -91,6 +91,7 @@ const ALLOWED_BY_ACTION = {
     ),
     "store-passwords-bulk": withCommon("passwords", "protection"),
     "store-zotp": withCommon("username", "setupKey", "issuer", "folder", "insideFolder", "protection"),
+    "purchase-slot": withCommon("kind", "idempotencyKey"),
     "store-notes": withCommon("title", "keyValuePairs", "folder", "insideFolder", "protection"),
     "store-credit-card": withCommon(
         "alias",

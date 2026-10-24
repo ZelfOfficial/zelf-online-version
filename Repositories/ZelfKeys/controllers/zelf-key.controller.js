@@ -4,7 +4,6 @@
  */
 
 const Module = require("../modules/zelf-key.module.js");
-const PlanLimits = require("../modules/zelf-key-plan-limits.module");
 const ZelfKeyDomainModule = require("../modules/zelf-key-domain.module");
 const { errorHandler } = require("../../../Core/http-handler");
 
@@ -315,7 +314,7 @@ const getVaultLimits = async (ctx) => {
 
 const purchaseExtraSlot = async (ctx) => {
 	try {
-		const data = await PlanLimits.purchaseExtraSlot(ctx.request.body, ctx.state.user);
+		const data = await Module.purchaseExtraSlot(ctx.request.body, ctx.state.user);
 
 		ctx.body = { data };
 	} catch (error) {

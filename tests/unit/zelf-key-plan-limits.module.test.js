@@ -1,3 +1,7 @@
+jest.mock("../../Repositories/ZelfNameService/modules/zns-transaction-detector.module", () => ({
+    getZNSBalance: jest.fn(),
+}));
+
 const mongoose = require("mongoose");
 const { MongoMemoryServer } = require("mongodb-memory-server");
 
@@ -6,6 +10,8 @@ const { Domain } = require("../../Repositories/Tags/modules/domain.class");
 const { errorHandler } = require("../../Core/http-handler");
 const SlotAccount = require("../../Repositories/ZelfKeys/models/zelf-key-slot-account.model");
 const PlanLimits = require("../../Repositories/ZelfKeys/modules/zelf-key-plan-limits.module");
+const Middleware = require("../../Repositories/ZelfKeys/middlewares/zelf-key.middleware");
+const ZnsBalance = require("../../Repositories/ZelfNameService/modules/zns-transaction-detector.module");
 
 jest.setTimeout(120000);
 
@@ -106,6 +112,22 @@ describe("Zelf Keys plan limits", () => {
         expect(decision.allowed).toBe(true);
         expect(PlanLimits.isItemUpdate("password", { id: "pw-1" }, [{ id: "pw-1" }])).toBe(true);
         expect(PlanLimits.isItemUpdate("password", { website: "https://same.example", username: "a" }, [{ id: "pw-1", publicData: { website: "https://same.example", username: "a" } }])).toBe(false);
+    });
+
+    test("edit reference precedence is id, then cid, then recordId", () => {
+        const items = [
+            { id: "id-1", cid: "cid-1" },
+            { id: "id-2", cid: "cid-2" },
+        ];
+
+        expect(PlanLimits.editReference({ id: "id-1", cid: "cid-2", recordId: "id-2" })).toEqual({ field: "id", value: "id-1" });
+        expect(PlanLimits.editReference({ cid: "cid-2", recordId: "id-1" })).toEqual({ field: "cid", value: "cid-2" });
+        expect(PlanLimits.editReference({ recordId: "id-2" })).toEqual({ field: "recordId", value: "id-2" });
+
+        expect(PlanLimits.findEditTarget("password", { id: "id-1", cid: "cid-2", recordId: "id-2" }, items).id).toBe("id-1");
+        expect(PlanLimits.findEditTarget("password", { cid: "cid-2", recordId: "id-1" }, items).id).toBe("id-2");
+        expect(PlanLimits.findEditTarget("password", { id: "missing", cid: "cid-1" }, items)).toBeNull();
+        expect(PlanLimits.findEditTarget("zotp", { recordId: "cid-1" }, items).id).toBe("id-1");
     });
 
     test("expired extra slots do not raise the cap and are not removed", () => {
@@ -246,8 +268,7 @@ describe("Zelf Keys extra-slot purchase", () => {
         expect(handled.status).toBe(409);
         expect(handled.code).toBe("ERR_INSUFFICIENT_TOKENS");
         expect(error.details).toMatchObject({ balance: 9, cost: 10, kind: "password" });
-        expect(account.spent).toBe(0);
-        expect(account.slots).toHaveLength(0);
+        expect(account).toBeNull();
     });
 
     test("a second purchase cannot drive the recorded spend past the on-chain balance", async () => {
@@ -378,5 +399,92 @@ describe("Zelf Keys extra-slot purchase", () => {
         });
         expect(usage.kinds.password.activeExtraSlots[0].expiresAt).toBe("2027-01-15T00:00:00.000Z");
         expect(usage.kinds.zotp).toMatchObject({ used: 1, limit: 3, extraSlots: 0, tokenCost: 20, canAdd: true });
+        expect(usage.balanceAvailable).toBe(true);
+    });
+
+    test("three parallel purchases with balance for one slot produce one success and no empty accounts", async () => {
+        const buyers = ["idem-race-a", "idem-race-b", "idem-race-c"].map((idempotencyKey) =>
+            PlanLimits.purchaseExtraSlot({ kind: "password", idempotencyKey }, alice, {
+                plan: "free",
+                balance: 10,
+                domainConfig: null,
+                now: "2026-01-15T00:00:00.000Z",
+            }),
+        );
+        const settled = await Promise.allSettled(buyers);
+        const fulfilled = settled.filter((row) => row.status === "fulfilled");
+        const rejected = settled.filter((row) => row.status === "rejected");
+        const account = await SlotAccount.findOne({ zelfName: "alice.zelf" }).lean();
+
+        expect(fulfilled).toHaveLength(1);
+        expect(rejected).toHaveLength(2);
+        rejected.forEach((row) => expect(row.reason.clientCode).toBe("ERR_INSUFFICIENT_TOKENS"));
+        expect(account.spent).toBe(10);
+        expect(account.slots).toHaveLength(1);
+        expect(await SlotAccount.countDocuments()).toBe(1);
+    });
+
+    test("a balance lookup failure still returns counts, limits, and costs", async () => {
+        ZnsBalance.getZNSBalance.mockResolvedValue({ balance: 0, error: "rpc down" });
+        const usage = await PlanLimits.getPlanUsage(
+            alice,
+            { password: 5, zotp: 3 },
+            {
+                plan: "free",
+                domainConfig: null,
+                tagPublicData: { solanaAddress: "So11111111111111111111111111111111111111112", plan: "free", type: "mainnet", zelfName: "alice.zelf" },
+                skipTagLookup: true,
+            },
+        );
+
+        expect(usage.balanceAvailable).toBe(false);
+        expect(usage.tokenBalance).toBeNull();
+        expect(usage.onChainBalance).toBeNull();
+        expect(usage.kinds.password).toMatchObject({ used: 5, limit: 5, tokenCost: 10, canAdd: false });
+        expect(usage.kinds.zotp).toMatchObject({ used: 3, limit: 3, tokenCost: 20, canAdd: false });
+
+        const { handled } = await detailsOf(() =>
+            PlanLimits.purchaseExtraSlot({ kind: "password", idempotencyKey: "idem-balance-down" }, alice, {
+                plan: "free",
+                domainConfig: null,
+                tagPublicData: { solanaAddress: "So11111111111111111111111111111111111111112", plan: "free", type: "mainnet", zelfName: "alice.zelf" },
+                skipTagLookup: true,
+            }),
+        );
+        expect(handled.status).toBe(503);
+        expect(handled.code).toBe("ERR_TOKEN_BALANCE_UNAVAILABLE");
+        expect(await SlotAccount.countDocuments({ zelfName: "alice.zelf" })).toBe(0);
+    });
+
+    test("limits and slot purchase reject an identifier-only session", async () => {
+        const device = { identifier: "device-fingerprint-abc", domain: "zelf" };
+        const { handled } = await detailsOf(() => PlanLimits.getPlanUsage(device, { password: 1, zotp: 0 }, { plan: "free", balance: 10, domainConfig: null }));
+        expect(handled.status).toBe(401);
+        expect(handled.code).toBe("ERR_ZELF_IDENTITY_REQUIRED");
+    });
+});
+
+describe("POST /slots validation codes", () => {
+    const run = async (body) => {
+        const ctx = {
+            request: { body },
+            state: { user: { tagName: "alice", domain: "zelf" } },
+        };
+        await Middleware.purchaseSlotValidation(ctx, async () => {
+            ctx.status = 200;
+        });
+        return ctx;
+    };
+
+    test("a bad kind returns ERR_SLOT_KIND_INVALID", async () => {
+        const ctx = await run({ kind: "note", idempotencyKey: "idem-valid-1", faceBase64: "face" });
+        expect(ctx.status).toBe(409);
+        expect(ctx.body.code).toBe("ERR_SLOT_KIND_INVALID");
+    });
+
+    test("a short idempotency key returns ERR_IDEMPOTENCY_KEY_INVALID", async () => {
+        const ctx = await run({ kind: "password", idempotencyKey: "short", faceBase64: "face" });
+        expect(ctx.status).toBe(409);
+        expect(ctx.body.code).toBe("ERR_IDEMPOTENCY_KEY_INVALID");
     });
 });
