@@ -441,6 +441,8 @@ const listValidation = async (ctx, next) => {
 		return;
 	}
 
+	if (!(await requireVerifiedWallet(ctx))) return;
+
 	await next();
 };
 
@@ -452,6 +454,8 @@ const listAllValidation = async (ctx, next) => {
 		ctx.body = { validationError: valid.error.message };
 		return;
 	}
+
+	if (!(await requireVerifiedWallet(ctx))) return;
 
 	await next();
 };
@@ -541,19 +545,23 @@ const requireZelfIdentity = (ctx) => {
 	return false;
 };
 
-const limitsValidation = async (ctx, next) => {
+/**
+ * The session must carry a current server stamp for the same normalized wallet as the token.
+ * Used by /limits and by reads that return item metadata (website, username, type).
+ */
+const requireVerifiedWallet = async (ctx) => {
 	const authUser = ctx.state.user;
 	if (!authUser?.session) {
 		ctx.status = 401;
 		ctx.body = { message: "A verified session is required", code: "ERR_SESSION_REQUIRED" };
-		return;
+		return false;
 	}
 
 	const session = await Session.findById(authUser.session).lean();
 	if (!session || session.status !== "active") {
 		ctx.status = 401;
 		ctx.body = { message: "A verified session is required", code: "ERR_SESSION_REQUIRED" };
-		return;
+		return false;
 	}
 
 	const domain = authUser.domain || session.domain || "zelf";
@@ -567,13 +575,13 @@ const limitsValidation = async (ctx, next) => {
 			message: "Session is not verified for this wallet",
 			code: "ERR_SESSION_NOT_VERIFIED",
 		};
-		return;
+		return false;
 	}
 
 	if (tokenWallet.zelfName && tokenWallet.zelfName !== verified.zelfName) {
 		ctx.status = 403;
 		ctx.body = { message: "Session is not the owner of this wallet", code: "ERR_SESSION_OWNER_MISMATCH" };
-		return;
+		return false;
 	}
 
 	ctx.state.user = {
@@ -582,6 +590,11 @@ const limitsValidation = async (ctx, next) => {
 		domain: verified.domain,
 	};
 
+	return true;
+};
+
+const limitsValidation = async (ctx, next) => {
+	if (!(await requireVerifiedWallet(ctx))) return;
 	await next();
 };
 

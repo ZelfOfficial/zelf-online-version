@@ -3,6 +3,7 @@ jest.mock("../../Repositories/ZelfNameService/modules/zns-transaction-detector.m
 }));
 
 const mongoose = require("mongoose");
+const jwt = require("jsonwebtoken");
 const { MongoMemoryServer } = require("mongodb-memory-server");
 
 const config = require("../../Core/config");
@@ -563,6 +564,94 @@ describe("GET /api/zelf-keys/limits session ownership", () => {
         expect(normalizeZelfName("JimBot", "zelf")).toEqual({ tagName: "jimbot", domain: "zelf", zelfName: "jimbot.zelf" });
         expect(normalizeZelfName("Jimbot.Zelf", "zelf").zelfName).toBe("jimbot.zelf");
         expect(normalizeZelfName("Jimbot.Zelf.zelf", "zelf").zelfName).toBe("jimbot.zelf");
+    });
+});
+
+describe("POST /api/sessions reuse", () => {
+    test("a reused session does not keep a previous verification stamp", async () => {
+        config.JWT_SECRET = config.JWT_SECRET || "test-session-secret";
+        const identifier = `reuse-${Date.now()}`;
+        const created = await SessionModule.insert({
+            clientIP: "203.0.113.10",
+            identifier,
+            tagName: "JimBot",
+            domain: "zelf",
+        });
+        const sessionId = jwt.decode(created.token).session;
+        await SessionModule.markSessionIdentityVerified({ session: sessionId, domain: "zelf" }, "JimBot", "zelf");
+        expect((await Session.findById(sessionId).lean()).verifiedTagName).toBe("jimbot.zelf");
+
+        const again = await SessionModule.insert({
+            clientIP: "203.0.113.10",
+            identifier,
+            tagName: "JimBot",
+            domain: "zelf",
+        });
+        const reused = await Session.findById(jwt.decode(again.token).session).lean();
+
+        expect(String(reused._id)).toBe(String(sessionId));
+        expect(reused.verifiedTagName).toBeFalsy();
+        expect(reused.verifiedAt).toBeFalsy();
+        expect(reused.verifiedUntil).toBeFalsy();
+    });
+});
+
+describe("GET /api/zelf-keys/list verified owner", () => {
+    const runList = async (user, category = "password") => {
+        const ctx = {
+            request: { query: { category } },
+            state: { user },
+            status: undefined,
+            body: undefined,
+        };
+        let continued = false;
+        await Middleware.listValidation(ctx, async () => {
+            continued = true;
+        });
+        return { ctx, continued };
+    };
+
+    const createSession = (tagName) =>
+        Session.create({
+            identifier: `list-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            clientIP: "127.0.0.1",
+            domain: "zelf",
+            isWebExtension: true,
+            status: "active",
+            type: "general",
+            tagName,
+        });
+
+    test.each(["jimbot", "jimBOT"])("an unverified session for %s cannot list item metadata", async (tagName) => {
+        const session = await createSession(tagName);
+        const { ctx, continued } = await runList({ session: session._id, tagName, domain: "zelf" });
+        expect(continued).toBe(false);
+        expect(ctx.status).toBe(403);
+        expect(ctx.body.code).toBe("ERR_SESSION_NOT_VERIFIED");
+    });
+
+    test("unlock then list works, and wallet A cannot list wallet B", async () => {
+        const session = await createSession("jimBOT");
+        await SessionModule.markSessionIdentityVerified({ session: session._id, domain: "zelf" }, "jimBOT", "zelf");
+
+        const allowed = await runList({ session: session._id, tagName: "jimBOT", domain: "zelf" });
+        expect(allowed.continued).toBe(true);
+        expect(allowed.ctx.state.user.tagName).toBe("jimbot");
+
+        const other = await runList({ session: session._id, tagName: "alice", domain: "zelf" });
+        expect(other.continued).toBe(false);
+        expect(other.ctx.status).toBe(403);
+        expect(other.ctx.body.code).toBe("ERR_SESSION_OWNER_MISMATCH");
+    });
+
+    test("list-all uses the same verified-owner rule", async () => {
+        const session = await createSession("jimbot");
+        const ctx = { request: { query: {} }, state: { user: { session: session._id, tagName: "jimbot", domain: "zelf" } } };
+        await Middleware.listAllValidation(ctx, async () => {
+            ctx.status = 200;
+        });
+        expect(ctx.status).toBe(403);
+        expect(ctx.body.code).toBe("ERR_SESSION_NOT_VERIFIED");
     });
 });
 

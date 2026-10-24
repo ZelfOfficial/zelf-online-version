@@ -59,6 +59,15 @@ const insert = async (params) => {
 
 			existingSession = null;
 		} else {
+			// A newly requested token must not inherit a previous face check.
+			await Model.updateOne(
+				{ _id: existingSession._id },
+				{ $set: { verifiedTagName: null, verifiedAt: null, verifiedUntil: null } }
+			);
+			existingSession.verifiedTagName = null;
+			existingSession.verifiedAt = null;
+			existingSession.verifiedUntil = null;
+
 			return {
 				token: jwt.sign(
 					{
