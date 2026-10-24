@@ -39,6 +39,7 @@
         "test:blogs": "jest --config jest.integration.http.config.js tests/integration/blogs-api.test.js --verbose --no-coverage",
         "test:zelf-ids": "jest --config jest.integration.http.config.js tests/integration/zelf-ids-api.test.js --verbose --no-coverage",
         "test:zelf-ids-payment": "jest tests/unit/zelf-id-plan.module.test.js tests/unit/zelf-ids-payment.module.test.js tests/unit/zelf-ids-stripe.module.test.js --verbose --no-coverage && jest --config jest.integration.http.config.js tests/integration/zelf-ids-payment-api.test.js --verbose --no-coverage",
+        "test:zelf-id-coupons": "jest tests/unit/zelf-id-coupons.test.js --verbose --no-coverage",
         "test:tx-notifications": "jest tests/unit/tx-notifications-registration.test.js tests/unit/tx-notifications-planner.test.js tests/unit/tx-notifications-push-message.test.js tests/unit/tx-notifications-adapters.test.js --verbose --no-coverage && jest --config jest.integration.http.config.js tests/integration/tx-notifications-devices.test.js --verbose --no-coverage",
         "tx-watcher": "node Repositories/TxNotifications/watcher/run.js",
         "status:check": "node scripts/run-status-check.js",

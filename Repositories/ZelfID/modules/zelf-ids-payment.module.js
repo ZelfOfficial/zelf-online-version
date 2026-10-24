@@ -417,8 +417,9 @@ const buildMetadata = (params, tagObject, domainConfig) => {
 
     const extraParams = {
         origin: tagObject.publicData.origin || "online",
-        price: params.paymentMethod === "gift" ? 0 : price,
+        price: params.paymentMethod === "gift" || params.paymentMethod === "coupon" ? 0 : price,
         paymentMethod: params.paymentMethod || undefined,
+        couponId: params.couponId || undefined,
         duration: resolvePaidDurationStamp({ publicData: tagObject.publicData, duration }),
         registeredAt: moment().format("YYYY-MM-DD HH:mm:ss"),
         renewedAt: tagObject.publicData.type === "mainnet" ? moment().format("YYYY-MM-DD HH:mm:ss") : undefined,
@@ -596,8 +597,26 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         reducedFeeRequested: Boolean(requestOptions.reducedFeeRequested),
     });
     const listPriceUsd = priceDetails.priceWithoutDiscount ?? priceDetails.price;
+    const couponCode = `${requestOptions.coupon || ""}`.trim();
+    let couponQuote = null;
+    if (couponCode) {
+        const Coupons = require("./zelf-ids-coupons.module");
+        const bare = `${tagName}`.split(".")[0].toLowerCase();
+        couponQuote = await Coupons.describeCoupon({
+            code: couponCode,
+            plan: priceDetails.plan,
+            duration: normalizedDuration,
+            zelfId: `${bare}.${String(domain || "").toLowerCase()}`,
+            listPrice: listPriceUsd,
+        });
+    }
+    // A valid coupon replaces referral and dev-fee adjustments. The server price is the license list times percent off.
     const billableUsdPrice = roundBillableUsdPrice(
-        devAmountFraction != null ? priceDetails.price * devAmountFraction : priceDetails.price
+        couponQuote?.valid
+            ? couponQuote.amountDue
+            : devAmountFraction != null
+              ? priceDetails.price * devAmountFraction
+              : priceDetails.price
     );
     const zelfPayCount = tagData.ipfs?.length || tagData.arweave?.length;
 
@@ -736,9 +755,17 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         reward: priceDetails.reward,
         discount: priceDetails.discount,
         discountType: priceDetails.discountType,
-        // $0 after a license coupon: confirm with network FREE, no Stripe or on-chain payment.
+        // $0 after a license whitelist or a 100% plan coupon: confirm with no network (FREE), no Stripe, RevenueCat, or crypto.
         freeCheckout: Number(billableUsdPrice) === 0,
     };
+
+    if (couponQuote) {
+        returnData.listPrice = couponQuote.listPrice;
+        returnData.percentOff = couponQuote.percentOff;
+        returnData.amountDue = couponQuote.amountDue;
+        returnData.currency = couponQuote.currency;
+        returnData.coupon = couponQuote.coupon;
+    }
 
     if (devAmountFraction != null) {
         returnData.devPaymentAmountDiscount = {

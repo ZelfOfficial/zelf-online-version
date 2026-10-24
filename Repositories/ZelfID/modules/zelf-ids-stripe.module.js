@@ -26,15 +26,49 @@ const durationStamp = (duration) => {
 
 const landingDurationParam = (duration) => (durationStamp(duration) === "lifetime" ? "999" : durationStamp(duration));
 
-const buildLeaseStripeMetadata = ({ tagName, domain, duration, plan, amountUsd }) => ({
-    source: SOURCE,
-    type: TYPE,
-    tagName: String(tagName || "").trim(),
-    domain: String(domain || "").trim(),
-    duration: durationStamp(duration),
-    plan: String(plan || "").trim(),
-    amountUsd: String(amountUsd),
-});
+const STRIPE_MINIMUM_CENTS = 50;
+
+/**
+ * Cents charged on the on-the-fly Stripe price.
+ * A coupon keeps the 50-cent minimum by rejecting a discounted total under it, instead of raising the charge.
+ * @param {number} amountUsd
+ * @param {{ coupon?: boolean }} [options]
+ * @returns {number}
+ */
+const unitAmountForCharge = (amountUsd, { coupon = false } = {}) => {
+    const cents = Math.round(Number(amountUsd) * 100);
+    if (coupon) {
+        if (!(cents > 0)) {
+            const err = new Error("409:invalid_quote_amount");
+            err.clientCode = "invalid_quote_amount";
+            err.clientMessage = "A 100% coupon is granted with payment confirmation and no network";
+            throw err;
+        }
+        if (cents < STRIPE_MINIMUM_CENTS) {
+            const err = new Error("409:stripe_amount_below_minimum");
+            err.clientCode = "stripe_amount_below_minimum";
+            err.clientMessage = "Discounted total is below the Stripe minimum of $0.50";
+            throw err;
+        }
+        return cents;
+    }
+    return Math.max(cents, STRIPE_MINIMUM_CENTS);
+};
+
+const buildLeaseStripeMetadata = ({ tagName, domain, duration, plan, amountUsd, couponId, couponCode }) => {
+    const metadata = {
+        source: SOURCE,
+        type: TYPE,
+        tagName: String(tagName || "").trim(),
+        domain: String(domain || "").trim(),
+        duration: durationStamp(duration),
+        plan: String(plan || "").trim(),
+        amountUsd: String(amountUsd),
+    };
+    if (couponId) metadata.couponId = String(couponId);
+    if (couponCode) metadata.couponCode = String(couponCode);
+    return metadata;
+};
 
 const parseLeaseStripeMetadata = (metadata = {}) => {
     const tagName = String(metadata.tagName || "").trim();
@@ -161,19 +195,42 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
         });
     }
 
-    const amountUsd = resolveQuotedUsd(tokenDecoded);
+    let amountUsd = resolveQuotedUsd(tokenDecoded);
+    let unitAmount = unitAmountForCharge(amountUsd);
+    let couponId;
+    let couponCode;
+    if (tokenDecoded.coupon?.valid === true && tokenDecoded.coupon.code) {
+        const Coupons = require("./zelf-ids-coupons.module");
+        const priced = await Coupons.priceCoupon({
+            code: tokenDecoded.coupon.code,
+            plan: resolvedPlan,
+            duration: expectedDuration,
+            zelfId: expectedFull,
+            tagName: localName,
+            domainConfig: licenseConfig,
+        });
+        if (!priced.valid) throw Coupons.couponInvalid(priced.reason);
+        if (tokenDecoded.amountDue != null && Math.abs(Number(tokenDecoded.amountDue) - priced.amountDue) > 0.009) {
+            throw Coupons.httpError(409, "Quoted total no longer matches the license price", "quote_price_changed");
+        }
+        amountUsd = priced.amountDue;
+        unitAmount = unitAmountForCharge(amountUsd, { coupon: true });
+        couponId = priced.coupon.id;
+        couponCode = priced.coupon.code;
+    }
 
     if (!(amountUsd > 0)) {
         throw new Error("409:invalid_quote_amount");
     }
 
-    const unitAmount = Math.max(Math.round(amountUsd * 100), 50);
     const metadata = buildLeaseStripeMetadata({
         tagName: localName,
         domain: domainName,
         duration: expectedDuration,
         plan: resolvedPlan,
         amountUsd,
+        couponId,
+        couponCode,
     });
     const query = new URLSearchParams({
         tagname: localName,
@@ -271,21 +328,82 @@ const confirmPaidStripeSession = async (session) => {
 
     const durationParam = duration === "lifetime" ? "lifetime" : parseInt(duration, 10);
     const price = Number(amountUsd) || (inspected.amountTotal ? inspected.amountTotal / 100 : 0);
-    const result = await addDurationToTag(
-        {
-            tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
-            price,
-            domain,
-            duration: durationParam,
-            plan,
-            domainConfig,
-            paymentCaptured: true,
-            paymentSource: "stripe",
-            sessionId: inspected.sessionId,
-            billableUsdPrice: price,
-        },
-        tagObject
-    );
+    const metadataCoupon = session.metadata || {};
+    let claimed = null;
+    if (metadataCoupon.couponId || metadataCoupon.couponCode) {
+        const Coupons = require("./zelf-ids-coupons.module");
+        try {
+            claimed = await Coupons.claimForGrant({
+                code: metadataCoupon.couponCode,
+                couponId: metadataCoupon.couponId,
+                zelfId: `${tagName}.${domain}`.toLowerCase(),
+                plan,
+                duration,
+                domainConfig,
+                tagName,
+                signedAmount: price,
+            });
+        } catch (error) {
+            const { recordPurchaseManualReview } = require("./zelf-id-purchase-manual-review.module");
+            await recordPurchaseManualReview({
+                tagName,
+                domain,
+                plan,
+                duration,
+                price,
+                billableUsdPrice: price,
+                source: "stripe",
+                violationCode: error.clientCode || "coupon_invalid",
+                sessionId: inspected.sessionId,
+                paymentNetwork: "stripe",
+                tagObject,
+                domainConfig,
+            });
+            return {
+                status: "success",
+                action: "needs_manual_review",
+                confirmed: false,
+                manualReview: true,
+                reason: error.clientCode || "coupon_invalid",
+                tagName,
+                domain,
+                duration,
+                plan,
+                expiresAt: tagObject.publicData.expiresAt || null,
+                publicData: tagObject.publicData,
+            };
+        }
+    }
+    let result;
+    try {
+        result = await addDurationToTag(
+            {
+                tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
+                price,
+                domain,
+                duration: durationParam,
+                plan,
+                domainConfig,
+                paymentCaptured: true,
+                paymentSource: "stripe",
+                sessionId: inspected.sessionId,
+                billableUsdPrice: price,
+                couponId: claimed?.couponId,
+            },
+            tagObject
+        );
+    } catch (error) {
+        if (claimed) {
+            const Coupons = require("./zelf-ids-coupons.module");
+            await Coupons.releaseRedemption(claimed);
+        }
+        throw error;
+    }
+
+    if (result.manualReview && claimed) {
+        const Coupons = require("./zelf-ids-coupons.module");
+        await Coupons.releaseRedemption(claimed);
+    }
 
     if (result.manualReview) {
         return {
@@ -334,6 +452,8 @@ const confirmFromSessionId = async (sessionId) => {
 module.exports = {
     SOURCE,
     TYPE,
+    STRIPE_MINIMUM_CENTS,
+    unitAmountForCharge,
     buildLeaseStripeMetadata,
     parseLeaseStripeMetadata,
     inspectStripeLeaseSession,

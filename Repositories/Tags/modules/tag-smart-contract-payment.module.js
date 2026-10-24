@@ -611,27 +611,77 @@ async function extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecod
         ? require("../../ZelfID/modules/my-zelf-id.module").addDurationToTag
         : require("./my-tags.module").addDurationToTag;
 
-    const extension = await addDurationToTag(
-        {
-            tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
-            price: amountToPay,
-            domain,
-            duration: tokenDecoded.duration || 1,
-            plan: tokenDecoded.plan,
-            domainConfig,
-            paymentCaptured: isZelfId,
-            paymentSource: isZelfId ? resolvedNetwork : undefined,
-            paymentNetwork: resolvedNetwork,
-            txHash: isZelfId ? txHash : undefined,
-            billableUsdPrice: tokenDecoded.prices?.[resolvedNetwork]?.price,
-            cryptoSymbol: resolvedNetwork,
-            cryptoAmount: amountToPay,
-            paymentInitiatedAt: tokenDecoded.initiatedAt,
-        },
-        tagObject,
-    );
+    let claimed = null;
+    if (isZelfId && tokenDecoded.coupon?.valid === true && tokenDecoded.coupon.code) {
+        const Coupons = require("../../ZelfID/modules/zelf-ids-coupons.module");
+        try {
+            claimed = await Coupons.claimForGrant({
+                code: tokenDecoded.coupon.code,
+                zelfId: String(tokenDecoded.tagName || "").toLowerCase(),
+                plan: tokenDecoded.plan,
+                duration: tokenDecoded.duration,
+                domainConfig,
+                tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
+                signedAmount: tokenDecoded.amountDue ?? tokenDecoded.billableUsdPrice ?? tokenDecoded.prices?.[resolvedNetwork]?.price,
+            });
+        } catch (error) {
+            const { recordPurchaseManualReview } = require("../../ZelfID/modules/zelf-id-purchase-manual-review.module");
+            await recordPurchaseManualReview({
+                tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
+                domain,
+                plan: tokenDecoded.plan,
+                duration: tokenDecoded.duration,
+                price: amountToPay,
+                billableUsdPrice: tokenDecoded.amountDue ?? tokenDecoded.prices?.[resolvedNetwork]?.price,
+                cryptoSymbol: resolvedNetwork,
+                cryptoAmount: amountToPay,
+                source: resolvedNetwork,
+                violationCode: error.clientCode || "coupon_invalid",
+                txHash,
+                paymentNetwork: resolvedNetwork,
+                paymentInitiatedAt: tokenDecoded.initiatedAt,
+                tagObject,
+                domainConfig,
+            });
+            throw error;
+        }
+    }
+
+    let extension;
+    try {
+        extension = await addDurationToTag(
+            {
+                tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
+                price: amountToPay,
+                domain,
+                duration: tokenDecoded.duration || 1,
+                plan: tokenDecoded.plan,
+                domainConfig,
+                paymentCaptured: isZelfId,
+                paymentSource: isZelfId ? resolvedNetwork : undefined,
+                paymentNetwork: resolvedNetwork,
+                txHash: isZelfId ? txHash : undefined,
+                billableUsdPrice: tokenDecoded.prices?.[resolvedNetwork]?.price,
+                cryptoSymbol: resolvedNetwork,
+                cryptoAmount: amountToPay,
+                paymentInitiatedAt: tokenDecoded.initiatedAt,
+                couponId: claimed?.couponId,
+            },
+            tagObject,
+        );
+    } catch (error) {
+        if (claimed) {
+            const Coupons = require("../../ZelfID/modules/zelf-ids-coupons.module");
+            await Coupons.releaseRedemption(claimed);
+        }
+        throw error;
+    }
 
     if (isZelfId && extension?.manualReview) {
+        if (claimed) {
+            const Coupons = require("../../ZelfID/modules/zelf-ids-coupons.module");
+            await Coupons.releaseRedemption(claimed);
+        }
         return extension;
     }
 }

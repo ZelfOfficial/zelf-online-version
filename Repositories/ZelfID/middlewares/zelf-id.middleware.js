@@ -103,7 +103,7 @@ const paymentSchemas = {
     paymentConfirmation: {
         tagName: string().required(),
         domain: string(),
-        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE", "BDAG", "FREE"]).required(),
+        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE", "BDAG", "FREE"]),
         token: string().required(),
     },
     paymentOptions: {
@@ -112,6 +112,7 @@ const paymentSchemas = {
         duration: string().required(), // allowed values come from the license planPricing
         plan: string().optional(), // offered plans come from the license planPricing
         referralTagName: string().optional(), // coupon = license payment.whitelist referrer
+        coupon: string().allow("", null), // percent-off plan coupon code
     },
     stripeCheckout: {
         tagName: string().required(),
@@ -321,7 +322,7 @@ const paymentConfirmationValidation = async (ctx, next) => {
         return;
     }
 
-    const { tagName, domain, token, network } = ctx.request.body;
+    let { tagName, domain, token, network } = ctx.request.body;
     const domainValidation = await TagsMiddleware.validateDomainAndName(domain, tagName);
 
     if (!domainValidation.valid) {
@@ -342,6 +343,17 @@ const paymentConfirmationValidation = async (ctx, next) => {
         ctx.status = 409;
         ctx.body = { validationError: "token_expired" };
         return;
+    }
+
+    // A 100% coupon (or any other signed $0 quote) confirms with no network.
+    if (!network) {
+        if (tokenDecoded.freeCheckout !== true) {
+            ctx.status = 409;
+            ctx.body = { validationError: '"network" is required' };
+            return;
+        }
+        network = "FREE";
+        ctx.request.body.network = "FREE";
     }
 
     // FREE has no price entry: allowed only for a signed $0 checkout (re-quoted from the license on confirm).

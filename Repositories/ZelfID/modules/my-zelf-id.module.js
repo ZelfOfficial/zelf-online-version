@@ -14,6 +14,150 @@ const { confirmPayUniqueAddress } = require("../../Tags/modules/my-tags.module")
 const ZelfIdModule = require("./zelf-id.module");
 const ZelfIdsPaymentModule = require("./zelf-ids-payment.module");
 
+const releaseCouponClaim = async (claimed) => {
+    if (!claimed?.couponId || !claimed?.redemptionKey) return;
+    const Coupons = require("./zelf-ids-coupons.module");
+    await Coupons.releaseRedemption(claimed);
+};
+
+/**
+ * After a captured Stripe or crypto payment, record the coupon redemption.
+ * A failed recheck does not grant the plan; the captured payment is kept for manual review.
+ * @returns {Promise<{ blocked: boolean, claimed: object|null, body?: object }>}
+ */
+const claimCouponAfterPayment = async ({
+    tokenDecoded,
+    tagName,
+    domain,
+    domainConfig,
+    tagObject,
+    source,
+    price,
+    billableUsdPrice,
+    cryptoSymbol,
+    cryptoAmount,
+    paymentNetwork,
+    sessionId,
+    txHash,
+    paymentInitiatedAt,
+    amountReceived,
+}) => {
+    if (tokenDecoded?.coupon?.valid !== true || !tokenDecoded.coupon.code) {
+        return { blocked: false, claimed: null };
+    }
+    const Coupons = require("./zelf-ids-coupons.module");
+    const bare = `${tagName}`.split(".")[0];
+    try {
+        const claimed = await Coupons.claimForGrant({
+            code: tokenDecoded.coupon.code,
+            zelfId: `${bare}.${domain}`.toLowerCase(),
+            plan: tokenDecoded.plan,
+            duration: tokenDecoded.duration,
+            domainConfig,
+            tagName: bare,
+            signedAmount: tokenDecoded.amountDue ?? tokenDecoded.billableUsdPrice ?? billableUsdPrice,
+        });
+        return { blocked: false, claimed };
+    } catch (error) {
+        const { recordPurchaseManualReview } = require("./zelf-id-purchase-manual-review.module");
+        await recordPurchaseManualReview({
+            tagName: bare,
+            domain,
+            plan: tokenDecoded.plan,
+            duration: tokenDecoded.duration,
+            price,
+            billableUsdPrice,
+            cryptoSymbol,
+            cryptoAmount,
+            source: source || "coupon",
+            violationCode: error.clientCode || "coupon_invalid",
+            sessionId,
+            txHash,
+            paymentNetwork,
+            paymentInitiatedAt,
+            tagObject,
+            domainConfig,
+        });
+        return {
+            blocked: true,
+            claimed: null,
+            body: {
+                tagObject,
+                confirmed: false,
+                manualReview: true,
+                reason: error.clientCode || "coupon_invalid",
+                amountReceived: amountReceived ?? 0,
+            },
+        };
+    }
+};
+
+/**
+ * 100% coupon: same purchase rules as a paid checkout, then the free-checkout grant.
+ * The redemption is conditional and is rolled back if the grant does not stick.
+ */
+const confirmCouponFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, tagObject) => {
+    const Coupons = require("./zelf-ids-coupons.module");
+    const bare = tagObject.publicData[domainConfig.getTagKey()].split(".")[0];
+    Coupons.assertCouponPlanRules({
+        publicData: tagObject.publicData,
+        requestedPlan: tokenDecoded.plan,
+        tagName: bare,
+        domainConfig,
+        duration: tokenDecoded.duration || "1",
+    });
+
+    let claimed = null;
+    try {
+        claimed = await Coupons.claimForGrant({
+            code: tokenDecoded.coupon.code,
+            zelfId: `${bare}.${domain}`.toLowerCase(),
+            plan: tokenDecoded.plan,
+            duration: tokenDecoded.duration,
+            domainConfig,
+            tagName: bare,
+            signedAmount: tokenDecoded.amountDue ?? 0,
+            requireZero: true,
+        });
+        const extension = await addDurationToTag(
+            {
+                tagName: bare,
+                price: 0,
+                domain,
+                duration: tokenDecoded.duration || 1,
+                plan: tokenDecoded.plan,
+                domainConfig,
+                paymentMethod: "coupon",
+                couponId: claimed.couponId,
+            },
+            tagObject
+        );
+        if (extension.manualReview) {
+            await releaseCouponClaim(claimed);
+            return {
+                tagObject: extension.tagObject || tagObject,
+                confirmed: false,
+                manualReview: true,
+                reason: extension.reason,
+                amountReceived: 0,
+            };
+        }
+        return {
+            tagObject: extension.tagObject || tagObject,
+            expiresAt: extension.expiresAt || tagObject.publicData?.expiresAt || null,
+            confirmed: true,
+            paymentMethod: "coupon",
+            couponId: claimed.couponId,
+            amountReceived: 0,
+            ipfsId: extension.ipfsId,
+            arweaveId: extension.arweaveId,
+        };
+    } catch (error) {
+        await releaseCouponClaim(claimed);
+        throw error;
+    }
+};
+
 const verifyPaymentConfirmation = async (tagName, domain, network, token) => {
     const tokenDecoded = jwt.verify(token, config.JWT_SECRET);
     const domainConfig = getDomainConfig(domain);
@@ -75,24 +219,52 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token) => {
         };
     }
 
-    const extension = await addDurationToTag(
-        {
-            tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
-            price: tokenDecoded.prices?.[network]?.price ?? amountToPay,
-            billableUsdPrice: tokenDecoded.prices?.[network]?.price,
-            cryptoSymbol: network,
-            cryptoAmount: amountToPay,
-            domain,
-            duration: tokenDecoded.duration || 1,
-            plan: tokenDecoded.plan,
-            domainConfig,
-            paymentCaptured: true,
-            paymentSource: network,
-            paymentNetwork: network,
-            paymentInitiatedAt: tokenDecoded.initiatedAt,
-        },
-        tagObject
-    );
+    const couponGrant = await claimCouponAfterPayment({
+        tokenDecoded,
+        tagName,
+        domain,
+        domainConfig,
+        tagObject,
+        source: network,
+        price: tokenDecoded.prices?.[network]?.price ?? amountToPay,
+        billableUsdPrice: tokenDecoded.amountDue ?? tokenDecoded.billableUsdPrice ?? tokenDecoded.prices?.[network]?.price,
+        cryptoSymbol: network,
+        cryptoAmount: amountToPay,
+        paymentNetwork: network,
+        paymentInitiatedAt: tokenDecoded.initiatedAt,
+        amountReceived: paymentConfirmation.amountReceived,
+    });
+    if (couponGrant.blocked) return couponGrant.body;
+
+    let extension;
+    try {
+        extension = await addDurationToTag(
+            {
+                tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
+                price: tokenDecoded.prices?.[network]?.price ?? amountToPay,
+                billableUsdPrice: tokenDecoded.prices?.[network]?.price,
+                cryptoSymbol: network,
+                cryptoAmount: amountToPay,
+                domain,
+                duration: tokenDecoded.duration || 1,
+                plan: tokenDecoded.plan,
+                domainConfig,
+                paymentCaptured: true,
+                paymentSource: network,
+                paymentNetwork: network,
+                paymentInitiatedAt: tokenDecoded.initiatedAt,
+                couponId: couponGrant.claimed?.couponId,
+            },
+            tagObject
+        );
+    } catch (error) {
+        await releaseCouponClaim(couponGrant.claimed);
+        throw error;
+    }
+
+    if (extension.manualReview && couponGrant.claimed) {
+        await releaseCouponClaim(couponGrant.claimed);
+    }
 
     if (extension.manualReview) {
         return {
@@ -136,7 +308,22 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig) 
 
     // Same signed checkout already applied: return the record, never stamp twice.
     if (initiatedAt && renewedAt && moment(renewedAt).isAfter(initiatedAt)) {
-        return { cache: true, confirmed: true, amountReceived: 0, tagObject, expiresAt: tagObject.publicData?.expiresAt || null };
+        const cached = {
+            cache: true,
+            confirmed: true,
+            amountReceived: 0,
+            tagObject,
+            expiresAt: tagObject.publicData?.expiresAt || null,
+        };
+        if (tagObject.publicData.paymentMethod === "coupon") {
+            cached.paymentMethod = "coupon";
+            cached.couponId = tagObject.publicData.couponId || null;
+        }
+        return cached;
+    }
+
+    if (tokenDecoded.coupon?.valid === true && tokenDecoded.coupon?.code) {
+        return confirmCouponFreeCheckout(tagName, domain, tokenDecoded, domainConfig, tagObject);
     }
 
     const { assertPurchaseKeepsPaidValue } = require("./zelf-id-plan.module");
@@ -205,6 +392,13 @@ const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata) 
             expiresAt = parsed.expiresAt || null;
             if (parsed.plan) {
                 tagObject.publicData = { ...tagObject.publicData, plan: parsed.plan, expiresAt, eventID: parsed.eventID };
+            }
+            if (parsed.renewedAt) tagObject.publicData.renewedAt = parsed.renewedAt;
+            if (parsed.registeredAt) tagObject.publicData.registeredAt = parsed.registeredAt;
+            if (parsed.paymentMethod) tagObject.publicData.paymentMethod = parsed.paymentMethod;
+            if (parsed.couponId) tagObject.publicData.couponId = parsed.couponId;
+            if (parsed.paymentMethod === "coupon" && parsed.couponId) {
+                tagObject.publicData.payment = { method: "coupon", couponId: parsed.couponId };
             }
             if (parsed.revenueCatOriginalTransactionId) {
                 tagObject.publicData.revenueCatOriginalTransactionId = parsed.revenueCatOriginalTransactionId;
