@@ -19,7 +19,8 @@ jest.mock("../../Core/config", () => ({
 	zelfProof: { url: "https://example.test", apiKey: "test" },
 }));
 
-const { confirmFromSessionId, buildLeaseStripeMetadata } = require("../../Repositories/ZelfID/modules/zelf-ids-stripe.module");
+const jwt = require("jsonwebtoken");
+const { confirmFromSessionId, buildLeaseStripeMetadata, pollStripeSession } = require("../../Repositories/ZelfID/modules/zelf-ids-stripe.module");
 const { errorHandler } = require("../../Core/http-handler");
 
 const VALID_SESSION_ID = "cs_test_confirmflow01";
@@ -73,5 +74,65 @@ describe("confirmFromSessionId", () => {
 			plan: "unlimited",
 			amountUsd: "36",
 		});
+	});
+});
+
+describe("pollStripeSession", () => {
+	const metadata = buildLeaseStripeMetadata({
+		tagName: "qa99",
+		domain: "zelf",
+		duration: "1",
+		plan: "unlimited",
+		amountUsd: "36",
+	});
+
+	beforeEach(() => {
+		mockRetrieve.mockReset();
+	});
+
+	test("an unpaid poll returns only status when the caller does not own the name", async () => {
+		mockRetrieve.mockResolvedValue({
+			id: VALID_SESSION_ID,
+			metadata,
+			payment_status: "unpaid",
+		});
+
+		const result = await pollStripeSession({ sessionId: VALID_SESSION_ID, authUser: {}, token: "" });
+
+		expect(result).toEqual({ status: "unpaid", confirmed: false });
+	});
+
+	test("an unpaid poll returns the quote fields to the checkout owner", async () => {
+		mockRetrieve.mockResolvedValue({
+			id: VALID_SESSION_ID,
+			metadata,
+			payment_status: "unpaid",
+		});
+		const token = jwt.sign({ tagName: "qa99.zelf", ttl: Math.floor(Date.now() / 1000) + 3600 }, "test");
+
+		const result = await pollStripeSession({ sessionId: VALID_SESSION_ID, authUser: {}, token });
+
+		expect(result).toMatchObject({
+			status: "unpaid",
+			confirmed: false,
+			tagName: "qa99",
+			domain: "zelf",
+			plan: "unlimited",
+		});
+	});
+
+	test("a paid poll does not grant when the caller does not own the name", async () => {
+		mockRetrieve.mockResolvedValue({
+			id: VALID_SESSION_ID,
+			metadata,
+			payment_status: "paid",
+			created: Math.floor(Date.now() / 1000) - 60,
+			amount_total: 3600,
+		});
+
+		const error = await pollStripeSession({ sessionId: VALID_SESSION_ID, authUser: {} }).catch((caught) => caught);
+
+		expect(error).toMatchObject({ clientCode: "tag_not_owned" });
+		expect(mockRetrieve).toHaveBeenCalledTimes(1);
 	});
 });

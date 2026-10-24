@@ -329,6 +329,26 @@ const claimForGrant = async ({ code, couponId, zelfId, plan, duration, domainCon
     };
 };
 
+/**
+ * Redemption of this coupon for this Zelf ID that happened after the signed quote.
+ * Replaying that same confirm returns the grant instead of consuming another redemption.
+ * A later quote (initiatedAt after the redemption) is not a replay.
+ * @returns {Promise<{ couponId: string, code: string, plan: string, duration: string }|null>}
+ */
+const findGrantForReplay = async ({ code, zelfId, initiatedAt }) => {
+    const started = Number(initiatedAt);
+    if (!Number.isFinite(started)) return null;
+    const coupon = await Coupon.findOne({ code: normalizeCode(code) }).lean();
+    if (!coupon) return null;
+    const zelfKey = normalizeZelfId(zelfId);
+    const hit = (coupon.redemptions || []).find((redemption) => {
+        if (normalizeZelfId(redemption.zelfId) !== zelfKey) return false;
+        return new Date(redemption.redeemedAt).getTime() > started * 1000;
+    });
+    if (!hit) return null;
+    return { couponId: coupon.id, code: coupon.code, plan: hit.plan, duration: hit.duration };
+};
+
 const releaseRedemption = async ({ couponId, redemptionKey }) => {
     if (!couponId || !redemptionKey) return;
     await Coupon.updateOne({ id: couponId }, { $pull: { redemptions: { key: redemptionKey } } });
@@ -349,6 +369,7 @@ module.exports = {
     assertCouponPlanRules,
     claimForGrant,
     couponInvalid,
+    findGrantForReplay,
     createCoupon,
     deactivateCoupon,
     describeCoupon,

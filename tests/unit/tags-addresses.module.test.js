@@ -12,6 +12,7 @@ const {
     buildSearchablePinPages,
     cleanExtraParamsForPinata,
     collectReservedKeyvalues,
+    expandStoredExtraParams,
     mergeAddressKeyvaluesIntoPublicData,
     getAllChainAddresses,
     resolveEncryptVersion,
@@ -438,10 +439,12 @@ describe("tags-addresses.module", () => {
                 zelfProof: "x".repeat(80),
             });
 
-            expect(cleaned).toEqual({
+            expect(cleaned.registeredAt).toBeUndefined();
+            expect(cleaned.couponId).toBeUndefined();
+            expect(JSON.stringify(cleaned).length).toBeLessThanOrEqual(PINATA_KEYVALUE_MAX_LENGTH);
+            expect(expandStoredExtraParams(cleaned)).toMatchObject({
                 hasPassword: "true",
                 origin: "online",
-                registeredAt: "2026-01-16 20:32:43",
                 expiresAt: "2028-11-14 23:25:33",
                 price: 1.8,
                 duration: "3",
@@ -449,7 +452,6 @@ describe("tags-addresses.module", () => {
                 v: 3,
                 st: "password",
             });
-            expect(JSON.stringify(cleaned).length).toBeLessThanOrEqual(PINATA_KEYVALUE_MAX_LENGTH);
         });
 
         test("drops a session JWT or object from st", () => {
@@ -471,16 +473,14 @@ describe("tags-addresses.module", () => {
             ).toBeUndefined();
         });
 
-        test("collectReservedKeyvalues omits values longer than 250 characters", () => {
-            const keyvalues = collectReservedKeyvalues({
-                tagName: "miguel.zelf",
-                domain: "zelf",
-                extraParams: JSON.stringify({ st: "a".repeat(300) }),
-            });
-
-            expect(keyvalues.tagName).toBe("miguel.zelf");
-            expect(keyvalues.domain).toBe("zelf");
-            expect(keyvalues.extraParams).toBeUndefined();
+        test("collectReservedKeyvalues throws before a value over 250 characters is pinned", () => {
+            expect(() =>
+                collectReservedKeyvalues({
+                    tagName: "miguel.zelf",
+                    domain: "zelf",
+                    extraParams: JSON.stringify({ st: "a".repeat(300) }),
+                })
+            ).toThrow("409:stored_metadata_too_long");
         });
     });
 });

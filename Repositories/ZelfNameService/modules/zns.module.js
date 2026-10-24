@@ -15,6 +15,7 @@ const jwt = require("jsonwebtoken");
 const { createUnderName } = require("./undernames.module");
 const { confirmPayUniqueAddress } = require("../../purchase-zelf/modules/balance-checker.module");
 const ZNSPartsModule = require("./zns-parts.module");
+const { expandStoredExtraParams } = require("../../Tags/modules/tags-addresses.module");
 
 const evmCompatibleTickers = [
 	"ETH", // Ethereum
@@ -107,7 +108,7 @@ const _removeExpiredRecords = async (records) => {
 	for (let index = records.length - 1; index >= 0; index--) {
 		const record = records[index];
 
-		const extraParams = JSON.parse(record.metadata.keyvalues.extraParams || "{}");
+		const extraParams = expandStoredExtraParams(record.metadata.keyvalues.extraParams || "{}");
 
 		const expiresAt = moment(record.metadata.keyvalues.expiresAt || extraParams.expiresAt);
 

@@ -8,6 +8,7 @@
  *   - listRecords: filtered, paginated drill-down (page size 50, max 100)
  */
 const { createSwrCache, keepPriorSnapshotSignal } = require("../../../Core/utils/swr-snapshot-cache");
+const { expandStoredExtraParams } = require("../../Tags/modules/tags-addresses.module");
 
 const SNAPSHOT_CAP = 50000;
 const DAILY_WINDOW_DAYS = 60;
@@ -38,7 +39,7 @@ const normalizeRow = (raw, storage) => {
     let pd = raw?.publicData ?? raw?.tagObject?.publicData ?? {};
     if (pd?.extraParams && typeof pd.extraParams === "string") {
         try {
-            pd = { ...pd, ...JSON.parse(pd.extraParams) };
+            pd = { ...pd, ...expandStoredExtraParams(pd.extraParams) };
         } catch {
             /* ignore */
         }

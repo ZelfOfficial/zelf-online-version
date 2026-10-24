@@ -407,10 +407,13 @@ describe("TON tag address packing (publish safety)", () => {
 			expect(extraParams.st).toBe("pin");
 			expect(extraParams.plan).toBe("free");
 			expect(extraParams.hasPassword).toBe("true");
+			expect(extraParams.price).toBe(0);
+			expect(extraParams.expiresAt).toBe("2027-09-01 21:00:00");
+			expect(extraParams.duration).toBe(1);
 			expect(extraParams.v).toBe(4);
 		});
 
-		it("infers premium for planless 6+ mainnet and skips plan on holds", () => {
+		it("does not persist an inferred plan on re-pin", () => {
 			const mainnet = buildRepinExtraParams({
 				type: "mainnet",
 				tagName: "abcdef.zelf",
@@ -419,15 +422,25 @@ describe("TON tag address packing (publish safety)", () => {
 				registeredAt: "2026-09-01 21:00:00",
 				expiresAt: "2027-09-01 21:00:00",
 			});
-			expect(mainnet.plan).toBe("premium");
+			expect(mainnet.plan).toBeUndefined();
+			expect(mainnet.expiresAt).toBe("2027-09-01 21:00:00");
+			expect(mainnet.registeredAt).toBeUndefined();
 			expect(mainnet.v).toBe(3);
 
 			const expired = buildRepinExtraParams({
 				type: "mainnet",
 				tagName: "abcdef.zelf",
-				expiresAt: "2020-01-01 00:00:00",
+				plan: "premium",
+				planExpiresAt: "2020-01-01 00:00:00",
+				expiresAt: "2126-01-01 00:00:00",
+				price: 0,
+				duration: "1",
 			});
-			expect(expired.plan).toBe("free");
+			expect(expired.plan).toBe("premium");
+			expect(expired.expiresAt).toBe("2126-01-01 00:00:00");
+			expect(expired.planExpiresAt).toBe("2020-01-01 00:00:00");
+			expect(expired.price).toBe(0);
+			expect(expired.duration).toBe("1");
 
 			const hold = buildRepinExtraParams({
 				type: "hold",
@@ -445,7 +458,8 @@ describe("TON tag address packing (publish safety)", () => {
 				{ encryptVersion: 4 }
 			);
 			expect(forcedV4.v).toBe(4);
-			expect(forcedV4.plan).toBe("premium");
+			expect(forcedV4.plan).toBeUndefined();
+			expect(forcedV4.expiresAt).toBe("2027-09-01 21:00:00");
 		});
 	});
 });

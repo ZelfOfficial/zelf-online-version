@@ -511,8 +511,12 @@ const stripeCheckout = async (ctx) => {
 
 const stripeSession = async (ctx) => {
     try {
-        const { sessionId } = ctx.request.query;
-        const data = await ZelfIdsStripeModule.confirmFromSessionId(sessionId);
+        const { sessionId, token } = ctx.request.query;
+        const data = await ZelfIdsStripeModule.pollStripeSession({
+            sessionId,
+            token,
+            authUser: ctx.state.user,
+        });
 
         ctx.body = { data };
     } catch (error) {

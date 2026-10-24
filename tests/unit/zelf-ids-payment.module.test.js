@@ -18,6 +18,9 @@ jest.mock("../../Repositories/ZelfID/modules/zelf-id.module", () => ({
 const moment = require("moment");
 const { buildMetadata } = require("../../Repositories/ZelfID/modules/zelf-ids-payment.module");
 const { addDurationToTag } = require("../../Repositories/ZelfID/modules/my-zelf-id.module");
+const { expandStoredExtraParams, PINATA_KEYVALUE_MAX_LENGTH } = require("../../Repositories/Tags/modules/tags-addresses.module");
+
+const readExtra = (extraParams) => expandStoredExtraParams(extraParams);
 
 const { zelfPlanLicense } = require("../fixtures/zelf-plan-license.fixture");
 const domainConfig = zelfPlanLicense();
@@ -45,7 +48,7 @@ describe("zelf-ids-payment.module", () => {
 		expect(metadata.tagName).toBe("zid12345.zelf");
 		expect(metadata.domain).toBe("zelf");
 
-		const extra = JSON.parse(metadata.extraParams);
+		const extra = readExtra(metadata.extraParams);
 		expect(extra.plan).toBe("premium");
 		expect(extra.type).toBe("mainnet");
 		expect(Number(extra.v)).toBe(4);
@@ -70,7 +73,7 @@ describe("zelf-ids-payment.module", () => {
 			tagObject,
 			domainConfig
 		);
-		const extra = JSON.parse(metadata.extraParams);
+		const extra = readExtra(metadata.extraParams);
 		expect(extra.plan).toBe("unlimited");
 		expect(extra.type).toBe("mainnet");
 	});
@@ -86,7 +89,7 @@ describe("zelf-ids-payment.module", () => {
 		};
 
 		const { metadata } = buildMetadata({ tagName: "mik", domain: "zelf", duration: 1, price: 99 }, tagObject, domainConfig);
-		const extra = JSON.parse(metadata.extraParams);
+		const extra = readExtra(metadata.extraParams);
 		expect(extra.plan).toBe("unlimited");
 		expect(extra.type).toBe("mainnet");
 	});
@@ -109,7 +112,7 @@ describe("zelf-ids-payment.module", () => {
 			tagObject,
 			domainConfig
 		);
-		const extra = JSON.parse(metadata.extraParams);
+		const extra = readExtra(metadata.extraParams);
 		expect(extra.duration).toBe("1");
 		expect(extra.expiresAt).toBe(tagObject.publicData.expiresAt);
 		expect(moment(extra.planExpiresAt).diff(moment(), "year", true)).toBeGreaterThan(0.9);
@@ -148,14 +151,14 @@ describe("zelf-ids-payment.module", () => {
 			rewritten,
 			domainConfig
 		);
-		const extra = JSON.parse(metadata.extraParams);
+		const extra = readExtra(metadata.extraParams);
 		expect(extra.duration).toBe("1");
 		expect(extra.paymentMethod).toBe("coupon");
 		expect(extra.expiresAt).toBe(freePublic.expiresAt);
 		expect(moment(extra.planExpiresAt).diff(moment(), "year", true)).toBeGreaterThan(0.9);
 		expect(moment(extra.planExpiresAt).diff(moment(), "year", true)).toBeLessThan(1.2);
 
-		const stacked = JSON.parse(
+		const stacked = readExtra(
 			buildMetadata(
 				{ tagName: "myname", domain: "zelf", duration: 1, price: 0, plan: "unlimited", paymentMethod: "coupon" },
 				rewritten,
@@ -177,7 +180,7 @@ describe("zelf-ids-payment.module", () => {
 				expiresAt: moment().add(1, "year").format("YYYY-MM-DD HH:mm:ss"),
 			},
 		};
-		const extra = JSON.parse(
+		const extra = readExtra(
 			buildMetadata(
 				{ tagName: "myname", domain: "zelf", duration: 1, price: 0, plan: "unlimited", paymentMethod: "whitelist" },
 				tagObject,
@@ -210,7 +213,7 @@ describe("zelf-ids-payment.module", () => {
 			tagObject,
 			domainConfig
 		);
-		const extra = JSON.parse(metadata.extraParams);
+		const extra = readExtra(metadata.extraParams);
 		expect(extra.duration).toBe("5");
 		expect(moment(extra.expiresAt).diff(moment(stored, "YYYY-MM-DD HH:mm:ss"), "year", true)).toBeGreaterThanOrEqual(2.9);
 	});
@@ -233,7 +236,7 @@ describe("zelf-ids-payment.module", () => {
 			tagObject,
 			domainConfig
 		);
-		const extra = JSON.parse(metadata.extraParams);
+		const extra = readExtra(metadata.extraParams);
 		expect(extra.duration).toBe("lifetime");
 		expect(moment(extra.expiresAt).diff(moment(), "year", true)).toBeGreaterThanOrEqual(99);
 	});
@@ -256,7 +259,7 @@ describe("zelf-ids-payment.module", () => {
 			domainConfig
 		);
 		expect(fullTagName).toBe("alice.zelf");
-		const extra = JSON.parse(metadata.extraParams);
+		const extra = readExtra(metadata.extraParams);
 		expect(extra.type).toBe("mainnet");
 		expect(extra.plan).toBe("unlimited");
 	});
@@ -274,7 +277,7 @@ describe("zelf-ids-payment.module", () => {
 				expiresAt: leftover,
 			},
 		};
-		const freeExtra = JSON.parse(
+		const freeExtra = readExtra(
 			buildMetadata(
 				{ tagName: "v4miguelunittest1", domain: "zelf", duration: 1, price: 24, plan: "premium" },
 				freeObject,
@@ -298,7 +301,7 @@ describe("zelf-ids-payment.module", () => {
 				expiresAt: leftover,
 			},
 		};
-		const planlessExtra = JSON.parse(
+		const planlessExtra = readExtra(
 			buildMetadata(
 				{ tagName: "v4miguelunittest1", domain: "zelf", duration: 1, price: 24, plan: "premium" },
 				planlessObject,
@@ -322,7 +325,7 @@ describe("zelf-ids-payment.module", () => {
 				expiresAt: stored,
 			},
 		};
-		const v4Extra = JSON.parse(
+		const v4Extra = readExtra(
 			buildMetadata(
 				{ tagName: "v4miguelunittest2", domain: "zelf", duration: 1, price: 24, plan: "premium" },
 				v4Object,
@@ -344,7 +347,7 @@ describe("zelf-ids-payment.module", () => {
 				expiresAt: stored,
 			},
 		};
-		const v36Extra = JSON.parse(
+		const v36Extra = readExtra(
 			buildMetadata(
 				{ tagName: "v4miguelunittest2", domain: "zelf", duration: 1, price: 24, plan: "premium" },
 				v36Object,
@@ -391,9 +394,88 @@ describe("zelf-ids-payment.module", () => {
 			tagObject,
 			domainConfig
 		);
-		const extra = JSON.parse(metadata.extraParams);
+		const extra = readExtra(metadata.extraParams);
 		expect(Number(extra.v)).toBe(3);
 		expect(extra.plan).toBe("premium");
 		expect(extra.type).toBe("mainnet");
+	});
+
+	test("stored keyvalues for the longest name and domain stay within the pin limit", () => {
+		const tagName = "a".repeat(27);
+		const domain = `${"b".repeat(61)}cd`;
+		const leaseExpiresAt = moment().add(100, "year").format("YYYY-MM-DD HH:mm:ss");
+		const tagObject = {
+			publicData: {
+				origin: "online",
+				type: "mainnet",
+				plan: "free",
+				duration: "100",
+				hasPassword: "true",
+				v: "4",
+				domain,
+				expiresAt: leaseExpiresAt,
+			},
+		};
+		const paths = [
+			["coupon", "coupon", 0],
+			["whitelist", "whitelist", 0],
+			["stripe", "stripe", 990],
+			["crypto", "crypto", 990],
+		];
+		const durations = [1, 5, "lifetime"];
+		const maxByPath = {};
+
+		for (const [label, paymentMethod, price] of paths) {
+			for (const duration of durations) {
+				const { metadata, fullTagName } = buildMetadata(
+					{ tagName, domain, duration, price, plan: "unlimited", paymentMethod },
+					tagObject,
+					domainConfig
+				);
+				const stored = metadata.extraParams;
+				expect(stored.length).toBeLessThanOrEqual(PINATA_KEYVALUE_MAX_LENGTH);
+				expect(fullTagName.length).toBeLessThanOrEqual(PINATA_KEYVALUE_MAX_LENGTH);
+				expect(String(metadata.domain).length).toBeLessThanOrEqual(PINATA_KEYVALUE_MAX_LENGTH);
+				const expanded = readExtra(stored);
+				expect(expanded.plan).toBe("unlimited");
+				expect(expanded.paymentMethod).toBe(paymentMethod);
+				expect(expanded.expiresAt).toBe(leaseExpiresAt);
+				expect(expanded.couponId).toBeUndefined();
+				expect(expanded.registeredAt).toBeUndefined();
+				if (duration === "lifetime") {
+					expect(expanded.duration).toBe("lifetime");
+					expect(expanded.planExpiresAt).toBeUndefined();
+				} else {
+					expect(expanded.duration).toBe(String(duration));
+					expect(moment(expanded.planExpiresAt).diff(moment(), "year", true)).toBeGreaterThan(duration - 0.2);
+					expect(moment(expanded.planExpiresAt).diff(moment(), "year", true)).toBeLessThan(duration + 0.2);
+				}
+				maxByPath[label] = Math.max(maxByPath[label] || 0, stored.length);
+			}
+		}
+
+		expect(maxByPath).toEqual({
+			coupon: 139,
+			whitelist: 142,
+			stripe: 141,
+			crypto: 141,
+		});
+	});
+
+	test("buildMetadata throws before a keyvalue over the pin limit is stored", () => {
+		const tagObject = {
+			publicData: {
+				origin: "x".repeat(300),
+				type: "mainnet",
+				plan: "free",
+				duration: "100",
+				hasPassword: "true",
+				v: "4",
+				expiresAt: moment().add(100, "year").format("YYYY-MM-DD HH:mm:ss"),
+			},
+		};
+		expect(() =>
+			buildMetadata({ tagName: "myname", domain: "zelf", duration: 1, price: 0, plan: "premium", paymentMethod: "coupon" }, tagObject, domainConfig)
+		).toThrow("409:stored_metadata_too_long");
 	});
 });

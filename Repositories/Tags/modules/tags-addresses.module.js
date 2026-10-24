@@ -4,7 +4,12 @@
  * New writes keep addresses as standalone searchable keys. Overflow goes on
  * continuation pins that share the same QR and point back via `_tagName` /
  * `__tagName`. Old packed `addresses*` blobs stay readable via merge only.
+ *
+ * Lease `extraParams` is stored with short keys and epoch-second dates so a
+ * plan term fits under the 250-character value cap. Readers expand that back
+ * to the long field names. `registeredAt` and `couponId` are not stored.
  */
+const moment = require("moment");
 
 const PINATA_KEYVALUE_MAX_COUNT = 9;
 const PINATA_KEYVALUE_MAX_LENGTH = 250;
@@ -92,8 +97,143 @@ const EXTRA_PARAMS_ALLOWED_KEYS = [
 
 const EXTRA_PARAMS_SECURITY_TYPES = new Set(["pin", "password"]);
 
-/** Drop these first when the allow-listed JSON is still over 250 chars. */
-const EXTRA_PARAMS_OPTIONAL_KEYS = ["eventID", "eventPrice", "renewedAt", "price", "duration"];
+/**
+ * Stored key → app field. Dates are epoch seconds. `registeredAt` and `couponId`
+ * are omitted: registration time follows `renewedAt`, and the coupon id lives on
+ * the Mongo redemption keyed by Zelf ID.
+ */
+const EXTRA_PARAMS_SHORT_KEYS = {
+    hasPassword: "hp",
+    origin: "o",
+    renewedAt: "rn",
+    expiresAt: "e",
+    planExpiresAt: "pe",
+    price: "p",
+    duration: "d",
+    type: "ty",
+    plan: "pl",
+    paymentMethod: "pm",
+    eventID: "eid",
+    eventPrice: "ep",
+};
+
+const EXTRA_PARAMS_SHORT_TO_LONG = Object.fromEntries(Object.entries(EXTRA_PARAMS_SHORT_KEYS).map(([longKey, shortKey]) => [shortKey, longKey]));
+
+const EXTRA_PARAMS_DATE_FIELDS = new Set(["renewedAt", "expiresAt", "planExpiresAt"]);
+
+/** Not written to the pin. */
+const EXTRA_PARAMS_OMIT_KEYS = new Set(["registeredAt", "couponId"]);
+
+const EXTRA_PARAMS_COMPACT_ORDER = [
+    "hasPassword",
+    "origin",
+    "renewedAt",
+    "expiresAt",
+    "planExpiresAt",
+    "price",
+    "duration",
+    "type",
+    "plan",
+    "paymentMethod",
+    "v",
+    "st",
+    "eventID",
+    "eventPrice",
+];
+
+/** Drop only these when the compact JSON is still over 250. Plan, lease, and price stay. */
+const EXTRA_PARAMS_OPTIONAL_KEYS = ["eventID", "eventPrice"];
+
+const storedMetadataTooLong = () => {
+    const error = new Error("409:stored_metadata_too_long");
+    error.clientCode = "stored_metadata_too_long";
+    error.clientMessage = "stored_metadata_too_long";
+    error.status = 409;
+    return error;
+};
+
+const toEpochSeconds = (value) => {
+    if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
+    const text = String(value ?? "").trim();
+    if (/^\d{9,12}$/.test(text)) return Number(text);
+    const strict = moment(text, "YYYY-MM-DD HH:mm:ss", true);
+    const parsed = strict.isValid() ? strict : moment(text);
+    if (!parsed.isValid()) return undefined;
+    return parsed.unix();
+};
+
+const fromEpochSeconds = (value) => {
+    if (typeof value === "string" && moment(value, "YYYY-MM-DD HH:mm:ss", true).isValid()) return value;
+    const text = String(value ?? "").trim();
+    if (typeof value !== "number" && !/^\d{9,12}$/.test(text)) return value;
+    const parsed = moment.unix(Number(text));
+    if (!parsed.isValid()) return value;
+    return parsed.format("YYYY-MM-DD HH:mm:ss");
+};
+
+/**
+ * Long field names and `YYYY-MM-DD HH:mm:ss` dates. Accepts a stored short-key
+ * object or a legacy long-key object. Unknown keys are left in place.
+ * @param {Object|string} extraParams
+ * @returns {Object}
+ */
+const expandStoredExtraParams = (extraParams = {}) => {
+    const source =
+        typeof extraParams === "string"
+            ? (() => {
+                  try {
+                      return JSON.parse(extraParams);
+                  } catch (_error) {
+                      return {};
+                  }
+              })()
+            : { ...(extraParams || {}) };
+    if (!source || typeof source !== "object") return {};
+
+    const expanded = {};
+    const keys = [...EXTRA_PARAMS_COMPACT_ORDER, ...Object.keys(source)];
+
+    for (const key of keys) {
+        if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+        const longKey = EXTRA_PARAMS_SHORT_TO_LONG[key] || key;
+        const value = source[key];
+        if (value === undefined || value === null || value === "") continue;
+        if (expanded[longKey] !== undefined && EXTRA_PARAMS_SHORT_TO_LONG[key]) continue;
+        expanded[longKey] = EXTRA_PARAMS_DATE_FIELDS.has(longKey) ? fromEpochSeconds(value) : value;
+    }
+
+    return expanded;
+};
+
+/**
+ * Short keys and epoch-second dates for the pin. Drops `registeredAt` and `couponId`.
+ * @param {Object|string} extraParams
+ * @returns {Object}
+ */
+const compactStoredExtraParams = (extraParams = {}) => {
+    const expanded = expandStoredExtraParams(extraParams);
+    const compact = {};
+
+    for (const longKey of EXTRA_PARAMS_COMPACT_ORDER) {
+        if (EXTRA_PARAMS_OMIT_KEYS.has(longKey)) continue;
+        const value = expanded[longKey];
+        if (value === undefined || value === null || value === "") continue;
+        const stored = EXTRA_PARAMS_DATE_FIELDS.has(longKey) ? toEpochSeconds(value) : value;
+        if (stored === undefined || stored === null || stored === "") continue;
+        const shortKey = EXTRA_PARAMS_SHORT_KEYS[longKey] || longKey;
+        compact[shortKey] = stored;
+    }
+
+    return compact;
+};
+
+const assertPinataKeyvalue = (key, value) => {
+    const serialized = value !== null && typeof value === "object" ? JSON.stringify(value) : String(value);
+    if (String(key).length > PINATA_KEYVALUE_MAX_LENGTH || serialized.length > PINATA_KEYVALUE_MAX_LENGTH) {
+        throw storedMetadataTooLong();
+    }
+    return serialized.length;
+};
 
 const ADDRESS_KEY_ALIASES = {
     eth: "ethAddress",
@@ -334,24 +474,22 @@ const pickAllowedExtraParams = (extraParams = {}) => {
 /**
  * Keep `extraParams` to the known lease schema and under Pinata's 250-char cap.
  * Addresses, referral, session JWTs, and other publicData do not belong here.
+ * Over-limit values throw. They are not dropped and then pinned without a lease.
  * @param {Object} extraParams
  * @returns {Object}
  */
 const cleanExtraParamsForPinata = (extraParams) => {
     if (!extraParams || typeof extraParams !== "object") return extraParams;
 
-    const cleaned = pickAllowedExtraParams(extraParams);
-    const checkLength = (obj) => JSON.stringify(obj).length;
+    const compact = compactStoredExtraParams(pickAllowedExtraParams(extraParams));
 
-    if (checkLength(cleaned) <= PINATA_KEYVALUE_MAX_LENGTH) return cleaned;
-
-    for (const key of EXTRA_PARAMS_OPTIONAL_KEYS) {
-        if (!(key in cleaned)) continue;
-        delete cleaned[key];
-        if (checkLength(cleaned) <= PINATA_KEYVALUE_MAX_LENGTH) return cleaned;
+    for (const longKey of EXTRA_PARAMS_OPTIONAL_KEYS) {
+        if (JSON.stringify(compact).length <= PINATA_KEYVALUE_MAX_LENGTH) break;
+        delete compact[EXTRA_PARAMS_SHORT_KEYS[longKey] || longKey];
     }
 
-    return cleaned;
+    assertPinataKeyvalue("extraParams", compact);
+    return compact;
 };
 
 const serializePinataValue = (value) => (typeof value === "object" ? JSON.stringify(value) : String(value));
@@ -384,7 +522,7 @@ const collectReservedKeyvalues = (reserved = {}) => {
         if (key.length > PINATA_KEYVALUE_MAX_LENGTH) continue;
 
         const serialized = serializePinataValue(value);
-        if (serialized.length > PINATA_KEYVALUE_MAX_LENGTH) continue;
+        assertPinataKeyvalue(key, serialized);
 
         keyvalues[key] = serialized;
     }
@@ -539,7 +677,10 @@ module.exports = {
     buildUpsertPrimarySearchableKeyvalues,
     buildSearchablePinPages,
     buildTopLevelAddressKeyvalues,
+    assertPinataKeyvalue,
     cleanExtraParamsForPinata,
+    compactStoredExtraParams,
+    expandStoredExtraParams,
     collectReservedKeyvalues,
     continuationPinName,
     expandPackedAddresses,

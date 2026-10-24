@@ -12,6 +12,7 @@ const config = require("../Core/config");
 const IPFS = require("../Core/ipfs");
 const { postGraphql } = require("../Repositories/Arweave/modules/arweave-gateway.module");
 const TagAddressIndex = require("../Repositories/Tags/modules/tag-address-index.module");
+const { expandStoredExtraParams } = require("../Repositories/Tags/modules/tags-addresses.module");
 
 const PAGE_SIZE = 100;
 
@@ -42,7 +43,7 @@ const pageQuery = (after) => `{
 const withExtraParams = (publicData) => {
     if (publicData.extraParams) {
         try {
-            Object.assign(publicData, JSON.parse(publicData.extraParams));
+            Object.assign(publicData, expandStoredExtraParams(publicData.extraParams));
         } catch (_error) {
             /* keep the raw tags */
         }

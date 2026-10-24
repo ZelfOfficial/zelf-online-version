@@ -26,6 +26,7 @@ const faceBase64 = fs.readFileSync(selfieImagePath, "base64");
 const uniqueTagName = () => `zid${Math.floor(Math.random() * 100000).toString().padStart(5, "0")}`;
 const shortUniqueTagName = () => `z${Math.floor(Math.random() * 10000).toString().padStart(4, "0")}`;
 const { buildMetadata } = require("../../Repositories/ZelfID/modules/zelf-ids-payment.module");
+const { expandStoredExtraParams } = require("../../Repositories/Tags/modules/tags-addresses.module");
 const { resolvePaidExpiresAt } = require("../../Repositories/ZelfID/modules/zelf-id-plan.module");
 
 describe("Zelf IDs payment API", () => {
@@ -347,7 +348,7 @@ describe("Zelf IDs payment API", () => {
 		expect(moment(stamp).diff(moment(), "year", true)).toBeGreaterThanOrEqual(0.9);
 		expect(moment(stamp).diff(moment(), "year", true)).toBeLessThan(2);
 
-		const extra = JSON.parse(
+		const extra = expandStoredExtraParams(
 			buildMetadata(
 				{ tagName, domain: TEST_DOMAIN, duration: 1, price: 24, plan: "premium" },
 				{ publicData },
@@ -356,7 +357,8 @@ describe("Zelf IDs payment API", () => {
 		);
 		expect(extra.plan).toBe("premium");
 		expect(extra.duration).toBe("1");
-		expect(moment(extra.expiresAt).diff(moment(), "year", true)).toBeLessThan(2);
+		expect(moment(extra.expiresAt).diff(moment(), "year", true)).toBeGreaterThan(50);
+		expect(moment(extra.planExpiresAt).diff(moment(), "year", true)).toBeLessThan(2);
 	});
 
 	it("lease v4migut2* overlay — v3.6 paid evidence adds onto stored expiry", async () => {
@@ -392,7 +394,7 @@ describe("Zelf IDs payment API", () => {
 		const stamp = resolvePaidExpiresAt({ publicData, duration: "1" });
 		expect(moment(stamp).diff(moment(stored, "YYYY-MM-DD HH:mm:ss"), "year", true)).toBeGreaterThanOrEqual(0.9);
 
-		const extra = JSON.parse(
+		const extra = expandStoredExtraParams(
 			buildMetadata(
 				{ tagName, domain: TEST_DOMAIN, duration: 1, price: 24, plan: "premium" },
 				{ publicData },

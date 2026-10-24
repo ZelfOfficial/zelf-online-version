@@ -13,6 +13,7 @@ const {
 const { confirmPayUniqueAddress } = require("../../Tags/modules/my-tags.module");
 const ZelfIdModule = require("./zelf-id.module");
 const ZelfIdsPaymentModule = require("./zelf-ids-payment.module");
+const { expandStoredExtraParams } = require("../../Tags/modules/tags-addresses.module");
 
 const releaseCouponClaim = async (claimed) => {
     if (!claimed?.couponId || !claimed?.redemptionKey) return;
@@ -47,6 +48,20 @@ const claimCouponAfterPayment = async ({
     }
     const Coupons = require("./zelf-ids-coupons.module");
     const bare = `${tagName}`.split(".")[0];
+    ZelfIdsPaymentModule.buildMetadata(
+        {
+            tagName: bare,
+            price: price ?? billableUsdPrice,
+            domain,
+            duration: tokenDecoded.duration || 1,
+            plan: tokenDecoded.plan,
+            domainConfig,
+            paymentMethod: source === "stripe" ? "stripe" : "crypto",
+            basePublicData: tagObject.publicData,
+        },
+        tagObject,
+        domainConfig
+    );
     try {
         const claimed = await Coupons.claimForGrant({
             code: tokenDecoded.coupon.code,
@@ -109,6 +124,21 @@ const confirmCouponFreeCheckout = async (tagName, domain, tokenDecoded, domainCo
 
     let claimed = null;
     try {
+        // Refuse before a redemption when the pin would drop the lease.
+        ZelfIdsPaymentModule.buildMetadata(
+            {
+                tagName: bare,
+                price: 0,
+                domain,
+                duration: tokenDecoded.duration || 1,
+                plan: tokenDecoded.plan,
+                domainConfig,
+                paymentMethod: "coupon",
+                basePublicData: basePublicData || tagObject.publicData,
+            },
+            tagObject,
+            domainConfig
+        );
         claimed = await Coupons.claimForGrant({
             code: tokenDecoded.coupon.code,
             zelfId: `${bare}.${domain}`.toLowerCase(),
@@ -250,6 +280,7 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
                 duration: tokenDecoded.duration || 1,
                 plan: tokenDecoded.plan,
                 domainConfig,
+                paymentMethod: "crypto",
                 paymentCaptured: true,
                 paymentSource: network,
                 paymentNetwork: network,
@@ -319,11 +350,33 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
             tagObject,
             expiresAt: tagObject.publicData?.expiresAt || null,
         };
-        if (tagObject.publicData.paymentMethod === "coupon") {
+        if (tagObject.publicData.paymentMethod === "coupon" || tokenDecoded.coupon?.code) {
             cached.paymentMethod = "coupon";
             cached.couponId = tagObject.publicData.couponId || null;
         }
         return cached;
+    }
+
+    // The pin no longer carries couponId. A replay of the same signed confirm is the
+    // redemption already stored for this name after the quote was signed.
+    if (tokenDecoded.coupon?.valid === true && tokenDecoded.coupon?.code) {
+        const Coupons = require("./zelf-ids-coupons.module");
+        const prior = await Coupons.findGrantForReplay({
+            code: tokenDecoded.coupon.code,
+            zelfId: `${tagName}.${domain}`,
+            initiatedAt: tokenDecoded.initiatedAt,
+        });
+        if (prior) {
+            return {
+                cache: true,
+                confirmed: true,
+                amountReceived: 0,
+                tagObject,
+                expiresAt: tagObject.publicData?.expiresAt || null,
+                paymentMethod: "coupon",
+                couponId: prior.couponId,
+            };
+        }
     }
 
     // Prove control of this name before a coupon redemption or a whitelist grant.
@@ -406,8 +459,8 @@ const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata) 
 
     let expiresAt = null;
     try {
-        if (metadata?.extraParams && typeof metadata.extraParams === "string") {
-            const parsed = JSON.parse(metadata.extraParams);
+        if (metadata?.extraParams) {
+            const parsed = expandStoredExtraParams(metadata.extraParams);
             expiresAt = parsed.expiresAt || null;
             if (parsed.plan) {
                 tagObject.publicData = { ...tagObject.publicData, plan: parsed.plan, expiresAt, eventID: parsed.eventID };
@@ -416,18 +469,19 @@ const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata) 
             if (parsed.planExpiresAt) tagObject.publicData.planExpiresAt = parsed.planExpiresAt;
             else if (parsed.duration === "lifetime") delete tagObject.publicData.planExpiresAt;
             if (parsed.renewedAt) tagObject.publicData.renewedAt = parsed.renewedAt;
-            if (parsed.registeredAt) tagObject.publicData.registeredAt = parsed.registeredAt;
             if (parsed.paymentMethod) tagObject.publicData.paymentMethod = parsed.paymentMethod;
-            if (parsed.couponId) tagObject.publicData.couponId = parsed.couponId;
-            if (parsed.paymentMethod === "coupon" && parsed.couponId) {
-                tagObject.publicData.payment = { method: "coupon", couponId: parsed.couponId };
-            }
+            if (parsed.price === 0 || parsed.price) tagObject.publicData.price = parsed.price;
             if (parsed.revenueCatOriginalTransactionId) {
                 tagObject.publicData.revenueCatOriginalTransactionId = parsed.revenueCatOriginalTransactionId;
             }
         }
     } catch (_error) {
         /* optional */
+    }
+
+    if (params.couponId) {
+        tagObject.publicData.couponId = params.couponId;
+        tagObject.publicData.payment = { method: "coupon", couponId: params.couponId };
     }
 
     const arweaveSkipped = Boolean(tagObject.arweave?.skipped);

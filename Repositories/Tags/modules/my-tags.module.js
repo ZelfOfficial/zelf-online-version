@@ -20,6 +20,7 @@ const AvalancheModule = require("../../Avalanche/modules/avalanche-scrapping.mod
 const BlockDAGModule = require("../../BlockDAG/modules/blockdag.module");
 const { sendCustomEmail } = require("../../../Core/mailgun");
 const { buildMetadata, ensureZelfProofQRCode, storeInIPFS, storeInWalrus, storeInArweave } = require("./tags-payment.module");
+const { expandStoredExtraParams } = require("./tags-addresses.module");
 const { parseTagPayAmount, coerceInitiatedAtUnix, filterSessionInboundTransactions } = require("./tag-pay-session-tx.util");
 const { verifySmartContractPayment, throwPaymentConfirmationTagNotFound } = require("./tag-smart-contract-payment.module");
 
@@ -428,7 +429,7 @@ const addDurationToTag = async (params, tagObject) => {
     let expiresAt = null;
     try {
         if (metadata?.extraParams && typeof metadata.extraParams === "string") {
-            const parsed = JSON.parse(metadata.extraParams);
+            const parsed = expandStoredExtraParams(metadata.extraParams);
             expiresAt = parsed.expiresAt || null;
         }
     } catch (_) {

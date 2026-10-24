@@ -10,7 +10,7 @@ const {
 	fetchTxAsBase64Png,
 } = require("../../Arweave/modules/arweave-gateway.module");
 const { getDomainConfiguration } = require("./domain-registry.module");
-const { expandPackedAddresses } = require("./tags-addresses.module");
+const { expandPackedAddresses, expandStoredExtraParams } = require("./tags-addresses.module");
 
 const owner = config.arwave.env === "development" ? config.arwave.hold.owner : config.arwave.owner;
 
@@ -391,7 +391,7 @@ const formatSearchResults = (searchResults) => {
 		}
 
 		if (formattedResult.publicData.extraParams) {
-			const extraParams = JSON.parse(formattedResult.publicData.extraParams);
+			const extraParams = expandStoredExtraParams(formattedResult.publicData.extraParams);
 			Object.assign(formattedResult.publicData, extraParams);
 			delete formattedResult.publicData.extraParams;
 		}
@@ -424,7 +424,7 @@ const formatCreatedRecord = (record) => {
 	};
 
 	if (record.publicData.extraParams) {
-		const extraParams = JSON.parse(record.publicData.extraParams);
+		const extraParams = expandStoredExtraParams(record.publicData.extraParams);
 
 		Object.assign(formattedRecord.publicData, extraParams);
 

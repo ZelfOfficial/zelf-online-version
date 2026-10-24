@@ -1,3 +1,4 @@
+const moment = require("moment");
 const { addressLookupValues } = require("./ton-address-lookup.util");
 const IPFS = require("../../../Core/ipfs");
 const config = require("../../../Core/config");
@@ -15,6 +16,7 @@ const {
     mergeContinuationAddresses,
     buildUpsertPrimarySearchableKeyvalues,
     expandPackedAddresses,
+    expandStoredExtraParams,
 } = require("./tags-addresses.module");
 
 /**
@@ -133,11 +135,16 @@ const _formatRecord = (item) => {
 	};
 
 	if (formattedResult?.publicData?.extraParams) {
-		const extraParams = JSON.parse(formattedResult.publicData.extraParams);
+		const extraParams = expandStoredExtraParams(formattedResult.publicData.extraParams);
 
 		Object.assign(formattedResult.publicData, extraParams);
 
 		delete formattedResult.publicData.extraParams;
+	}
+
+	if (formattedResult?.publicData && !formattedResult.publicData.registeredAt && formattedResult.date_pinned) {
+		const pinnedAt = moment(formattedResult.date_pinned);
+		if (pinnedAt.isValid()) formattedResult.publicData.registeredAt = pinnedAt.format("YYYY-MM-DD HH:mm:ss");
 	}
 
 	if (formattedResult?.publicData) {

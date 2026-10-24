@@ -337,6 +337,52 @@ describe("Zelf ID plan coupons", () => {
         expect(saved.redemptions[0]).toMatchObject({ zelfId: "couponaa.zelf", plan: "premium", duration: "1y" });
     });
 
+    test("replaying the same coupon confirm returns the grant when the pin has no renewedAt", async () => {
+        const created = await Coupons.createCoupon({ code: "replay1", percentOff: 100, plans: ["premium"], maxRedemptions: 1 }, "admin@zelf.world");
+        const bare = "replaynm";
+        const token = signQuote(bare, created, { initiatedAt: moment().subtract(5, "minutes").unix() });
+        const identity = await allowOwner(bare);
+        const granted = await verifyPaymentConfirmation(bare, "zelf", "FREE", token, identity);
+        expect(granted.confirmed).toBe(true);
+        delete granted.tagObject.publicData.renewedAt;
+        delete granted.tagObject.publicData.registeredAt;
+        delete granted.tagObject.publicData.couponId;
+
+        const replay = await verifyPaymentConfirmation(bare, "zelf", "FREE", token, identity);
+        expect(replay.cache).toBe(true);
+        expect(replay.confirmed).toBe(true);
+        expect(replay.paymentMethod).toBe("coupon");
+        expect(replay.couponId).toBe(created.id);
+
+        const saved = await Coupon.findOne({ code: "REPLAY1" }).lean();
+        expect(saved.redemptions).toHaveLength(1);
+
+        const later = signQuote(bare, created, { initiatedAt: moment().add(1, "minute").unix() });
+        await expect(verifyPaymentConfirmation(bare, "zelf", "FREE", later, identity)).rejects.toMatchObject({
+            clientCode: "max_redemptions",
+        });
+        expect((await Coupon.findOne({ code: "REPLAY1" }).lean()).redemptions).toHaveLength(1);
+    });
+
+    test("an over-limit pin does not redeem the coupon", async () => {
+        const created = await Coupons.createCoupon({ code: "toolong", percentOff: 100, plans: ["premium"], maxRedemptions: 2 }, "admin@zelf.world");
+        const bare = "toolong1";
+        const token = signQuote(bare, created, { initiatedAt: moment().subtract(1, "minute").unix() });
+        const identity = await allowOwner(bare);
+        ZelfIdModule.searchTag.mockImplementation(async () => ({
+            available: false,
+            tagName: bare,
+            tagObject: tagFor(bare, { origin: "x".repeat(300) }),
+            ipfs: [],
+        }));
+
+        await expect(verifyPaymentConfirmation(bare, "zelf", "FREE", token, identity)).rejects.toMatchObject({
+            clientCode: "stored_metadata_too_long",
+        });
+        const saved = await Coupon.findOne({ code: "TOOLONG" }).lean();
+        expect(saved.redemptions).toHaveLength(0);
+    });
+
     test("free checkout requires identity for this Zelf ID and does not redeem when it fails", async () => {
         const created = await Coupons.createCoupon(
             { code: "idcheck", percentOff: 100, plans: ["premium"], maxRedemptions: 5 },
@@ -480,7 +526,7 @@ describe("Zelf ID plan coupons", () => {
         expect(result.confirmed).toBe(true);
         expect(result.tagObject.publicData.plan).toBe("premium");
         expect(result.tagObject.publicData.couponId).toBe(created.id);
-        expect(result.tagObject.publicData.paymentMethod).toBeUndefined();
+        expect(result.tagObject.publicData.paymentMethod).toBe("stripe");
         const saved = await Coupon.findOne({ code: "HALF" }).lean();
         expect(saved.redemptions).toHaveLength(1);
         expect(saved.redemptions[0].duration).toBe("1y");

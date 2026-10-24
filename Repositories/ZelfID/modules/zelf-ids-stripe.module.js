@@ -329,6 +329,21 @@ const confirmPaidStripeSession = async (session) => {
     const durationParam = duration === "lifetime" ? "lifetime" : parseInt(duration, 10);
     const price = Number(amountUsd) || (inspected.amountTotal ? inspected.amountTotal / 100 : 0);
     const metadataCoupon = session.metadata || {};
+    const ZelfIdsPaymentModule = require("./zelf-ids-payment.module");
+    ZelfIdsPaymentModule.buildMetadata(
+        {
+            tagName,
+            price,
+            domain,
+            duration: durationParam,
+            plan,
+            domainConfig,
+            paymentMethod: "stripe",
+            basePublicData: tagObject.publicData,
+        },
+        tagObject,
+        domainConfig
+    );
     let claimed = null;
     if (metadataCoupon.couponId || metadataCoupon.couponCode) {
         const Coupons = require("./zelf-ids-coupons.module");
@@ -384,6 +399,7 @@ const confirmPaidStripeSession = async (session) => {
                 duration: durationParam,
                 plan,
                 domainConfig,
+                paymentMethod: "stripe",
                 paymentCaptured: true,
                 paymentSource: "stripe",
                 sessionId: inspected.sessionId,
@@ -449,6 +465,67 @@ const confirmFromSessionId = async (sessionId) => {
     return confirmPaidStripeSession(session);
 };
 
+/**
+ * The checkout token names this Zelf ID, or the session was verified for it.
+ * @returns {Promise<boolean>}
+ */
+const callerOwnsLease = async ({ authUser, token, metadata }) => {
+    if (!metadata?.tagName || !metadata?.domain) return false;
+    const expected = `${metadata.tagName}.${metadata.domain}`.toLowerCase();
+
+    if (token) {
+        try {
+            const decoded = jwt.verify(token, config.JWT_SECRET);
+            if (!(decoded?.ttl < moment().unix()) && String(decoded?.tagName || "").toLowerCase() === expected) return true;
+        } catch (_error) {
+            /* a missing or foreign token is not ownership */
+        }
+    }
+
+    const { currentVerifiedZelfName } = require("./zelf-id-checkout-identity.module");
+    const verified = await currentVerifiedZelfName(authUser);
+    return Boolean(verified && verified === expected);
+};
+
+const statusOnly = (body) => ({ status: body.status, confirmed: false });
+
+/**
+ * GET poll for a Zelf ID Stripe Checkout session.
+ * A paid session grants the lease, so it requires the same owner check as confirm.
+ * An unpaid or skipped session is read-only: other callers receive status only.
+ */
+const pollStripeSession = async ({ sessionId, authUser, token }) => {
+    const id = String(sessionId || "").trim();
+
+    if (!config.stripe?.secretKey) {
+        throw new Error("500:stripe_not_configured");
+    }
+
+    const session = await retrieveCheckoutSession(getStripeClient(), id);
+    const inspected = inspectStripeLeaseSession(session);
+    const owner = await callerOwnsLease({ authUser, token, metadata: inspected.metadata });
+
+    if (!inspected.ok) {
+        const body = {
+            status: inspected.reason === "unpaid" ? "unpaid" : "skipped",
+            reason: inspected.reason,
+            confirmed: false,
+            ...(inspected.metadata || {}),
+        };
+        return owner ? body : statusOnly(body);
+    }
+
+    if (!owner) {
+        const error = new Error("403:tag_not_owned");
+        error.clientCode = "tag_not_owned";
+        error.clientMessage = "tag_not_owned";
+        error.status = 403;
+        throw error;
+    }
+
+    return confirmPaidStripeSession(session);
+};
+
 module.exports = {
     SOURCE,
     TYPE,
@@ -461,4 +538,6 @@ module.exports = {
     confirmPaidStripeSession,
     confirmFromCheckoutEvent,
     confirmFromSessionId,
+    callerOwnsLease,
+    pollStripeSession,
 };
