@@ -1127,13 +1127,14 @@ const storeInWalrus = async (tagObject, domainConfig, metadata) => {
 
 const storeInIPFS = async (tagObject, domainConfig, metadata) => {
     const fullName = tagObject.fullTagName;
-    buildSearchablePinPages({
+    const pages = buildSearchablePinPages({
         reserved: metadata,
         addresses: tagObject.publicData,
         tagName: fullName,
     });
 
     const previousPrimaryId = tagObject.ipfsId || tagObject.id;
+    const previousCid = tagObject.cid || tagObject.ipfsHash || tagObject.ipfs?.cid || tagObject.ipfs?.ipfsHash;
     const previousSiblingIds = (await TagsIpfsModule.listContinuationSiblingPinIds(fullName)) || [];
 
     tagObject.ipfs = await TagsIpfsModule.insertSearchablePins(
@@ -1147,9 +1148,26 @@ const storeInIPFS = async (tagObject, domainConfig, metadata) => {
         { pro: true },
     );
 
-    const newId = tagObject.ipfs?.id != null ? String(tagObject.ipfs.id) : "";
-    const staleIds = [...new Set([previousPrimaryId, ...previousSiblingIds].filter((id) => id != null && String(id) !== "" && String(id) !== newId).map(String))];
-    if (staleIds.length) await TagsIpfsModule.deleteFiles(staleIds);
+    const uploadedId = tagObject.ipfs?.id != null ? String(tagObject.ipfs.id) : "";
+    const uploadedCid = String(tagObject.ipfs?.cid || tagObject.ipfs?.ipfsHash || tagObject.ipfs?.ipfs_pin_hash || "");
+    const samePin =
+        (previousPrimaryId && uploadedId && String(previousPrimaryId) === uploadedId) ||
+        (previousCid && uploadedCid && String(previousCid) === uploadedCid) ||
+        tagObject.ipfs?.duplicated === true ||
+        tagObject.ipfs?.is_duplicate === true ||
+        tagObject.ipfs?.saved === false;
+    if (samePin) {
+        const pinId = uploadedId || (previousPrimaryId != null ? String(previousPrimaryId) : "");
+        if (pinId) tagObject.ipfs = await TagsIpfsModule.updateSearchablePinKeyvalues(pinId, pages.primary.keyvalues);
+    }
+
+    const keptId = tagObject.ipfs?.id != null ? String(tagObject.ipfs.id) : uploadedId;
+    const staleIds = [
+        ...new Set(
+            [previousPrimaryId, ...previousSiblingIds].filter((id) => id != null && String(id) !== "" && String(id) !== keptId).map(String)
+        ),
+    ];
+    if (!samePin && staleIds.length) await TagsIpfsModule.deleteFiles(staleIds);
 
     const ipfsRec = tagObject.ipfs;
     if (ipfsRec?.id != null && ipfsRec.id !== "") {

@@ -29,6 +29,7 @@ const {
     getZelfIdCheckoutPrice,
     getZelfIdPrice,
     isFreeOriginLease,
+    effectivePlan,
     paymentDurationYears,
     isExpiresAtPassed,
     FREE_EXPIRATION_YEARS,
@@ -78,12 +79,14 @@ const isTagPayReducedFeeClientHeaderHonored = () => {
     return process.env.TAG_PAY_ALLOW_REDUCED_FEE_FROM_CLIENT === "true";
 };
 
-const roundBillableUsdPrice = (usdAmount) => {
-    if (!Number.isFinite(usdAmount)) {
+const roundBillableUsdPrice = (usdAmount, options = {}) => {
+    if (!Number.isFinite(usdAmount) || usdAmount <= 0) {
         return 0;
     }
 
-    return Math.max(Math.round(usdAmount * 100) / 100, 0);
+    const rounded = Math.max(Math.round(usdAmount * 100) / 100, 0);
+    if (options.keepPositive && rounded === 0) return 0.01;
+    return rounded;
 };
 
 const WAD = BigInt(10) ** BigInt(18);
@@ -637,6 +640,15 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
     if (tagData.available) throw new Error("404:tag_not_found");
 
     const tagObject = tagData.tagObject;
+    const currentPlan = effectivePlan(tagObject.publicData, domainConfig);
+    const currentDuration = normalizePaymentDuration(tagObject.publicData.planDuration || tagObject.publicData.duration);
+    if (currentPlan === "unlimited" && currentDuration === "lifetime") {
+        const error = new Error("409:already_lifetime");
+        error.clientCode = "already_lifetime";
+        error.clientMessage = "plan_not_upgradable";
+        error.status = 409;
+        throw error;
+    }
     const requestedPlan = requestOptions.requestedPlan || requestOptions.plan;
     const normalizedDuration = normalizePaymentDuration(duration);
     require("./zelf-id-plan.module").assertPurchaseKeepsPaidValue({
@@ -723,17 +735,17 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
     }
     // A valid coupon replaces referral and dev-fee adjustments and applies after upgrade credit.
     // Credit is subtracted from the license list. A whitelist quote (price 0) stays 0.
-    const billableUsdPrice = roundBillableUsdPrice(
-        couponQuote?.valid
-            ? couponQuote.amountDue
-            : upgradeCreditUsd > 0 && Number(priceDetails.price) !== 0
-              ? devAmountFraction != null
-                  ? priceAfterCredit * devAmountFraction
-                  : priceAfterCredit
-              : devAmountFraction != null
-                ? priceDetails.price * devAmountFraction
-                : priceDetails.price
-    );
+    const rawBillable = couponQuote?.valid
+        ? couponQuote.amountDue
+        : upgradeCreditUsd > 0 && Number(priceDetails.price) !== 0
+          ? devAmountFraction != null
+              ? priceAfterCredit * devAmountFraction
+              : priceAfterCredit
+          : devAmountFraction != null
+            ? priceDetails.price * devAmountFraction
+            : priceDetails.price;
+    const devScaledPositive = devAmountFraction != null && !couponQuote?.valid && Number(rawBillable) > 0;
+    const billableUsdPrice = roundBillableUsdPrice(rawBillable, { keepPositive: devScaledPositive });
     const zelfPayCount = tagData.ipfs?.length || tagData.arweave?.length;
 
     const renewTagPayObject = await _fetchTagPayRecord(
@@ -873,6 +885,7 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         listPrice: listPriceUsd,
         upgradeCredit: upgradeCreditUsd,
         upgradeCreditUsd,
+        upgradeTerm: upgrade.upgradeTerm || null,
         amountDue: roundBillableUsdPrice(billableUsdPrice),
         billableUsdPrice,
         reward: priceDetails.reward,
@@ -1108,13 +1121,14 @@ const ensureZelfProofQRCode = async (tagObject) => {
 const storeInIPFS = async (tagObject, domainConfig, metadata) => {
     const fullName = tagObject.fullTagName;
     // Reject an over-long pin before any existing pin is removed.
-    buildSearchablePinPages({
+    const pages = buildSearchablePinPages({
         reserved: metadata,
         addresses: tagObject.publicData,
         tagName: fullName,
     });
 
     const previousPrimaryId = tagObject.ipfsId || tagObject.id;
+    const previousCid = tagObject.cid || tagObject.ipfsHash || tagObject.ipfs?.cid || tagObject.ipfs?.ipfsHash;
     const previousSiblingIds = (await TagsIpfsModule.listContinuationSiblingPinIds(fullName)) || [];
 
     tagObject.ipfs = await TagsIpfsModule.insertSearchablePins(
@@ -1128,9 +1142,26 @@ const storeInIPFS = async (tagObject, domainConfig, metadata) => {
         { pro: true }
     );
 
-    const newId = tagObject.ipfs?.id != null ? String(tagObject.ipfs.id) : "";
-    const staleIds = [...new Set([previousPrimaryId, ...previousSiblingIds].filter((id) => id != null && String(id) !== "" && String(id) !== newId).map(String))];
-    if (staleIds.length) await TagsIpfsModule.deleteFiles(staleIds);
+    const uploadedId = tagObject.ipfs?.id != null ? String(tagObject.ipfs.id) : "";
+    const uploadedCid = String(tagObject.ipfs?.cid || tagObject.ipfs?.ipfsHash || tagObject.ipfs?.ipfs_pin_hash || "");
+    const samePin =
+        (previousPrimaryId && uploadedId && String(previousPrimaryId) === uploadedId) ||
+        (previousCid && uploadedCid && String(previousCid) === uploadedCid) ||
+        tagObject.ipfs?.duplicated === true ||
+        tagObject.ipfs?.is_duplicate === true ||
+        tagObject.ipfs?.saved === false;
+    if (samePin) {
+        const pinId = uploadedId || (previousPrimaryId != null ? String(previousPrimaryId) : "");
+        if (pinId) tagObject.ipfs = await TagsIpfsModule.updateSearchablePinKeyvalues(pinId, pages.primary.keyvalues);
+    }
+
+    const keptId = tagObject.ipfs?.id != null ? String(tagObject.ipfs.id) : uploadedId;
+    const staleIds = [
+        ...new Set(
+            [previousPrimaryId, ...previousSiblingIds].filter((id) => id != null && String(id) !== "" && String(id) !== keptId).map(String)
+        ),
+    ];
+    if (!samePin && staleIds.length) await TagsIpfsModule.deleteFiles(staleIds);
 
     const ipfsRec = tagObject.ipfs;
     if (ipfsRec?.id != null && ipfsRec.id !== "") {

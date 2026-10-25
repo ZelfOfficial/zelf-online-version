@@ -374,6 +374,47 @@ const insertSearchablePins = async (data, authUser) => {
 	return formatted;
 };
 
+/**
+ * Same QR uploads come back as the existing pin. Keyvalues are unchanged until a metadata update.
+ * @param {Object} inserted
+ * @param {string} [previousId]
+ * @param {string} [previousCid]
+ * @returns {boolean}
+ */
+const isExistingPinUpload = (inserted = {}, previousId, previousCid) => {
+	const newId = inserted.id != null ? String(inserted.id) : "";
+	const newCid = String(inserted.cid || inserted.ipfsHash || inserted.ipfs_pin_hash || "");
+	if (previousId && newId && String(previousId) === newId) return true;
+	if (previousCid && newCid && String(previousCid) === newCid) return true;
+	if (inserted.duplicated === true || inserted.is_duplicate === true || inserted.saved === false) return true;
+	return false;
+};
+
+/**
+ * Write keyvalues onto an existing pin and return the record with those values expanded.
+ * @param {string} id
+ * @param {Object} keyvalues
+ */
+const updateSearchablePinKeyvalues = async (id, keyvalues) => {
+	await IPFS.updateFileKeyvalues(id, keyvalues);
+	let row = null;
+	try {
+		row = await IPFS.getFileById(id);
+	} catch (_error) {
+		row = null;
+	}
+	const readExtra = row?.publicData?.extraParams || row?.metadata?.keyvalues?.extraParams || row?.keyvalues?.extraParams;
+	const source = readExtra ? row : { ...(row || {}), id, metadata: { keyvalues }, keyvalues };
+	const formatted = _formatRecord(source);
+	formatted.id = formatted.id || id;
+	if (keyvalues?.extraParams) {
+		const parsed = expandStoredExtraParams(keyvalues.extraParams);
+		formatted.publicData = { ...(formatted.publicData || {}), ...parsed };
+		if (parsed.plan) formatted.publicData.plan = parsed.plan;
+	}
+	return formatted;
+};
+
 const _findContinuationPinRow = async (page) => {
 	const byName = await IPFS.filter("name", page.name);
 	if (byName?.length) {
@@ -892,6 +933,8 @@ module.exports = {
 	show,
 	insert,
 	insertSearchablePins,
+	isExistingPinUpload,
+	updateSearchablePinKeyvalues,
 	upsertSearchablePins,
 	tagRegistration,
 	unPinFiles,

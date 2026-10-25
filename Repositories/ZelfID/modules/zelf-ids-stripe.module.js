@@ -55,7 +55,7 @@ const unitAmountForCharge = (amountUsd, { coupon = false } = {}) => {
     return Math.max(cents, STRIPE_MINIMUM_CENTS);
 };
 
-const buildLeaseStripeMetadata = ({ tagName, domain, duration, plan, amountUsd, couponId, couponCode, upgradeCreditUsd }) => {
+const buildLeaseStripeMetadata = ({ tagName, domain, duration, plan, amountUsd, couponId, couponCode, upgradeCreditUsd, upgradeTerm }) => {
     const metadata = {
         source: SOURCE,
         type: TYPE,
@@ -68,6 +68,12 @@ const buildLeaseStripeMetadata = ({ tagName, domain, duration, plan, amountUsd, 
     if (couponId) metadata.couponId = String(couponId);
     if (couponCode) metadata.couponCode = String(couponCode);
     if (upgradeCreditUsd != null && upgradeCreditUsd !== "") metadata.upgradeCreditUsd = String(upgradeCreditUsd);
+    if (upgradeTerm) {
+        if (upgradeTerm.id) metadata.upgradeTermId = String(upgradeTerm.id);
+        if (upgradeTerm.planExpiresAt) metadata.upgradeTermExpiresAt = String(upgradeTerm.planExpiresAt);
+        if (upgradeTerm.amountPaidUsd != null && upgradeTerm.amountPaidUsd !== "") metadata.upgradeTermPaid = String(upgradeTerm.amountPaidUsd);
+        if (upgradeTerm.duration) metadata.upgradeTermDuration = String(upgradeTerm.duration);
+    }
     return metadata;
 };
 
@@ -89,6 +95,14 @@ const parseLeaseStripeMetadata = (metadata = {}) => {
     const parsed = { tagName, domain, duration, plan, amountUsd };
     if (metadata.upgradeCreditUsd != null && metadata.upgradeCreditUsd !== "") {
         parsed.upgradeCreditUsd = Number(metadata.upgradeCreditUsd);
+    }
+    if (metadata.upgradeTermId || metadata.upgradeTermExpiresAt || metadata.upgradeTermPaid || metadata.upgradeTermDuration) {
+        parsed.upgradeTerm = {
+            id: metadata.upgradeTermId || null,
+            planExpiresAt: metadata.upgradeTermExpiresAt || null,
+            amountPaidUsd: metadata.upgradeTermPaid != null && metadata.upgradeTermPaid !== "" ? Number(metadata.upgradeTermPaid) : null,
+            duration: metadata.upgradeTermDuration || null,
+        };
     }
     return parsed;
 };
@@ -200,10 +214,20 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
         });
     }
 
-    const { assertSignedUpgradeCredit, priceAfterUpgradeCredit } = require("./zelf-id-upgrade-credit.module");
+    const STRIPE_MIN_SESSION_SECONDS = 30 * 60;
+    const quoteRemaining = Number(tokenDecoded.ttl) - moment().unix();
+    if (!(quoteRemaining >= STRIPE_MIN_SESSION_SECONDS)) {
+        const error = new Error("409:quote_expiring");
+        error.clientCode = "quote_expiring";
+        error.clientMessage = "quote_expiring";
+        error.status = 409;
+        throw error;
+    }
+
+    const { assertQuoteUpgradeTerm, priceAfterUpgradeCredit } = require("./zelf-id-upgrade-credit.module");
     const freshCredit =
         !tagData.available && tagData.tagObject?.publicData
-            ? await assertSignedUpgradeCredit({
+            ? await assertQuoteUpgradeTerm({
                   tokenDecoded,
                   publicData: tagData.tagObject.publicData,
                   tagName: localName,
@@ -211,7 +235,7 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
                   domainConfig: licenseConfig,
                   targetPlan: resolvedPlan,
               })
-            : { upgradeCreditUsd: 0 };
+            : { upgradeCreditUsd: Number(tokenDecoded.upgradeCreditUsd || 0), upgradeTerm: tokenDecoded.upgradeTerm || null };
 
     const Coupons = require("./zelf-ids-coupons.module");
     const list = Coupons.licenseListPrice({
@@ -263,6 +287,7 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
         couponId,
         couponCode,
         upgradeCreditUsd: freshCredit.upgradeCreditUsd,
+        upgradeTerm: freshCredit.upgradeTerm,
     });
     const query = new URLSearchParams({
         tagname: localName,
@@ -294,6 +319,7 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
         ],
         success_url: `${origin}${prefix}/pricing?${query}&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}${prefix}/pricing?${query}`,
+        expires_at: Number(tokenDecoded.ttl),
         metadata,
         payment_intent_data: {
             metadata,
@@ -352,15 +378,16 @@ const confirmPaidStripeSession = async (session) => {
         };
     }
 
-    const { assertSignedUpgradeCredit, priceAfterUpgradeCredit } = require("./zelf-id-upgrade-credit.module");
+    const { assertQuoteUpgradeTerm, priceAfterUpgradeCredit } = require("./zelf-id-upgrade-credit.module");
     let freshCredit;
     try {
-        freshCredit = await assertSignedUpgradeCredit({
+        freshCredit = await assertQuoteUpgradeTerm({
             tokenDecoded: {
                 tagName: `${tagName}.${domain}`,
                 duration,
                 plan,
                 upgradeCreditUsd: inspected.metadata.upgradeCreditUsd,
+                upgradeTerm: inspected.metadata.upgradeTerm,
             },
             publicData: tagObject.publicData,
             tagName,

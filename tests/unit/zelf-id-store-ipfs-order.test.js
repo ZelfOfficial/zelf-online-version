@@ -5,6 +5,7 @@ jest.mock("../../Repositories/Tags/modules/tags-ipfs.module", () => ({
     unpinContinuationSiblings: jest.fn(async () => null),
     deleteFiles: jest.fn(async () => null),
     insertSearchablePins: jest.fn(async () => ({ id: "new-pin" })),
+    updateSearchablePinKeyvalues: jest.fn(async (id, keyvalues) => ({ id, keyvalues, publicData: { plan: "premium" } })),
     listContinuationSiblingPinIds: jest.fn(async () => ["old-sibling"]),
 }));
 
@@ -69,7 +70,39 @@ describe("storeInIPFS pin order", () => {
 
         expect(order).toEqual(["list", "insert", "delete"]);
         expect(TagsIpfsModule.unpinContinuationSiblings).not.toHaveBeenCalled();
+        expect(TagsIpfsModule.updateSearchablePinKeyvalues).not.toHaveBeenCalled();
         expect(TagsIpfsModule.deleteFiles).toHaveBeenCalledWith(["old-pin", "old-sibling"]);
         expect(record.ipfsId).toBe("new-pin");
+    });
+
+    test("a duplicate upload updates keyvalues on the existing pin", async () => {
+        TagsIpfsModule.insertSearchablePins.mockResolvedValue({
+            id: "old-pin",
+            cid: "cid-old",
+            duplicated: true,
+            saved: false,
+            publicData: { plan: "free" },
+        });
+        TagsIpfsModule.updateSearchablePinKeyvalues.mockImplementation(async (id, keyvalues) => ({
+            id,
+            cid: "cid-old",
+            publicData: { plan: "premium", extraParams: keyvalues.extraParams },
+        }));
+
+        const record = tag();
+        const stored = await storeInIPFS(
+            record,
+            {},
+            {
+                tagName: "alice.zelf",
+                domain: "zelf",
+                extraParams: JSON.stringify({ plan: "premium", duration: "1", expiresAt: "2126-01-01 00:00:00" }),
+            }
+        );
+
+        expect(TagsIpfsModule.updateSearchablePinKeyvalues).toHaveBeenCalledWith("old-pin", expect.objectContaining({ extraParams: expect.any(String) }));
+        expect(TagsIpfsModule.deleteFiles).not.toHaveBeenCalled();
+        expect(stored.publicData.plan).toBe("premium");
+        expect(record.ipfsId).toBe("old-pin");
     });
 });

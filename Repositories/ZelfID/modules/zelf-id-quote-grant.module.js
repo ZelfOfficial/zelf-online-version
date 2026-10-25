@@ -102,6 +102,13 @@ const markDoneFromEvidence = async (existing, evidence) => {
  * landed on the plan term or a redemption, the row is marked done instead.
  * @returns {Promise<{ state: "claimed"|"done", grant: Object }>}
  */
+const findDoneQuoteGrant = async ({ zelfName, domain, token }) => {
+    if (!mongoReady() || !token) return null;
+    const name = normalizedName(zelfName, domain);
+    if (!name) return null;
+    return QuoteGrant.findOne({ zelfName: name, quoteHash: quoteHash(token), status: "done" }).lean();
+};
+
 const claimQuoteGrant = async ({ zelfName, domain, token, source }) => {
     requireStore(token);
     await ensureIndexes();
@@ -176,6 +183,7 @@ module.exports = {
     PENDING_LEASE_MS,
     claimQuoteGrant,
     completeQuoteGrant,
+    findDoneQuoteGrant,
     findGrantEvidence,
     quoteHash,
     releaseQuoteGrant,

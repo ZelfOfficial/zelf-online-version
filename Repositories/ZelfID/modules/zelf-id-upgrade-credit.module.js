@@ -126,8 +126,14 @@ const computeUpgradeCredit = async ({ publicData = {}, tagName, domain, targetPl
             }
         }
     }
+    const upgradeTerm = {
+        id: term?._id ? String(term._id) : null,
+        planExpiresAt: planExpiresAt || null,
+        amountPaidUsd: paid.amountPaidUsd,
+        duration: duration ? String(duration) : null,
+    };
     if (!duration || normalizePaymentDuration(duration) === "lifetime" || !planExpiresAt) {
-        return { ...none, amountPaidUsd: paid.amountPaidUsd };
+        return { ...none, amountPaidUsd: paid.amountPaidUsd, upgradeTerm };
     }
 
     const upgradeCreditUsd = creditFromPaid({
@@ -136,7 +142,63 @@ const computeUpgradeCredit = async ({ publicData = {}, tagName, domain, targetPl
         duration,
         listPriceUsd: list,
     });
-    return { upgradeCreditUsd, amountPaidUsd: paid.amountPaidUsd, listPriceUsd: list };
+    return { upgradeCreditUsd, amountPaidUsd: paid.amountPaidUsd, listPriceUsd: list, upgradeTerm };
+};
+
+const sameUpgradeTerm = (signed = {}, current = {}) => {
+    const signedPaid = signed.amountPaidUsd == null ? null : Number(signed.amountPaidUsd);
+    const currentPaid = current.amountPaidUsd == null ? null : Number(current.amountPaidUsd);
+    const paidMatches = signedPaid == null || currentPaid == null || Math.abs(signedPaid - currentPaid) < 0.001;
+    return (
+        String(signed.id || "") === String(current.id || "") &&
+        String(signed.planExpiresAt || "") === String(current.planExpiresAt || "") &&
+        String(signed.duration || "") === String(current.duration || "") &&
+        paidMatches
+    );
+};
+
+const lockedCreditUsd = (tokenDecoded = {}) => {
+    if (tokenDecoded.upgradeCreditUsd == null || tokenDecoded.upgradeCreditUsd === "") return 0;
+    const locked = Number(tokenDecoded.upgradeCreditUsd);
+    return Number.isFinite(locked) ? locked : 0;
+};
+
+const termWasQuoted = (term) => Boolean(term && (term.id || term.planExpiresAt || term.duration || term.amountPaidUsd != null));
+
+/**
+ * The signed quote locks the credit for its TTL, the same way it locks a crypto price.
+ * Confirm does not recompute that credit from the clock. It rejects when the plan term
+ * the credit was based on is no longer the current term.
+ */
+const assertQuoteUpgradeTerm = async ({ tokenDecoded = {}, publicData, tagName, domain, domainConfig, targetPlan }) => {
+    const locked = lockedCreditUsd(tokenDecoded);
+    const signedTerm = tokenDecoded.upgradeTerm || null;
+    if (!termWasQuoted(signedTerm)) {
+        return { upgradeCreditUsd: locked, upgradeTerm: signedTerm };
+    }
+    const { getZelfIdCheckoutPrice } = require("./zelf-id-plan.module");
+    const priced = getZelfIdCheckoutPrice({
+        tagName: tagName || tokenDecoded.tagName,
+        duration: tokenDecoded.duration || "1",
+        referralTagName: "",
+        domainConfig,
+        requestedPlan: targetPlan || tokenDecoded.plan,
+    });
+    const fresh = await computeUpgradeCredit({
+        publicData,
+        tagName: tagName || tokenDecoded.tagName,
+        domain,
+        targetPlan: targetPlan || tokenDecoded.plan,
+        listPriceUsd: priced.priceWithoutDiscount ?? priced.price,
+    });
+    if (!fresh.upgradeTerm || !sameUpgradeTerm(signedTerm, fresh.upgradeTerm)) {
+        const error = new Error("409:upgrade_term_changed");
+        error.clientCode = "upgrade_term_changed";
+        error.clientMessage = "upgrade_term_changed";
+        error.status = 409;
+        throw error;
+    }
+    return { upgradeCreditUsd: locked, upgradeTerm: signedTerm };
 };
 
 const assertSignedUpgradeCredit = async ({ tokenDecoded = {}, publicData, tagName, domain, domainConfig, targetPlan }) => {
@@ -175,4 +237,6 @@ module.exports = {
     creditFromPaid,
     floorCents,
     priceAfterUpgradeCredit,
+    assertQuoteUpgradeTerm,
+    sameUpgradeTerm,
 };

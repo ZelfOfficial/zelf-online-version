@@ -211,6 +211,8 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
 
     if (tokenDecoded.tagName !== `${tagName}.${domain}`) throw new Error("403:tag_not_owned");
 
+    if (tokenDecoded.ttl < Math.floor(Date.now() / 1000)) throw new Error("409:token_expired");
+
     if (network === "FREE") return confirmFreeCheckout(tagName, domain, tokenDecoded, domainConfig, identity, token);
 
     if (network === "AVAX") {
@@ -222,6 +224,20 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
     if (tagData.available) throwPaymentConfirmationTagNotFound(tagName, domain);
 
     const tagObject = tagData.tagObject;
+    const { findDoneQuoteGrant } = require("./zelf-id-quote-grant.module");
+    const { assertQuoteUpgradeTerm, priceAfterUpgradeCredit } = require("./zelf-id-upgrade-credit.module");
+    const doneGrant = await findDoneQuoteGrant({ zelfName: `${tagName}.${domain}`, token });
+    let lockedCredit = { upgradeCreditUsd: Number(tokenDecoded.upgradeCreditUsd || 0) };
+    if (!doneGrant) {
+        lockedCredit = await assertQuoteUpgradeTerm({
+            tokenDecoded,
+            publicData: tagObject.publicData,
+            tagName,
+            domain,
+            domainConfig,
+            targetPlan: tokenDecoded.plan,
+        });
+    }
     const amountToPay = tokenDecoded.prices[network]?.amountToSend;
     const initiatedAtUnix = coerceInitiatedAtUnix(tokenDecoded.initiatedAt);
 
@@ -264,21 +280,7 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
         };
     }
 
-    const { assertSignedUpgradeCredit, priceAfterUpgradeCredit } = require("./zelf-id-upgrade-credit.module");
-    let freshCredit;
-    try {
-        freshCredit = await assertSignedUpgradeCredit({
-            tokenDecoded,
-            publicData: tagObject.publicData,
-            tagName,
-            domain,
-            domainConfig,
-            targetPlan: tokenDecoded.plan,
-        });
-    } catch (error) {
-        await releaseQuoteGrant(quote);
-        throw error;
-    }
+    const freshCredit = lockedCredit;
     let listPrice;
     if (tokenDecoded?.coupon?.valid === true && tokenDecoded.coupon.code) {
         const CouponsForCredit = require("./zelf-ids-coupons.module");
@@ -429,10 +431,10 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
         };
     }
 
-    const { assertSignedUpgradeCredit } = require("./zelf-id-upgrade-credit.module");
+    const { assertQuoteUpgradeTerm } = require("./zelf-id-upgrade-credit.module");
     let freshCredit;
     try {
-        freshCredit = await assertSignedUpgradeCredit({
+        freshCredit = await assertQuoteUpgradeTerm({
             tokenDecoded,
             publicData: basePublicData,
             tagName,

@@ -1,6 +1,7 @@
 const { errorHandler } = require("../../Core/http-handler");
 const { mapGrantError } = require("../../Repositories/ZelfID/modules/zelf-id-grant-error.module");
 const { restoredDurationForPlanTerm } = require("../../Repositories/ZelfID/modules/zelf-id-plan-term-duration");
+const { assertAllowedDatabase, summarizeRepair } = require("../../scripts/repair-zelf-id-plan-term-duration");
 const moment = require("moment");
 
 describe("grant error responses", () => {
@@ -40,6 +41,9 @@ describe("plan term duration repair", () => {
         expect(restoredDurationForPlanTerm({ duration: "", planExpiresAt, createdAt })).toBe("1");
         expect(restoredDurationForPlanTerm({ duration: "1", planExpiresAt, createdAt })).toBeNull();
         expect(restoredDurationForPlanTerm({ duration: null, planExpiresAt: null, createdAt })).toBeNull();
+        const renewed = { duration: null, planExpiresAt, createdAt, updatedAt: new Date("2026-06-01T00:00:00.000Z") };
+        expect(restoredDurationForPlanTerm(renewed)).toBeNull();
+        expect(restoredDurationForPlanTerm({ ...renewed, termStartedAt: createdAt })).toBe("1");
         expect(
             restoredDurationForPlanTerm({
                 duration: null,
@@ -47,5 +51,21 @@ describe("plan term duration repair", () => {
                 createdAt,
             })
         ).toBe("5");
+    });
+
+    test("the repair script allowlist refuses an unnamed database and labels a dry run wouldRestore", () => {
+        expect(assertAllowedDatabase({ uri: "mongodb://127.0.0.1:27017/wallet_development" })).toBe("wallet_development");
+        expect(assertAllowedDatabase({ uri: "mongodb+srv://user:pw@host/other_db", targetDb: "other_db" })).toBe("other_db");
+        expect(() => assertAllowedDatabase({ uri: "mongodb+srv://user:pw@host/zelf_prod" })).toThrow(/Refusing database zelf_prod/);
+        expect(() => assertAllowedDatabase({ uri: "mongodb://127.0.0.1:27017/wallet_development", targetDb: "other_db" })).toThrow(
+            /does not match/
+        );
+        expect(summarizeRepair({ apply: false, scanned: 4, changes: [{ zelfName: "a.zelf" }] })).toEqual({
+            apply: false,
+            scanned: 4,
+            wouldRestore: 1,
+            changes: [{ zelfName: "a.zelf" }],
+        });
+        expect(summarizeRepair({ apply: true, scanned: 4, changes: [{ zelfName: "a.zelf" }] }).restored).toBe(1);
     });
 });

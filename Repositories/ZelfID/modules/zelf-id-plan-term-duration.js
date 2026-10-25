@@ -8,14 +8,34 @@ const { parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 const PAID_TERM_YEARS = [1, 2, 3, 5];
 const HOUR_TOLERANCE = 48;
 
-const restoredDurationForPlanTerm = (row = {}) => {
+const renewalAmbiguous = (row = {}, renewalCount = 0) => {
+    if (renewalCount > 1) return true;
+    if (!row.createdAt || !row.updatedAt) return false;
+    return moment.utc(row.updatedAt).diff(moment.utc(row.createdAt), "hours", true) > HOUR_TOLERANCE;
+};
+
+/**
+ * Stored term start, or `createdAt` only when the row was not renewed.
+ * @returns {import("moment").Moment|null}
+ */
+const termStart = (row = {}, renewalCount = 0) => {
+    if (row.termStartedAt) {
+        const stored = moment.utc(row.termStartedAt);
+        return stored.isValid() ? stored : null;
+    }
+    if (renewalAmbiguous(row, renewalCount) || !row.createdAt) return null;
+    const created = moment.utc(row.createdAt);
+    return created.isValid() ? created : null;
+};
+
+const restoredDurationForPlanTerm = (row = {}, renewalCount = 0) => {
     const current = row.duration == null ? "" : String(row.duration).trim();
     if (current) return null;
-    if (!row.planExpiresAt || !row.createdAt) return null;
+    if (!row.planExpiresAt) return null;
 
     const end = parseLeaseDate(row.planExpiresAt);
-    const start = moment.utc(row.createdAt);
-    if (!end.isValid() || !start.isValid() || !end.isAfter(start)) return null;
+    const start = termStart(row, renewalCount);
+    if (!end.isValid() || !start || !end.isAfter(start)) return null;
 
     for (const years of PAID_TERM_YEARS) {
         const expected = start.clone().add(years, "year");
@@ -28,5 +48,7 @@ const restoredDurationForPlanTerm = (row = {}) => {
 module.exports = {
     HOUR_TOLERANCE,
     PAID_TERM_YEARS,
+    renewalAmbiguous,
     restoredDurationForPlanTerm,
+    termStart,
 };

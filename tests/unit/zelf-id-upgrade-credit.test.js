@@ -78,6 +78,8 @@ const ZelfIdModule = require("../../Repositories/ZelfID/modules/zelf-id.module")
 const config = require("../../Core/config");
 const Session = require("../../Repositories/Session/models/session.model");
 const Stripe = require("stripe");
+const jwt = require("jsonwebtoken");
+const { confirmPayUniqueAddress } = require("../../Repositories/Tags/modules/my-tags.module");
 
 const licenseData = () => {
     const base = zelfPlanLicenseData();
@@ -383,14 +385,148 @@ describe("Premium to Unlimited upgrade credit", () => {
         const identity = await allowOwner(bare);
 
         await expect(verifyPaymentConfirmation(bare, "zelf", "FREE", quote.signedDataPrice, identity)).rejects.toMatchObject({
-            message: "409:upgrade_credit_changed",
-            clientCode: "upgrade_credit_changed",
+            message: "409:upgrade_term_changed",
+            clientCode: "upgrade_term_changed",
         });
 
         const saved = await Coupon.findOne({ code: created.code }).lean();
         expect(saved.redemptions).toHaveLength(0);
         const pending = await QuoteGrant.findOne({ zelfName: `${bare}.zelf`, status: "pending" }).lean();
         expect(pending).toBeNull();
+    });
+
+    test("a valid quote keeps its locked credit when the clock would move the cent", async () => {
+        const bare = "lockedcr";
+        const planExpiresAt = halfwayFrom(moment.utc());
+        tags.set(bare, tagFor(bare, { plan: "premium", planExpiresAt, planDuration: "1" }));
+        await PlanTerm.create({
+            zelfName: `${bare}.zelf`,
+            plan: "premium",
+            planExpiresAt,
+            paymentMethod: "stripe",
+            duration: "1",
+            amountPaidUsd: 29,
+        });
+        await Coupons.createCoupon({ code: "lock100", percentOff: 100, plans: ["unlimited"], maxRedemptions: 3 }, "admin@zelf.world");
+        const quote = await getPaymentOptions(bare, "zelf", "1", {}, { requestedPlan: "unlimited", coupon: "lock100" });
+        const decoded = jwt.verify(quote.signedDataPrice, config.JWT_SECRET);
+        decoded.upgradeCreditUsd = 1;
+        decoded.upgradeCredit = 1;
+        const resigned = jwt.sign(decoded, config.JWT_SECRET);
+        const identity = await allowOwner(bare);
+        const granted = await verifyPaymentConfirmation(bare, "zelf", "FREE", resigned, identity);
+        expect(granted.confirmed).toBe(true);
+        expect(granted.paymentMethod).toBe("coupon");
+    });
+
+    test("an expired quote is rejected", async () => {
+        const bare = "expiredq";
+        tags.set(bare, tagFor(bare));
+        const token = jwt.sign(
+            {
+                tagName: `${bare}.zelf`,
+                tagPayName: `${bare}.zelfpay`,
+                plan: "premium",
+                duration: 1,
+                ttl: moment().subtract(1, "minute").unix(),
+                freeCheckout: true,
+                amountDue: 0,
+                billableUsdPrice: 0,
+            },
+            config.JWT_SECRET
+        );
+        await expect(verifyPaymentConfirmation(bare, "zelf", "FREE", token, {})).rejects.toThrow(/token_expired/);
+    });
+
+    test("a different plan term is rejected before crypto payment", async () => {
+        const bare = "termswap";
+        const planExpiresAt = halfwayFrom(moment.utc());
+        tags.set(bare, tagFor(bare, { plan: "premium", planExpiresAt, planDuration: "1" }));
+        await PlanTerm.create({
+            zelfName: `${bare}.zelf`,
+            plan: "premium",
+            planExpiresAt,
+            paymentMethod: "stripe",
+            duration: "1",
+            amountPaidUsd: 29,
+        });
+        const quote = await getPaymentOptions(bare, "zelf", "1", {}, { requestedPlan: "unlimited" });
+        const lapsed = moment.utc().subtract(2, "day").format("YYYY-MM-DD HH:mm:ss");
+        tags.get(bare).publicData.planExpiresAt = lapsed;
+        await PlanTerm.updateOne({ zelfName: `${bare}.zelf` }, { $set: { planExpiresAt: lapsed } });
+        confirmPayUniqueAddress.mockClear();
+
+        await expect(verifyPaymentConfirmation(bare, "zelf", "ETH", quote.signedDataPrice, {})).rejects.toMatchObject({
+            clientCode: "upgrade_term_changed",
+        });
+        expect(confirmPayUniqueAddress).not.toHaveBeenCalled();
+    });
+
+    test("stripe checkout expires with the quote and refuses one that is almost over", async () => {
+        const bare = "stripewin";
+        const planExpiresAt = halfwayFrom(moment.utc());
+        tags.set(bare, tagFor(bare, { plan: "premium", planExpiresAt, planDuration: "1" }));
+        await PlanTerm.create({
+            zelfName: `${bare}.zelf`,
+            plan: "premium",
+            planExpiresAt,
+            paymentMethod: "stripe",
+            duration: "1",
+            amountPaidUsd: 29,
+        });
+        const quote = await getPaymentOptions(bare, "zelf", "1", {}, { requestedPlan: "unlimited" });
+        const decoded = jwt.verify(quote.signedDataPrice, config.JWT_SECRET);
+        Stripe.__create.mockClear();
+        await createStripeCheckout({
+            tagName: bare,
+            domain: "zelf",
+            duration: "1",
+            plan: "unlimited",
+            token: quote.signedDataPrice,
+        });
+        expect(Stripe.__create.mock.calls[0][0].expires_at).toBe(decoded.ttl);
+
+        decoded.ttl = moment().add(10, "minutes").unix();
+        await expect(
+            createStripeCheckout({
+                tagName: bare,
+                domain: "zelf",
+                duration: "1",
+                plan: "unlimited",
+                token: jwt.sign(decoded, config.JWT_SECRET),
+            })
+        ).rejects.toMatchObject({ clientCode: "quote_expiring" });
+    });
+
+    test("an unlimited lifetime name is not quoted", async () => {
+        const bare = "lifename";
+        tags.set(bare, tagFor(bare, { plan: "unlimited", duration: "lifetime", planDuration: "lifetime" }));
+        await expect(getPaymentOptions(bare, "zelf", "1", {}, { requestedPlan: "unlimited" })).rejects.toMatchObject({
+            clientCode: "already_lifetime",
+            clientMessage: "plan_not_upgradable",
+        });
+    });
+
+    test("a dev fee fraction does not turn a positive total into a free checkout", async () => {
+        const bare = "devfeeaa";
+        tags.set(bare, tagFor(bare));
+        const previousEnv = config.env;
+        const previousFraction = process.env.TAG_PAY_DEV_AMOUNT_FRACTION;
+        const previousAuto = process.env.TAG_PAY_DEV_AUTO_REDUCED_FEE;
+        config.env = "development";
+        process.env.TAG_PAY_DEV_AMOUNT_FRACTION = "0.00001";
+        process.env.TAG_PAY_DEV_AUTO_REDUCED_FEE = "true";
+        try {
+            const quote = await getPaymentOptions(bare, "zelf", "1", {}, { requestedPlan: "premium" });
+            expect(quote.billableUsdPrice).toBeGreaterThanOrEqual(0.01);
+            expect(quote.freeCheckout).toBe(false);
+        } finally {
+            config.env = previousEnv;
+            if (previousFraction === undefined) delete process.env.TAG_PAY_DEV_AMOUNT_FRACTION;
+            else process.env.TAG_PAY_DEV_AMOUNT_FRACTION = previousFraction;
+            if (previousAuto === undefined) delete process.env.TAG_PAY_DEV_AUTO_REDUCED_FEE;
+            else process.env.TAG_PAY_DEV_AUTO_REDUCED_FEE = previousAuto;
+        }
     });
 
     test("a small positive total after credit is rejected by Stripe and still quoted for crypto", async () => {
