@@ -12,6 +12,7 @@ const ZelfProofModule = require("../../ZelfProof/modules/zelf-proof.module");
 const { resolveEncryptVersion } = require("../modules/tags-addresses.module");
 const { hasMissingOwner, applyPreviewPublicData } = require("../../Tags/modules/tag-preview-public-data");
 const TagWalletBalancesModule = require("../modules/tag-wallet-balances.module");
+const { runMonthlyAccess } = require("../../ZelfID/modules/zelf-id-monthly-access.module");
 
 /**
  * Keep full pin name (e.g. user.zelfpay) for IPFS lookup; middleware only supplies registry TLD + local name.
@@ -316,11 +317,11 @@ const decryptTag = async (ctx) => {
             domain: extractedDomain,
         };
 
-        const data = await Module.decryptTag(requestData, ctx.state.user);
-
-        ZaiIdentity.attachIdentityToken(data, requestData.domain);
-
-        ctx.body = { data };
+        await runMonthlyAccess(ctx, "tags-decrypt", async () => {
+            const data = await Module.decryptTag(requestData, ctx.state.user);
+            ZaiIdentity.attachIdentityToken(data, requestData.domain);
+            return data;
+        });
     } catch (error) {
         const _exception = errorHandler(error, ctx);
 

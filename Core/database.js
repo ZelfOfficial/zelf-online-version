@@ -27,6 +27,9 @@ const initMongoDB = () => {
         require("../Repositories/ZelfID/modules/zelf-ids-revenue-cat-events.module")
             .ensureIndexes()
             .catch((error) => console.error("RevenueCatProcessedEvent index creation failed:", error?.message || error));
+        require("../Repositories/ZelfID/modules/zelf-id-monthly-access.module")
+            .ensureIndexes()
+            .catch((error) => console.error("Monthly access index creation failed:", error?.message || error));
     });
 
     return MongoConnection;

@@ -30,6 +30,19 @@ const purchaseSchema = new Schema(
 );
 
 /**
+ * One monthly access debit. The period key keeps a second confirm from reserving the same ZNS.
+ */
+const monthlyChargeSchema = new Schema(
+    {
+        periodKey: { type: String, required: true },
+        amountZns: { type: Number, required: true },
+        quoteId: { type: String, required: true },
+        chargedAt: { type: Date, required: true },
+    },
+    { _id: false },
+);
+
+/**
  * Token holds and extra slots for one Zelf identity (`tag.domain`).
  * `spent` is the ZNS already reserved for slots. Spendable balance is the on-chain
  * ZNS balance minus `spent`. The document is updated with a single conditional write
@@ -42,6 +55,7 @@ const zelfKeySlotAccountSchema = new Schema({
     spent: { type: Number, required: true, default: 0, min: 0 },
     slots: { type: [slotSchema], default: [] },
     purchases: { type: [purchaseSchema], default: [] },
+    monthlyCharges: { type: [monthlyChargeSchema], default: [] },
 });
 
 addBasicPlugins(zelfKeySlotAccountSchema);
