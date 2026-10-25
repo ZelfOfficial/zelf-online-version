@@ -1,7 +1,7 @@
 const { errorHandler } = require("../../Core/http-handler");
 const { mapGrantError } = require("../../Repositories/ZelfID/modules/zelf-id-grant-error.module");
 const { restoredDurationForPlanTerm } = require("../../Repositories/ZelfID/modules/zelf-id-plan-term-duration");
-const { assertAllowedDatabase, summarizeRepair } = require("../../scripts/repair-zelf-id-plan-term-duration");
+const { assertAllowedDatabase, databaseNameFromUri, redactSecrets, summarizeRepair } = require("../../scripts/repair-zelf-id-plan-term-duration");
 const moment = require("moment");
 
 describe("grant error responses", () => {
@@ -54,12 +54,32 @@ describe("plan term duration repair", () => {
     });
 
     test("the repair script allowlist refuses an unnamed database and labels a dry run wouldRestore", () => {
-        expect(assertAllowedDatabase({ uri: "mongodb://127.0.0.1:27017/wallet_development" })).toBe("wallet_development");
-        expect(assertAllowedDatabase({ uri: "mongodb+srv://user:pw@host/other_db", targetDb: "other_db" })).toBe("other_db");
-        expect(() => assertAllowedDatabase({ uri: "mongodb+srv://user:pw@host/zelf_prod" })).toThrow(/Refusing database zelf_prod/);
-        expect(() => assertAllowedDatabase({ uri: "mongodb://127.0.0.1:27017/wallet_development", targetDb: "other_db" })).toThrow(
-            /does not match/
+        const replica =
+            "mongodb://appuser:s3cret-pass@db1.internal:27017,db2.internal:27017,db3.internal:27017/wallet_development?replicaSet=rs0&authSource=admin";
+        expect(databaseNameFromUri(replica)).toBe("wallet_development");
+        expect(databaseNameFromUri("mongodb+srv://appuser:s3cret-pass@cluster.example.net/wallet_development?retryWrites=true")).toBe(
+            "wallet_development"
         );
+        expect(assertAllowedDatabase({ uri: replica })).toBe("wallet_development");
+        expect(assertAllowedDatabase({ uri: "mongodb://127.0.0.1:27017/wallet_development" })).toBe("wallet_development");
+
+        const refuse = (input) => {
+            try {
+                assertAllowedDatabase(input);
+            } catch (error) {
+                expect(error.message).not.toMatch(/s3cret-pass/);
+                expect(error.message).not.toMatch(/mongodb(\+srv)?:\/\//);
+                throw error;
+            }
+        };
+        expect(() => refuse({ uri: replica.replace("/wallet_development", "/wallet_production") })).toThrow(/allowlist/);
+        expect(() => refuse({ uri: replica, targetDb: "wallet_production" })).toThrow(/does not match/);
+        expect(() =>
+            refuse({
+                uri: "mongodb://appuser:s3cret-pass@db1.internal:27017,db2.internal:27017/wallet_production?replicaSet=rs0",
+                targetDb: "wallet_production",
+            })
+        ).toThrow(/allowlist/);
         expect(summarizeRepair({ apply: false, scanned: 4, changes: [{ zelfName: "a.zelf" }] })).toEqual({
             apply: false,
             scanned: 4,
@@ -67,5 +87,6 @@ describe("plan term duration repair", () => {
             changes: [{ zelfName: "a.zelf" }],
         });
         expect(summarizeRepair({ apply: true, scanned: 4, changes: [{ zelfName: "a.zelf" }] }).restored).toBe(1);
+        expect(redactSecrets(`connect failed ${replica}`)).not.toMatch(/s3cret-pass/);
     });
 });

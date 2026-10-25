@@ -588,6 +588,9 @@ describe("Premium to Unlimited upgrade credit", () => {
         let stored = await PlanTerm.findOne({ zelfName: `${bare}.zelf` }).lean();
         expect(stored.amountPaidUsd).toBe(14.5);
         expect(stored.plan).toBe("premium");
+        expect(stored.termStartedAt).toBeInstanceOf(Date);
+        const originalStart = new Date("2024-01-01T00:00:00.000Z");
+        await PlanTerm.updateOne({ zelfName: `${bare}.zelf` }, { $set: { termStartedAt: originalStart } });
 
         await addDurationToTag(
             {
@@ -604,6 +607,7 @@ describe("Premium to Unlimited upgrade credit", () => {
         );
         stored = await PlanTerm.findOne({ zelfName: `${bare}.zelf` }).lean();
         expect(stored.amountPaidUsd).toBe(29);
+        expect(new Date(stored.termStartedAt).toISOString()).toBe(originalStart.toISOString());
 
         await addDurationToTag(
             {
@@ -621,5 +625,109 @@ describe("Premium to Unlimited upgrade credit", () => {
         stored = await PlanTerm.findOne({ zelfName: `${bare}.zelf` }).lean();
         expect(stored.plan).toBe("unlimited");
         expect(stored.amountPaidUsd).toBe(84.5);
+        expect(new Date(stored.termStartedAt).toISOString()).not.toBe(originalStart.toISOString());
+    });
+
+    test("a finished crypto grant replays after the quote expires", async () => {
+        const bare = "replaylate";
+        tags.set(bare, tagFor(bare));
+        const now = Date.now();
+        const clock = jest.spyOn(Date, "now").mockReturnValue(now);
+        const live = jwt.sign(
+            {
+                tagName: `${bare}.zelf`,
+                tagPayName: `${bare}.zelfpay`,
+                plan: "premium",
+                duration: 1,
+                ttl: Math.floor(now / 1000) + 60,
+                prices: { ETH: { price: 29, amountToSend: 0.01 } },
+                paymentAddress: { ethAddress: "0xabc" },
+            },
+            config.JWT_SECRET
+        );
+        confirmPayUniqueAddress.mockResolvedValue({ confirmed: true, amountReceived: 0.01, paidAt: Math.floor(now / 1000) });
+        const first = await verifyPaymentConfirmation(bare, "zelf", "ETH", live, {});
+        expect(first.confirmed).toBe(true);
+        expect(first.cache).toBeUndefined();
+
+        clock.mockReturnValue(now + 5 * 60 * 1000);
+        confirmPayUniqueAddress.mockClear();
+        const replay = await verifyPaymentConfirmation(bare, "zelf", "ETH", live, {});
+        clock.mockRestore();
+        expect(replay.cache).toBe(true);
+        expect(replay.confirmed).toBe(true);
+        expect(confirmPayUniqueAddress).not.toHaveBeenCalled();
+    });
+
+    test("crypto paid before quote expiry is granted after expiry, and a later payment is not", async () => {
+        const bare = "paidontime";
+        tags.set(bare, tagFor(bare));
+        const ttl = moment().subtract(1, "minute").unix();
+        const token = jwt.sign(
+            {
+                tagName: `${bare}.zelf`,
+                tagPayName: `${bare}.zelfpay`,
+                plan: "premium",
+                duration: 1,
+                ttl,
+                prices: { ETH: { price: 29, amountToSend: 0.01 } },
+                paymentAddress: { ethAddress: "0xabc" },
+            },
+            config.JWT_SECRET
+        );
+        confirmPayUniqueAddress.mockResolvedValue({
+            confirmed: true,
+            amountReceived: 0.01,
+            paidAt: ttl - 30,
+        });
+        const granted = await verifyPaymentConfirmation(bare, "zelf", "ETH", token, {});
+        expect(granted.confirmed).toBe(true);
+        expect(granted.cache).toBeUndefined();
+
+        const late = "paidlate1";
+        tags.set(late, tagFor(late));
+        const lateToken = jwt.sign(
+            {
+                tagName: `${late}.zelf`,
+                tagPayName: `${late}.zelfpay`,
+                plan: "premium",
+                duration: 1,
+                ttl,
+                prices: { ETH: { price: 29, amountToSend: 0.01 } },
+                paymentAddress: { ethAddress: "0xabc" },
+            },
+            config.JWT_SECRET
+        );
+        confirmPayUniqueAddress.mockResolvedValue({
+            confirmed: true,
+            amountReceived: 0.01,
+            paidAt: moment().unix(),
+        });
+        await expect(verifyPaymentConfirmation(late, "zelf", "ETH", lateToken, {})).rejects.toMatchObject({
+            clientCode: "token_expired",
+        });
+    });
+
+    test("a one-cent dev quote is below the Stripe minimum", async () => {
+        const bare = "centquote";
+        tags.set(bare, tagFor(bare));
+        const token = jwt.sign(
+            {
+                tagName: `${bare}.zelf`,
+                tagPayName: `${bare}.zelfpay`,
+                plan: "premium",
+                duration: 1,
+                ttl: moment().add(2, "hour").unix(),
+                billableUsdPrice: 0.01,
+                amountDue: 0.01,
+                prices: { ETH: { price: 0.01, amountToSend: 0.00001 } },
+                devPaymentAmountDiscount: { fraction: 0.00001, billableUsdPrice: 0.01, listPriceUsd: 29 },
+                upgradeCreditUsd: 0,
+            },
+            config.JWT_SECRET
+        );
+        await expect(
+            createStripeCheckout({ tagName: bare, domain: "zelf", duration: "1", plan: "premium", token })
+        ).rejects.toMatchObject({ clientCode: "stripe_amount_below_minimum" });
     });
 });

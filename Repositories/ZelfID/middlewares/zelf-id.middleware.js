@@ -339,12 +339,6 @@ const paymentConfirmationValidation = async (ctx, next) => {
         return;
     }
 
-    if (tokenDecoded.ttl < moment().unix()) {
-        ctx.status = 409;
-        ctx.body = { validationError: "token_expired" };
-        return;
-    }
-
     // A 100% coupon (or any other signed $0 quote) confirms with no network.
     if (!network) {
         if (tokenDecoded.freeCheckout !== true) {
@@ -354,6 +348,15 @@ const paymentConfirmationValidation = async (ctx, next) => {
         }
         network = "FREE";
         ctx.request.body.network = "FREE";
+    }
+
+    // Crypto confirms can arrive after the quote TTL when the transfer itself was sent in time.
+    // Free quotes have no chain timestamp, so an expired one stops here.
+    const cryptoConfirm = ["ETH", "SOL", "BTC", "AVAX", "BDAG", "BNB", "POL", "BASE"].includes(String(network || "").toUpperCase());
+    if (tokenDecoded.ttl < moment().unix() && !cryptoConfirm) {
+        ctx.status = 409;
+        ctx.body = { validationError: "token_expired" };
+        return;
     }
 
     // FREE has no price entry: allowed only for a signed $0 checkout (re-quoted from the license on confirm).

@@ -1,13 +1,14 @@
 /**
  * Restore plan-term duration cleared by an unlock that saved the row without duration.
  * Dry-run unless `--apply` is passed.
- * Refuses every database except `wallet_development`, unless `--target-db <name>` matches the URI.
+ * Refuses every database except `wallet_development`. `--target-db` must name that same allowlisted database.
  *
  *   node scripts/repair-zelf-id-plan-term-duration.js
  *   node scripts/repair-zelf-id-plan-term-duration.js --apply
  *   node scripts/repair-zelf-id-plan-term-duration.js --target-db wallet_development --apply
  */
 const mongoose = require("mongoose");
+const { ConnectionString, redactConnectionString } = require("mongodb-connection-string-url");
 const config = require("../Core/config");
 const PlanTerm = require("../Repositories/ZelfID/models/zelf-id-plan-term.model");
 const QuoteGrant = require("../Repositories/ZelfID/models/zelf-id-quote-grant.model");
@@ -16,10 +17,9 @@ const { restoredDurationForPlanTerm } = require("../Repositories/ZelfID/modules/
 const DEV_DB_ALLOWLIST = ["wallet_development"];
 
 const databaseNameFromUri = (uri) => {
-    const raw = String(uri || "");
-    const normalized = raw.replace(/^mongodb(?:\+srv)?:\/\//, "http://");
     try {
-        const path = new URL(normalized).pathname.replace(/^\//, "");
+        const parsed = new ConnectionString(String(uri || ""), { looseValidation: true });
+        const path = String(parsed.pathname || "").replace(/^\//, "");
         return decodeURIComponent(path.split("/")[0] || "");
     } catch (_error) {
         return "";
@@ -39,20 +39,18 @@ const assertAllowedDatabase = ({ uri, targetDb = "" }) => {
         error.code = "database_not_allowed";
         throw error;
     }
-    if (targetDb) {
-        if (name !== targetDb) {
-            const error = new Error(`Database ${name} does not match --target-db ${targetDb}.`);
-            error.code = "database_not_allowed";
-            throw error;
-        }
-        return name;
-    }
-    if (!DEV_DB_ALLOWLIST.includes(name)) {
-        const error = new Error(`Refusing database ${name}. Use wallet_development or pass --target-db.`);
+    if (targetDb && targetDb !== name) {
+        const error = new Error("Database name does not match --target-db.");
         error.code = "database_not_allowed";
         throw error;
     }
-    return name;
+    const effective = targetDb || name;
+    if (!DEV_DB_ALLOWLIST.includes(effective)) {
+        const error = new Error("Refusing database that is not on the dev allowlist.");
+        error.code = "database_not_allowed";
+        throw error;
+    }
+    return effective;
 };
 
 const summarizeRepair = ({ apply, scanned, changes }) =>
@@ -94,9 +92,18 @@ const main = async () => {
     await mongoose.disconnect();
 };
 
+const redactSecrets = (value) =>
+    String(value || "").replace(/mongodb(?:\+srv)?:\/\/\S+/gi, (match) => {
+        try {
+            return redactConnectionString(match);
+        } catch (_error) {
+            return "mongodb://***";
+        }
+    });
+
 if (require.main === module) {
     main().catch(async (error) => {
-        console.error(error.message || error);
+        console.error(redactSecrets(error?.message || "repair failed"));
         process.exitCode = 1;
         await mongoose.disconnect().catch(() => {});
     });
@@ -106,6 +113,7 @@ module.exports = {
     DEV_DB_ALLOWLIST,
     assertAllowedDatabase,
     databaseNameFromUri,
+    redactSecrets,
     summarizeRepair,
     targetDbFromArgv,
 };

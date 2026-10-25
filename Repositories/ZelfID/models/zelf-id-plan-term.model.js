@@ -14,6 +14,7 @@ const zelfIdPlanTermSchema = new mongoose.Schema({
     duration: { type: String, default: null },
     amountPaidUsd: { type: Number, default: null },
     quoteHash: { type: String, default: null },
+    termStartedAt: { type: Date, default: null },
 });
 
 addBasicPlugins(zelfIdPlanTermSchema);

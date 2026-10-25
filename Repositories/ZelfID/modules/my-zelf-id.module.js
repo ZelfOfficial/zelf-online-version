@@ -14,6 +14,40 @@ const { confirmPayUniqueAddress } = require("../../Tags/modules/my-tags.module")
 const ZelfIdModule = require("./zelf-id.module");
 const ZelfIdsPaymentModule = require("./zelf-ids-payment.module");
 const { expandStoredExtraParams } = require("../../Tags/modules/tags-addresses.module");
+const { txUnixSeconds } = require("../../Tags/modules/tag-pay-session-tx.util");
+
+const quoteIsExpired = (tokenDecoded) => Number(tokenDecoded?.ttl) < Math.floor(Date.now() / 1000);
+
+const expiredQuoteError = () => {
+    const error = new Error("409:token_expired");
+    error.clientCode = "token_expired";
+    error.clientMessage = "token_expired";
+    error.status = 409;
+    return error;
+};
+
+/**
+ * A crypto payment counted against an expired quote only when the locked amount arrived
+ * at or before the quote expiry.
+ */
+const cryptoPaymentWithinQuote = (paymentConfirmation, tokenDecoded, network) => {
+    const ttl = Number(tokenDecoded?.ttl);
+    const lockedAmount = Number(tokenDecoded?.prices?.[network]?.amountToSend);
+    const received = Number(paymentConfirmation?.amountReceived);
+    if (!Number.isFinite(ttl) || !Number.isFinite(lockedAmount) || !Number.isFinite(received) || received + 1e-9 < lockedAmount) {
+        return false;
+    }
+    const times = [];
+    const direct = txUnixSeconds({
+        timestamp: paymentConfirmation?.paidAt ?? paymentConfirmation?.timestamp ?? paymentConfirmation?.blockTime,
+    });
+    if (direct != null) times.push(direct);
+    for (const tx of paymentConfirmation?.transactions || []) {
+        const ts = txUnixSeconds(tx);
+        if (ts != null) times.push(ts);
+    }
+    return times.some((ts) => ts <= ttl);
+};
 
 const releaseCouponClaim = async (claimed) => {
     if (!claimed?.couponId || !claimed?.redemptionKey) return;
@@ -211,9 +245,12 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
 
     if (tokenDecoded.tagName !== `${tagName}.${domain}`) throw new Error("403:tag_not_owned");
 
-    if (tokenDecoded.ttl < Math.floor(Date.now() / 1000)) throw new Error("409:token_expired");
+    const quoteExpired = quoteIsExpired(tokenDecoded);
 
-    if (network === "FREE") return confirmFreeCheckout(tagName, domain, tokenDecoded, domainConfig, identity, token);
+    if (network === "FREE") {
+        if (quoteExpired) throw expiredQuoteError();
+        return confirmFreeCheckout(tagName, domain, tokenDecoded, domainConfig, identity, token);
+    }
 
     if (network === "AVAX") {
         throw new Error("409:avax_use_smart_contract_confirmation");
@@ -227,17 +264,25 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
     const { findDoneQuoteGrant } = require("./zelf-id-quote-grant.module");
     const { assertQuoteUpgradeTerm, priceAfterUpgradeCredit } = require("./zelf-id-upgrade-credit.module");
     const doneGrant = await findDoneQuoteGrant({ zelfName: `${tagName}.${domain}`, token });
-    let lockedCredit = { upgradeCreditUsd: Number(tokenDecoded.upgradeCreditUsd || 0) };
-    if (!doneGrant) {
-        lockedCredit = await assertQuoteUpgradeTerm({
-            tokenDecoded,
+    if (doneGrant) {
+        return {
+            cache: true,
+            confirmed: true,
+            amountReceived: 0,
             publicData: tagObject.publicData,
-            tagName,
-            domain,
-            domainConfig,
-            targetPlan: tokenDecoded.plan,
-        });
+            expiresAt: tagObject.publicData?.expiresAt || null,
+            tagObject,
+            paymentMethod: doneGrant.paymentMethod || "crypto",
+        };
     }
+    const lockedCredit = await assertQuoteUpgradeTerm({
+        tokenDecoded,
+        publicData: tagObject.publicData,
+        tagName,
+        domain,
+        domainConfig,
+        targetPlan: tokenDecoded.plan,
+    });
     const amountToPay = tokenDecoded.prices[network]?.amountToSend;
     const initiatedAtUnix = coerceInitiatedAtUnix(tokenDecoded.initiatedAt);
 
@@ -253,7 +298,8 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
 
     const paymentOk = paymentConfirmation && typeof paymentConfirmation === "object" && paymentConfirmation.confirmed === true;
 
-    if (!paymentOk) {
+    if (!paymentOk || (quoteExpired && !cryptoPaymentWithinQuote(paymentConfirmation, tokenDecoded, network))) {
+        if (quoteExpired) throw expiredQuoteError();
         const _paymentConfirmation = paymentConfirmation && typeof paymentConfirmation === "object" ? paymentConfirmation : null;
 
         return {
@@ -608,17 +654,23 @@ const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata, 
     const zeroMethods = new Set(["coupon", "whitelist", "free", "gift"]);
     const charged = Number.isFinite(explicitCharge) ? explicitCharge : zeroMethods.has(params.paymentMethod) ? 0 : null;
     let amountPaidUsd;
-    if (charged != null && mongoose.connection.readyState === 1) {
+    let existing = null;
+    if (mongoose.connection.readyState === 1) {
         const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
         const normalized = normalizeZelfName(storedName, params.domain || domainConfig?.name || "zelf");
-        const existing = normalized.zelfName ? await PlanTerm.findOne({ zelfName: normalized.zelfName }).lean() : null;
-        amountPaidUsd = combineAmountPaid({
-            previousPlan: existing?.plan,
-            previousAmount: existing?.amountPaidUsd,
-            nextPlan: planTerm?.plan || params.plan,
-            charged,
-        });
+        existing = normalized.zelfName ? await PlanTerm.findOne({ zelfName: normalized.zelfName }).lean() : null;
+        if (charged != null) {
+            amountPaidUsd = combineAmountPaid({
+                previousPlan: existing?.plan,
+                previousAmount: existing?.amountPaidUsd,
+                nextPlan: planTerm?.plan || params.plan,
+                charged,
+            });
+        }
     }
+    const nextPlan = planTerm?.plan || params.plan;
+    const samePlan = existing?.plan && String(existing.plan).toLowerCase() === String(nextPlan || "").toLowerCase();
+    const termStartedAt = samePlan && existing.termStartedAt ? existing.termStartedAt : new Date();
     if (planTerm) {
         if (planTerm.planExpiresAt) tagObject.publicData.planExpiresAt = planTerm.planExpiresAt;
         if (planTerm.paymentMethod) tagObject.publicData.paymentMethod = planTerm.paymentMethod;
@@ -629,20 +681,22 @@ const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata, 
             plan: planTerm.plan,
             planExpiresAt: planTerm.planExpiresAt,
             paymentMethod: planTerm.paymentMethod,
-                duration: planTerm.duration,
-                ...(amountPaidUsd !== undefined ? { amountPaidUsd } : {}),
-                ...(grantQuoteHash ? { quoteHash: grantQuoteHash } : {}),
-            });
-        } else if (amountPaidUsd !== undefined || grantQuoteHash) {
-            await savePlanTerm({
-                zelfName: storedName,
-                domain: params.domain || domainConfig?.name,
-                plan: params.plan,
-                paymentMethod: params.paymentMethod,
-                ...(amountPaidUsd !== undefined ? { amountPaidUsd } : {}),
-                ...(grantQuoteHash ? { quoteHash: grantQuoteHash } : {}),
-            });
-        }
+            duration: planTerm.duration,
+            termStartedAt,
+            ...(amountPaidUsd !== undefined ? { amountPaidUsd } : {}),
+            ...(grantQuoteHash ? { quoteHash: grantQuoteHash } : {}),
+        });
+    } else if (amountPaidUsd !== undefined || grantQuoteHash) {
+        await savePlanTerm({
+            zelfName: storedName,
+            domain: params.domain || domainConfig?.name,
+            plan: params.plan,
+            paymentMethod: params.paymentMethod,
+            termStartedAt,
+            ...(amountPaidUsd !== undefined ? { amountPaidUsd } : {}),
+            ...(grantQuoteHash ? { quoteHash: grantQuoteHash } : {}),
+        });
+    }
     if (!planTerm && options.clearPlanTerm) {
         const { deletePlanTerm } = require("./zelf-id-plan-term.module");
         const storedName = tagObject.publicData?.tagName || tagObject.publicData?.zelfName || params.tagName;

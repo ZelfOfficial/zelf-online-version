@@ -216,7 +216,7 @@ describe("Zelf IDs payment API", () => {
 		expect(`${response.body.code || ""} ${response.body.message || ""}`).toMatch(/tag_not_owned/i);
 	});
 
-	it("POST /zelf-ids/payment-confirmation — rejects an expired signed quote before provider lookup", async () => {
+	it("POST /zelf-ids/payment-confirmation — rejects an expired crypto quote that has no in-time payment", async () => {
 		expect(process.env.JWT_SECRET).toBeTruthy();
 		const expiredToken = jwt.sign(
 			{
@@ -238,7 +238,7 @@ describe("Zelf IDs payment API", () => {
 			});
 
 		expect(response.status).toBe(409);
-		expect(response.body.validationError).toBe("token_expired");
+		expect(`${response.body.validationError || ""} ${response.body.code || ""} ${response.body.message || ""}`).toMatch(/token_expired/);
 	});
 
 	it("POST /zelf-ids/stripe-checkout — 401 without auth", async () => {

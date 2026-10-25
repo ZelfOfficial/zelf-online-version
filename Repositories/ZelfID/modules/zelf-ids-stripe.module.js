@@ -264,15 +264,19 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
         amountUsd = priced.amountDue;
         couponId = priced.coupon.id;
         couponCode = priced.coupon.code;
-    } else if (creditApplied) {
-        const fraction = Number(tokenDecoded?.devPaymentAmountDiscount?.fraction);
-        const expected = Number.isFinite(fraction) && fraction > 0 ? Math.round(afterCredit * fraction * 100) / 100 : afterCredit;
+    }
+    const devFraction = Number(tokenDecoded?.devPaymentAmountDiscount?.fraction);
+    const hasDevFraction = Boolean(tokenDecoded?.devPaymentAmountDiscount) && Number.isFinite(devFraction) && devFraction > 0;
+    if (!couponCode && (creditApplied || hasDevFraction)) {
+        const { roundBillableUsdPrice } = require("./zelf-ids-payment.module");
+        const raw = hasDevFraction ? afterCredit * devFraction : afterCredit;
+        const expected = roundBillableUsdPrice(raw, { keepPositive: hasDevFraction && raw > 0 });
         if (Math.abs(amountUsd - expected) > 0.009) {
             throw Coupons.httpError(409, "Quoted total no longer matches the license price", "quote_price_changed");
         }
         amountUsd = expected;
     }
-    const unitAmount = unitAmountForCharge(amountUsd, { coupon: Boolean(couponCode) || creditApplied });
+    const unitAmount = unitAmountForCharge(amountUsd, { coupon: Boolean(couponCode) || creditApplied || hasDevFraction });
 
     if (!(amountUsd > 0)) {
         throw new Error("409:invalid_quote_amount");

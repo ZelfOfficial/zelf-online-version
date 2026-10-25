@@ -1191,6 +1191,7 @@ module.exports = {
     getPaymentOptions,
     isTagPayReducedFeeClientHeaderHonored,
     ensureZelfProofQRCode,
+    roundBillableUsdPrice,
     storeInIPFS,
     storeInArweave,
 };
