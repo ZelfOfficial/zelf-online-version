@@ -9,12 +9,14 @@ const { encrypt, decrypt, preview, encryptQR } = require("../../Wallet/modules/e
 const OfflineProofModule = require("../../../Core/offline-proof");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const moment = require("moment");
+const { parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 const config = require("../../../Core/config");
 const { addReferralReward, addPurchaseReward } = require("./zns-token.module");
 const jwt = require("jsonwebtoken");
 const { createUnderName } = require("./undernames.module");
 const { confirmPayUniqueAddress } = require("../../purchase-zelf/modules/balance-checker.module");
 const ZNSPartsModule = require("./zns-parts.module");
+const { expandStoredExtraParams } = require("../../Tags/modules/tags-addresses.module");
 
 const evmCompatibleTickers = [
 	"ETH", // Ethereum
@@ -107,13 +109,13 @@ const _removeExpiredRecords = async (records) => {
 	for (let index = records.length - 1; index >= 0; index--) {
 		const record = records[index];
 
-		const extraParams = JSON.parse(record.metadata.keyvalues.extraParams || "{}");
+		const extraParams = expandStoredExtraParams(record.metadata.keyvalues.extraParams || "{}");
 
-		const expiresAt = moment(record.metadata.keyvalues.expiresAt || extraParams.expiresAt);
+		const expiresAt = parseLeaseDate(record.metadata.keyvalues.expiresAt || extraParams.expiresAt);
 
 		const type = record.metadata.keyvalues.type;
 
-		const isExpired = now.isAfter(expiresAt);
+		const isExpired = moment.utc().isAfter(expiresAt);
 
 		if (isExpired && type === "hold") {
 			records.splice(index, 1);

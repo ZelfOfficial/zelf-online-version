@@ -85,6 +85,31 @@ describe("face body whitelist — extension v4 payloads", () => {
         expect(strict.rejected).toContain("unknownKey");
     });
 
+    it("payment-confirmation keeps the quote token, network, and face proof", () => {
+        config.faceSecurity.bodyWhitelist.strict = true;
+        const { body, rejected } = pickWhitelistedBody(
+            {
+                tagName: "myname",
+                domain: "zelf",
+                network: "FREE",
+                token: "signed.jwt",
+                faceBase64: "face",
+                masterPassword: "secret",
+                pow: { challengeId: "c", solution: 1 },
+                faceNonce: "nonce",
+                unknownKey: "drop",
+            },
+            "payment-confirmation"
+        );
+        expect(rejected).toContain("unknownKey");
+        expect(body.token).toBe("signed.jwt");
+        expect(body.network).toBe("FREE");
+        expect(body.faceBase64).toBe("face");
+        expect(body.masterPassword).toBe("secret");
+        expect(body.pow).toEqual({ challengeId: "c", solution: 1 });
+        expect(body.faceNonce).toBe("nonce");
+    });
+
     it("documents server-only strip list", () => {
         expect(STRIPPED_SERVER_ONLY_FIELDS).toContain("removePGP");
         expect(STRIPPED_SERVER_ONLY_FIELDS).toContain("tolerance");

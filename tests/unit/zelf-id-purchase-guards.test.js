@@ -15,6 +15,12 @@ jest.mock("../../Repositories/ZelfID/modules/zelf-id.module", () => ({
     searchTag: jest.fn(),
 }));
 
+jest.mock("../../Repositories/ZelfID/modules/zelf-id-quote-grant.module", () => ({
+    claimQuoteGrant: jest.fn(async () => ({ state: "claimed", grant: { status: "pending" } })),
+    completeQuoteGrant: jest.fn(async () => null),
+    releaseQuoteGrant: jest.fn(async () => null),
+}));
+
 jest.mock("jsonwebtoken", () => ({
     verify: jest.fn(),
 }));
@@ -38,6 +44,7 @@ jest.mock("../../Repositories/ZelfID/modules/zelf-id-purchase-manual-review.modu
 
 const moment = require("moment");
 const { verifyPaymentConfirmation } = require("../../Repositories/ZelfID/modules/my-zelf-id.module");
+const { claimQuoteGrant } = require("../../Repositories/ZelfID/modules/zelf-id-quote-grant.module");
 const { confirmPaidStripeSession, buildLeaseStripeMetadata } = require("../../Repositories/ZelfID/modules/zelf-ids-stripe.module");
 const { addDurationToTag } = require("../../Repositories/ZelfID/modules/my-zelf-id.module");
 const ZelfIdModule = require("../../Repositories/ZelfID/modules/zelf-id.module");
@@ -121,10 +128,9 @@ describe("Zelf ID purchase guards", () => {
             },
         });
 
-        const result = await verifyPaymentConfirmation("jimqatest", "zelf", "FREE", "signed.jwt");
-
-        expect(result.cache).toBe(true);
-        expect(result.confirmed).toBe(true);
+        await expect(verifyPaymentConfirmation("jimqatest", "zelf", "FREE", "signed.jwt")).rejects.toMatchObject({
+            clientCode: "ERR_IDENTITY_VERIFICATION_REQUIRED",
+        });
     });
 
     test("confirmPaidStripeSession replay after lifetime purchase returns already_extended", async () => {
@@ -140,6 +146,11 @@ describe("Zelf ID purchase guards", () => {
             duration: "1",
             plan: "premium",
             amountUsd: 29,
+        });
+
+        claimQuoteGrant.mockResolvedValueOnce({
+            state: "done",
+            grant: { zelfName: "jimqatest.zelf", source: "stripe", status: "done", paymentMethod: "stripe" },
         });
 
         const result = await confirmPaidStripeSession({

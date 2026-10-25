@@ -374,6 +374,8 @@ describe("zelf-id-plan.module", () => {
 		expect(normalizePaymentDuration(999)).toBe("lifetime");
 		expect(normalizePaymentDuration("lifetime")).toBe("lifetime");
 		expect(normalizePaymentDuration("4")).toBe("4");
+		expect(normalizePaymentDuration("1y")).toBe("1");
+		expect(normalizePaymentDuration("5y")).toBe("5");
 		expect(paymentDurationYears("lifetime")).toBe(100);
 		expect(paymentDurationYears("3")).toBe(3);
 	});
@@ -683,6 +685,27 @@ describe("active paid lease keeps its value", () => {
         const publicData = { ...base, plan: "premium", duration: "lifetime", expiresAt: exp };
         expect(P.resolvePaidExpiresAt({ publicData, duration: "1" })).toBe(exp);
         expect(P.resolvePaidDurationStamp({ publicData, duration: "1" })).toBe("lifetime");
+    });
+
+    test("a lapsed plan term reads as free for limits", () => {
+        const { effectivePlan, planForLimits } = P;
+        const lease = "2126-10-24 18:00:00";
+        const caps = { free: { passwords: 5, zotp: 3 }, premium: { passwords: 100, zotp: 100 } };
+        const active = {
+            tagName: "myname.zelf",
+            type: "mainnet",
+            plan: "premium",
+            duration: "1",
+            expiresAt: lease,
+            planExpiresAt: moment().add(1, "year").format("YYYY-MM-DD HH:mm:ss"),
+        };
+        const lapsed = { ...active, planExpiresAt: moment().subtract(1, "day").format("YYYY-MM-DD HH:mm:ss") };
+        expect(effectivePlan(active, domainConfig)).toBe("premium");
+        expect(planForLimits(active, domainConfig)).toBe("premium");
+        expect(caps[planForLimits(active, domainConfig)]).toEqual(caps.premium);
+        expect(effectivePlan(lapsed, domainConfig)).toBe("free");
+        expect(planForLimits(lapsed, domainConfig)).toBe("free");
+        expect(caps[planForLimits(lapsed, domainConfig)]).toEqual(caps.free);
     });
 
     test("yearly extension still adds onto an active paid lease", () => {

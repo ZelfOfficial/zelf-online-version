@@ -8,6 +8,7 @@ const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const ZelfIdModule = require("./zelf-id.module");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
 const { getBareName } = require("./zelf-id-plan.module");
+const { expandStoredExtraParams } = require("../../Tags/modules/tags-addresses.module");
 const {
     normalizeTagName,
     applyAddressSyncToRecord,
@@ -211,8 +212,7 @@ const leaseOffline = async (params, authUser) => {
     let plan = persistedPublic.plan;
     if (!plan && persistedPublic.extraParams) {
         try {
-            const extra =
-                typeof persistedPublic.extraParams === "string" ? JSON.parse(persistedPublic.extraParams) : persistedPublic.extraParams;
+            const extra = expandStoredExtraParams(persistedPublic.extraParams);
             plan = extra.plan;
         } catch (_error) {
             plan = undefined;

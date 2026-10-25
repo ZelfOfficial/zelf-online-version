@@ -11,6 +11,7 @@
  * active paid lease (v4 premium/unlimited, or v3.6 planless with renewedAt / price > 0).
  */
 const moment = require("moment");
+const { formatLeaseDate, parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 
 /** Unpaid short-name hold window. Override via `ZELF_ID_RESERVATION_AMOUNT` / `ZELF_ID_RESERVATION_UNIT` (e.g. `5` + `hour` to revert). */
 const ZELF_ID_RESERVATION_DURATION = {
@@ -27,10 +28,7 @@ const ZELF_ID_RESERVATION_HOURS = moment
  * UTC `expiresAt` for a new unpaid `.hold` reservation (same format as lease stamps).
  * @returns {string}
  */
-const getReservationExpiresAt = () =>
-    moment()
-        .add(ZELF_ID_RESERVATION_DURATION.amount, ZELF_ID_RESERVATION_DURATION.unit)
-        .format("YYYY-MM-DD HH:mm:ss");
+const getReservationExpiresAt = () => formatLeaseDate(ZELF_ID_RESERVATION_DURATION.amount, ZELF_ID_RESERVATION_DURATION.unit);
 const FREE_EXPIRATION_YEARS = 100;
 const LIFETIME_EXPIRATION_YEARS = 100;
 const PAID_HORIZON_YEARS = 50;
@@ -298,7 +296,8 @@ const resolveComplimentaryPlan = ({ price } = {}) => {
 const normalizePaymentDuration = (duration = "1") => {
     const raw = `${duration ?? "1"}`.trim().toLowerCase();
     if (raw === "999" || raw === "lifetime") return "lifetime";
-    if (/^\d+$/.test(raw) && Number(raw) > 0) return String(Number(raw));
+    const years = raw.endsWith("y") ? raw.slice(0, -1) : raw;
+    if (/^\d+$/.test(years) && Number(years) > 0) return String(Number(years));
     return raw || "1";
 };
 
@@ -365,10 +364,7 @@ const isUnpaidReservation = (publicData = {}) => {
  */
 const isExpiresAtPassed = (publicData = {}) => {
     if (!publicData.expiresAt) return false;
-
-    return moment(publicData.expiresAt, "YYYY-MM-DD HH:mm:ss", true).isValid()
-        ? moment(publicData.expiresAt, "YYYY-MM-DD HH:mm:ss").isBefore(moment())
-        : moment(publicData.expiresAt).isBefore(moment());
+    return parseLeaseDate(publicData.expiresAt).isBefore(moment.utc());
 };
 
 /**
@@ -380,7 +376,15 @@ const isExpiresAtPassed = (publicData = {}) => {
 const effectivePlan = (publicData = {}, domainConfig) => {
     if (isUnpaidReservation(publicData)) return publicData.plan;
 
-    if ((publicData.type === "mainnet" || !publicData.type) && isExpiresAtPassed(publicData)) return "free";
+    // A Free name that bought a term keeps the 100-year lease in `expiresAt`.
+    // The paid plan ends at `planExpiresAt`. Read time only; no cron.
+    if (publicData.planExpiresAt) {
+        if (isExpiresAtPassed({ expiresAt: publicData.planExpiresAt })) return "free";
+        const active = String(publicData.plan || "").toLowerCase();
+        if (active === "premium" || active === "unlimited") return active;
+    }
+
+    if ((publicData.type === "mainnet" || !publicData.type) && isExpiresAtPassed(publicData) && !publicData.planExpiresAt) return "free";
 
     const tagName = publicData.tagName || publicData.zelfName;
     const offered = licensePaidPlansForName(tagName, domainConfig);
@@ -415,10 +419,7 @@ const isUnpaidExpiredReservation = (publicData = {}) => {
  */
 const remainingExpirationYears = (expiresAt) => {
     if (!expiresAt) return 0;
-    const parsed = moment(expiresAt, "YYYY-MM-DD HH:mm:ss", true).isValid()
-        ? moment(expiresAt, "YYYY-MM-DD HH:mm:ss")
-        : moment(expiresAt);
-    return parsed.diff(moment(), "years", true);
+    return parseLeaseDate(expiresAt).diff(moment.utc(), "years", true);
 };
 
 /**
@@ -443,10 +444,42 @@ const hasV36PaidEvidence = (publicData = {}) => {
  * @param {Object} [publicData]
  * @returns {boolean}
  */
+/**
+ * A Free registration (plan `free`, or a 100-year sentinel with no paid plan).
+ * Buying a term must not move `expiresAt`. Paid-from-the-start names have no `planExpiresAt`
+ * and are not matched here.
+ * @param {Object} [publicData]
+ * @returns {boolean}
+ */
+const isFreeOriginLease = (publicData = {}) => {
+    if (publicData.planExpiresAt) return false;
+    const plan = String(publicData.plan || "").toLowerCase();
+    if (plan === "free") return true;
+    if (plan === "premium" || plan === "unlimited") return false;
+    const years = Number(publicData.duration);
+    return Number.isFinite(years) && years >= FREE_EXPIRATION_YEARS;
+};
+
+/**
+ * Plan Zelf Keys `/limits` should use. #207 `vaultPlanFromTag` already calls `effectivePlan`;
+ * keep that call. An elapsed `planExpiresAt` reads as `free`, so free caps apply without a migration.
+ * @param {Object} [publicData]
+ * @param {Object} [domainConfig]
+ * @returns {"free"|"premium"|"unlimited"}
+ */
+const planForLimits = (publicData, domainConfig) => {
+    const plan = effectivePlan(publicData, domainConfig);
+    return plan === "premium" || plan === "unlimited" ? plan : "free";
+};
+
 const hasActivePaidLease = (publicData = {}) => {
     if (isUnpaidReservation(publicData) || isExpiresAtPassed(publicData)) return false;
-    if (publicData.plan === "premium" || publicData.plan === "unlimited") return true;
-    if (publicData.plan === "free") return false;
+    const plan = String(publicData.plan || "").toLowerCase();
+    if (plan === "premium" || plan === "unlimited") return true;
+    if (plan === "free") return false;
+    // The free-lease sentinel (100 years) is not a paid term to extend.
+    const storedYears = Number(publicData.duration);
+    if (Number.isFinite(storedYears) && storedYears >= PAID_HORIZON_YEARS) return false;
     return hasV36PaidEvidence(publicData);
 };
 
@@ -463,22 +496,17 @@ const hasActivePaidLease = (publicData = {}) => {
  */
 const resolvePaidExpiresAt = ({ publicData = {}, duration, durationYears } = {}) => {
     const years = durationYears ?? paymentDurationYears(duration);
-    const fromNow = () =>
-        moment()
-            .add(isLifetimeDuration(duration) ? LIFETIME_EXPIRATION_YEARS : years || 1, "year")
-            .format("YYYY-MM-DD HH:mm:ss");
+    const fromNow = () => formatLeaseDate(isLifetimeDuration(duration) ? LIFETIME_EXPIRATION_YEARS : years || 1, "year");
 
     if (!hasActivePaidLease(publicData) || !publicData.expiresAt) return fromNow();
 
-    const parsed = moment(publicData.expiresAt, "YYYY-MM-DD HH:mm:ss", true).isValid()
-        ? moment(publicData.expiresAt, "YYYY-MM-DD HH:mm:ss")
-        : moment(publicData.expiresAt);
+    const parsed = parseLeaseDate(publicData.expiresAt);
 
     // An active paid lease is never shortened: lifetime keeps its horizon, and a
     // lifetime purchase on top of a longer stored expiry keeps the longer one.
     if (isLifetimeDuration(duration)) {
         const lifetime = fromNow();
-        return moment(lifetime, "YYYY-MM-DD HH:mm:ss").isAfter(parsed) ? lifetime : parsed.format("YYYY-MM-DD HH:mm:ss");
+        return parseLeaseDate(lifetime).isAfter(parsed) ? lifetime : parsed.format("YYYY-MM-DD HH:mm:ss");
     }
     if (publicData.duration === "lifetime") return parsed.format("YYYY-MM-DD HH:mm:ss");
 
@@ -585,6 +613,8 @@ module.exports = {
     resolveComplimentaryPlan,
     resolveUpgradePlan,
     effectivePlan,
+    isFreeOriginLease,
+    planForLimits,
     isHoldName,
     isUnpaidReservation,
     isExpiresAtPassed,

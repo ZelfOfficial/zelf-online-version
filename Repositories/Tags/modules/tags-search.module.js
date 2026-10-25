@@ -181,7 +181,8 @@ const searchTag = async (params, authUser) => {
             }
         }
 
-        return combinedResults;
+        const { readLeaseSearchResult } = require("../../ZelfID/modules/zelf-id-plan-term.module");
+        return readLeaseSearchResult(combinedResults);
     } catch (error) {
         console.error({ searchTag_error: error });
 

@@ -1,12 +1,12 @@
 /**
  * Zelf ID v4 lease-time pins. Do not call TagsRegistrationModule from here.
  */
-const moment = require("moment");
 const TagsIPFSModule = require("../../Tags/modules/tags-ipfs.module");
 const TagsArweaveModule = require("../../Tags/modules/tags-arweave.module");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { cleanExtraParamsForPinata, resolveEncryptVersion, stampExtraParamsVersion } = require("../../Tags/modules/tags-addresses.module");
 const { FREE_EXPIRATION_YEARS, getBareName, getReservationPinName, getReservationExpiresAt } = require("./zelf-id-plan.module");
+const { formatLeaseDate } = require("../../Tags/modules/lease-date.util");
 
 const attachReferral = (metadata, referralTagObject, storageKey) => {
     if (!referralTagObject) return;
@@ -42,8 +42,8 @@ const confirmZelfId = async (tagObject, referralTagObject, domainConfig, securit
         origin: tagObject.origin || "online",
         price: tagObject.price,
         duration: expirationYears,
-        registeredAt: moment().format("YYYY-MM-DD HH:mm:ss"),
-        expiresAt: moment().add(expirationYears, "year").format("YYYY-MM-DD HH:mm:ss"),
+        registeredAt: formatLeaseDate(),
+        expiresAt: formatLeaseDate(expirationYears, "year"),
         type: "mainnet",
         hasPassword: tagObject.hasPassword,
         plan,
@@ -104,7 +104,7 @@ const reserveZelfId = async (tagObject, referralTagObject, domainConfig, securit
         hasPassword: tagObject.hasPassword,
         type: "hold",
         origin: tagObject.origin || "online",
-        registeredAt: moment().format("YYYY-MM-DD HH:mm:ss"),
+        registeredAt: formatLeaseDate(),
         expiresAt: getReservationExpiresAt(),
     };
 

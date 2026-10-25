@@ -26,6 +26,7 @@ const faceBase64 = fs.readFileSync(selfieImagePath, "base64");
 const uniqueTagName = () => `zid${Math.floor(Math.random() * 100000).toString().padStart(5, "0")}`;
 const shortUniqueTagName = () => `z${Math.floor(Math.random() * 10000).toString().padStart(4, "0")}`;
 const { buildMetadata } = require("../../Repositories/ZelfID/modules/zelf-ids-payment.module");
+const { expandStoredExtraParams } = require("../../Repositories/Tags/modules/tags-addresses.module");
 const { resolvePaidExpiresAt } = require("../../Repositories/ZelfID/modules/zelf-id-plan.module");
 
 describe("Zelf IDs payment API", () => {
@@ -215,7 +216,7 @@ describe("Zelf IDs payment API", () => {
 		expect(`${response.body.code || ""} ${response.body.message || ""}`).toMatch(/tag_not_owned/i);
 	});
 
-	it("POST /zelf-ids/payment-confirmation — rejects an expired signed quote before provider lookup", async () => {
+	it("POST /zelf-ids/payment-confirmation — rejects an expired crypto quote that has no in-time payment", async () => {
 		expect(process.env.JWT_SECRET).toBeTruthy();
 		const expiredToken = jwt.sign(
 			{
@@ -237,7 +238,7 @@ describe("Zelf IDs payment API", () => {
 			});
 
 		expect(response.status).toBe(409);
-		expect(response.body.validationError).toBe("token_expired");
+		expect(`${response.body.validationError || ""} ${response.body.code || ""} ${response.body.message || ""}`).toMatch(/token_expired/);
 	});
 
 	it("POST /zelf-ids/stripe-checkout — 401 without auth", async () => {
@@ -347,16 +348,16 @@ describe("Zelf IDs payment API", () => {
 		expect(moment(stamp).diff(moment(), "year", true)).toBeGreaterThanOrEqual(0.9);
 		expect(moment(stamp).diff(moment(), "year", true)).toBeLessThan(2);
 
-		const extra = JSON.parse(
-			buildMetadata(
-				{ tagName, domain: TEST_DOMAIN, duration: 1, price: 24, plan: "premium" },
-				{ publicData },
-				{ getTagKey: () => "tagName" }
-			).metadata.extraParams
+		const built = buildMetadata(
+			{ tagName, domain: TEST_DOMAIN, duration: 1, price: 24, plan: "premium" },
+			{ publicData },
+			{ getTagKey: () => "tagName" }
 		);
+		const extra = JSON.parse(built.metadata.extraParams);
 		expect(extra.plan).toBe("premium");
 		expect(extra.duration).toBe("1");
-		expect(moment(extra.expiresAt).diff(moment(), "year", true)).toBeLessThan(2);
+		expect(moment(extra.expiresAt).diff(moment(), "year", true)).toBeGreaterThan(50);
+		expect(moment(built.planTerm.planExpiresAt).diff(moment(), "year", true)).toBeLessThan(2);
 	});
 
 	it("lease v4migut2* overlay — v3.6 paid evidence adds onto stored expiry", async () => {
@@ -392,7 +393,7 @@ describe("Zelf IDs payment API", () => {
 		const stamp = resolvePaidExpiresAt({ publicData, duration: "1" });
 		expect(moment(stamp).diff(moment(stored, "YYYY-MM-DD HH:mm:ss"), "year", true)).toBeGreaterThanOrEqual(0.9);
 
-		const extra = JSON.parse(
+		const extra = expandStoredExtraParams(
 			buildMetadata(
 				{ tagName, domain: TEST_DOMAIN, duration: 1, price: 24, plan: "premium" },
 				{ publicData },

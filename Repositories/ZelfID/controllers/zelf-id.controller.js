@@ -436,12 +436,13 @@ const getWalletBalances = async (ctx, next) => {
 
 const paymentOptions = async (ctx) => {
     try {
-        const { tagName, domain, duration, plan, referralTagName } = ctx.request.query;
+        const { tagName, domain, duration, plan, referralTagName, coupon } = ctx.request.query;
         const reducedFeeRequested = Boolean(ctx.state.reducedFeeRequested);
         const data = await MyZelfIdModule.getPaymentOptions(tagName, domain, duration, ctx.state.user, {
             reducedFeeRequested,
             requestedPlan: plan,
             referralTagName,
+            coupon,
         });
 
         ctx.body = { data };
@@ -455,8 +456,13 @@ const paymentOptions = async (ctx) => {
 
 const paymentConfirmation = async (ctx) => {
     try {
-        const { tagName, domain, network, token } = ctx.request.body;
-        const data = await MyZelfIdModule.verifyPaymentConfirmation(tagName, domain, network, token);
+        const { tagName, domain, network, token, faceBase64, masterPassword, password } = ctx.request.body;
+        const data = await MyZelfIdModule.verifyPaymentConfirmation(tagName, domain, network, token, {
+            authUser: ctx.state.user,
+            faceBase64,
+            masterPassword,
+            password,
+        });
 
         ctx.body = { data };
     } catch (error) {
@@ -505,8 +511,12 @@ const stripeCheckout = async (ctx) => {
 
 const stripeSession = async (ctx) => {
     try {
-        const { sessionId } = ctx.request.query;
-        const data = await ZelfIdsStripeModule.confirmFromSessionId(sessionId);
+        const { sessionId, token } = ctx.request.query;
+        const data = await ZelfIdsStripeModule.pollStripeSession({
+            sessionId,
+            token,
+            authUser: ctx.state.user,
+        });
 
         ctx.body = { data };
     } catch (error) {
