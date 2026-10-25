@@ -180,6 +180,30 @@ describe("Premium to Unlimited upgrade credit", () => {
         expect(creditFromPaid({ amountPaidUsd: 500, planExpiresAt, duration: "1", listPriceUsd: 99, now })).toBe(99);
         expect(creditFromPaid({ amountPaidUsd: 29, planExpiresAt, duration: "lifetime", listPriceUsd: 99, now })).toBe(0);
         expect(creditFromPaid({ amountPaidUsd: 0, planExpiresAt, duration: "1", listPriceUsd: 99, now })).toBe(0);
+
+        const renewedEnd = moment.utc("2028-01-01 00:00:00", "YYYY-MM-DD HH:mm:ss");
+        const renewedStart = moment.utc("2026-01-01T00:00:00.000Z");
+        const midway = moment.utc("2027-01-01T00:00:00.000Z");
+        expect(
+            creditFromPaid({
+                amountPaidUsd: 58,
+                planExpiresAt: renewedEnd.format("YYYY-MM-DD HH:mm:ss"),
+                duration: "1",
+                termStartedAt: renewedStart.toDate(),
+                listPriceUsd: 99,
+                now: midway,
+            })
+        ).toBe(29);
+        expect(
+            creditFromPaid({
+                amountPaidUsd: 58,
+                planExpiresAt: "2020-01-01 00:00:00",
+                duration: "1",
+                termStartedAt: renewedStart.toDate(),
+                listPriceUsd: 99,
+                now: midway,
+            })
+        ).toBe(0);
     });
 
     test("a halfway Premium term paid $29 credits about $14.50", async () => {
@@ -569,6 +593,9 @@ describe("Premium to Unlimited upgrade credit", () => {
             combineAmountPaid({ previousPlan: "premium", previousAmount: 29, nextPlan: "unlimited", charged: 84.5 })
         ).toBe(84.5);
         expect(combineAmountPaid({ previousPlan: null, previousAmount: null, nextPlan: "premium", charged: 0 })).toBe(0);
+        expect(
+            combineAmountPaid({ previousPlan: "premium", previousAmount: 29, nextPlan: "premium", charged: 29, previousTermLapsed: true })
+        ).toBe(29);
 
         const bare = "storepay";
         const tag = tagFor(bare);
@@ -729,5 +756,101 @@ describe("Premium to Unlimited upgrade credit", () => {
         await expect(
             createStripeCheckout({ tagName: bare, domain: "zelf", duration: "1", plan: "premium", token })
         ).rejects.toMatchObject({ clientCode: "stripe_amount_below_minimum" });
+    });
+
+    const purchase = (bare, plan, billableUsdPrice) => ({
+        tagName: bare,
+        price: billableUsdPrice,
+        billableUsdPrice,
+        domain: "zelf",
+        duration: 1,
+        plan,
+        domainConfig,
+        paymentMethod: "stripe",
+    });
+
+    test("an active same-plan renewal keeps termStartedAt and credits the open term", async () => {
+        const bare = "openrenew";
+        const originalStart = new Date("2026-01-01T00:00:00.000Z");
+        const planExpiresAt = moment.utc().add(1, "year").format("YYYY-MM-DD HH:mm:ss");
+        const tag = tagFor(bare, { plan: "premium", planExpiresAt, planDuration: "1" });
+        tags.set(bare, tag);
+        await PlanTerm.create({
+            zelfName: `${bare}.zelf`,
+            plan: "premium",
+            planExpiresAt,
+            paymentMethod: "stripe",
+            duration: "1",
+            amountPaidUsd: 29,
+            termStartedAt: originalStart,
+        });
+
+        await addDurationToTag(purchase(bare, "premium", 29), tag);
+        const stored = await PlanTerm.findOne({ zelfName: `${bare}.zelf` }).lean();
+        expect(new Date(stored.termStartedAt).toISOString()).toBe(originalStart.toISOString());
+        expect(stored.amountPaidUsd).toBe(58);
+        expect(stored.plan).toBe("premium");
+        expect(moment.utc(stored.planExpiresAt, "YYYY-MM-DD HH:mm:ss").isAfter(moment.utc(planExpiresAt, "YYYY-MM-DD HH:mm:ss"))).toBe(true);
+
+        const quote = await getPaymentOptions(bare, "zelf", "1", {}, { requestedPlan: "unlimited" });
+        expect(quote.upgradeCreditUsd).toBeGreaterThan(30);
+        expect(quote.upgradeCreditUsd).toBeLessThan(50);
+    });
+
+    test("a lapsed same-plan renewal starts a new term and leaves the old payment uncredited", async () => {
+        const bare = "lapserenew";
+        const originalStart = new Date("2020-01-01T00:00:00.000Z");
+        const planExpiresAt = moment.utc().subtract(200, "day").format("YYYY-MM-DD HH:mm:ss");
+        const tag = tagFor(bare, { plan: "premium", planExpiresAt, planDuration: "1" });
+        tags.set(bare, tag);
+        await PlanTerm.create({
+            zelfName: `${bare}.zelf`,
+            plan: "premium",
+            planExpiresAt,
+            paymentMethod: "stripe",
+            duration: "1",
+            amountPaidUsd: 29,
+            termStartedAt: originalStart,
+        });
+
+        const lapsedQuote = await getPaymentOptions(bare, "zelf", "1", {}, { requestedPlan: "unlimited" });
+        expect(lapsedQuote.upgradeCreditUsd).toBe(0);
+
+        const before = Date.now();
+        await addDurationToTag(purchase(bare, "premium", 29), tag);
+        const stored = await PlanTerm.findOne({ zelfName: `${bare}.zelf` }).lean();
+        expect(new Date(stored.termStartedAt).toISOString()).not.toBe(originalStart.toISOString());
+        expect(new Date(stored.termStartedAt).getTime()).toBeGreaterThanOrEqual(before - 1000);
+        expect(stored.amountPaidUsd).toBe(29);
+        expect(stored.plan).toBe("premium");
+
+        const quote = await getPaymentOptions(bare, "zelf", "1", {}, { requestedPlan: "unlimited" });
+        expect(quote.upgradeCreditUsd).toBeGreaterThan(28);
+        expect(quote.upgradeCreditUsd).toBeLessThanOrEqual(29);
+    });
+
+    test("an upgrade starts a new term", async () => {
+        const bare = "upgradeat";
+        const originalStart = new Date("2024-06-01T00:00:00.000Z");
+        const planExpiresAt = moment.utc().add(8, "month").format("YYYY-MM-DD HH:mm:ss");
+        const tag = tagFor(bare, { plan: "premium", planExpiresAt, planDuration: "1" });
+        tags.set(bare, tag);
+        await PlanTerm.create({
+            zelfName: `${bare}.zelf`,
+            plan: "premium",
+            planExpiresAt,
+            paymentMethod: "stripe",
+            duration: "1",
+            amountPaidUsd: 29,
+            termStartedAt: originalStart,
+        });
+
+        const before = Date.now();
+        await addDurationToTag(purchase(bare, "unlimited", 84.5), tag);
+        const stored = await PlanTerm.findOne({ zelfName: `${bare}.zelf` }).lean();
+        expect(stored.plan).toBe("unlimited");
+        expect(stored.amountPaidUsd).toBe(84.5);
+        expect(new Date(stored.termStartedAt).toISOString()).not.toBe(originalStart.toISOString());
+        expect(new Date(stored.termStartedAt).getTime()).toBeGreaterThanOrEqual(before - 1000);
     });
 });

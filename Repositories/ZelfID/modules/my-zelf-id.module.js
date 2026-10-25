@@ -646,6 +646,7 @@ const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata, 
 
     const { savePlanTerm } = require("./zelf-id-plan-term.module");
     const { combineAmountPaid } = require("./zelf-id-upgrade-credit.module");
+    const { isExpiresAtPassed } = require("./zelf-id-plan.module");
     const { quoteHash } = require("./zelf-id-quote-grant.module");
     const PlanTerm = require("../models/zelf-id-plan-term.model");
     const grantQuoteHash = params.quoteToken ? quoteHash(params.quoteToken) : undefined;
@@ -655,22 +656,27 @@ const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata, 
     const charged = Number.isFinite(explicitCharge) ? explicitCharge : zeroMethods.has(params.paymentMethod) ? 0 : null;
     let amountPaidUsd;
     let existing = null;
+    let previousTermLapsed = false;
     if (mongoose.connection.readyState === 1) {
         const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
         const normalized = normalizeZelfName(storedName, params.domain || domainConfig?.name || "zelf");
         existing = normalized.zelfName ? await PlanTerm.findOne({ zelfName: normalized.zelfName }).lean() : null;
+        previousTermLapsed = Boolean(existing?.planExpiresAt) && isExpiresAtPassed({ expiresAt: existing.planExpiresAt });
         if (charged != null) {
             amountPaidUsd = combineAmountPaid({
                 previousPlan: existing?.plan,
                 previousAmount: existing?.amountPaidUsd,
                 nextPlan: planTerm?.plan || params.plan,
                 charged,
+                previousTermLapsed,
             });
         }
     }
     const nextPlan = planTerm?.plan || params.plan;
     const samePlan = existing?.plan && String(existing.plan).toLowerCase() === String(nextPlan || "").toLowerCase();
-    const termStartedAt = samePlan && existing.termStartedAt ? existing.termStartedAt : new Date();
+    // An open same-plan renewal keeps the term start and extends expiry. A lapsed same-plan
+    // renewal, and any upgrade, starts the term at this purchase.
+    const termStartedAt = samePlan && existing.termStartedAt && !previousTermLapsed ? existing.termStartedAt : new Date();
     if (planTerm) {
         if (planTerm.planExpiresAt) tagObject.publicData.planExpiresAt = planTerm.planExpiresAt;
         if (planTerm.paymentMethod) tagObject.publicData.paymentMethod = planTerm.paymentMethod;

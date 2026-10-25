@@ -2,6 +2,8 @@
  * Premium → Unlimited mid-term credit.
  * credit = amount paid for the open Premium term × remaining / total seconds,
  * floored to the cent and capped at the Unlimited price.
+ * Total is planExpiresAt minus termStartedAt when that start is stored,
+ * otherwise planExpiresAt minus the duration.
  * Lifetime and lapsed terms credit nothing. A missing payment record credits 0.
  */
 const moment = require("moment");
@@ -25,11 +27,9 @@ const roundCents = (usd) => {
     return Math.max(Math.round(n * 100) / 100, 0);
 };
 
-const creditFromPaid = ({ amountPaidUsd, planExpiresAt, duration, listPriceUsd, now = moment.utc() }) => {
+const creditFromPaid = ({ amountPaidUsd, planExpiresAt, duration, termStartedAt, listPriceUsd, now = moment.utc() }) => {
     const normalized = normalizePaymentDuration(duration);
     if (normalized === "lifetime") return 0;
-    const years = Number(normalized);
-    if (!Number.isFinite(years) || years <= 0) return 0;
     if (!planExpiresAt || isExpiresAtPassed({ expiresAt: planExpiresAt })) return 0;
 
     const paid = Number(amountPaidUsd);
@@ -37,7 +37,13 @@ const creditFromPaid = ({ amountPaidUsd, planExpiresAt, duration, listPriceUsd, 
 
     const end = parseLeaseDate(planExpiresAt);
     if (!end.isValid()) return 0;
-    const start = end.clone().subtract(years, "year");
+    const storedStart = termStartedAt ? moment.utc(termStartedAt) : null;
+    let start = storedStart && storedStart.isValid() && end.isAfter(storedStart) ? storedStart : null;
+    if (!start) {
+        const years = Number(normalized);
+        if (!Number.isFinite(years) || years <= 0) return 0;
+        start = end.clone().subtract(years, "year");
+    }
     const total = end.diff(start, "seconds");
     const remaining = end.diff(now, "seconds");
     if (!(total > 0) || remaining <= 0) return 0;
@@ -54,11 +60,12 @@ const priceAfterUpgradeCredit = (listPriceUsd, upgradeCreditUsd) => {
 };
 
 /**
- * Same-plan renewal adds the new charge onto what this term already recorded.
- * A plan change (Premium → Unlimited) stores only the new charge.
+ * Same-plan renewal of an open term adds the new charge onto what this term already recorded.
+ * A plan change stores only the new charge. A lapsed term is closed, so its amount is not carried forward.
  */
-const combineAmountPaid = ({ previousPlan, previousAmount, nextPlan, charged }) => {
+const combineAmountPaid = ({ previousPlan, previousAmount, nextPlan, charged, previousTermLapsed = false }) => {
     const next = roundCents(charged);
+    if (previousTermLapsed) return next;
     const same = previousPlan && String(previousPlan).toLowerCase() === String(nextPlan || "").toLowerCase();
     if (same && typeof previousAmount === "number") return roundCents(previousAmount + Number(charged));
     return next;
@@ -140,6 +147,7 @@ const computeUpgradeCredit = async ({ publicData = {}, tagName, domain, targetPl
         amountPaidUsd: paid.amountPaidUsd,
         planExpiresAt,
         duration,
+        termStartedAt: term?.termStartedAt,
         listPriceUsd: list,
     });
     return { upgradeCreditUsd, amountPaidUsd: paid.amountPaidUsd, listPriceUsd: list, upgradeTerm };
