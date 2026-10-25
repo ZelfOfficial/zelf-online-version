@@ -20,6 +20,7 @@ const { resolveEncryptVersion } = require("../../Tags/modules/tags-addresses.mod
 const { ZELFPROOF_CLIENT_ERROR_STATUS } = require("../../ZelfProof/modules/zelf-proof.module");
 
 const config = require("../../../Core/config");
+const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
 const { errorHandler } = require("../../../Core/http-handler");
 const { validate } = require("../../../Core/JoiUtils");
 const {
@@ -34,6 +35,17 @@ const {
     normalizeSetupKey,
     createZotpValidationError,
 } = require("./zelf-key-zotp.module");
+const PlanLimits = require("./zelf-key-plan-limits.module");
+
+const ownerParts = (authToken) => {
+    const domain = authToken?.domain || "zelf";
+    const raw = authToken?.tagName || authToken?.identifier;
+    const normalized = normalizeZelfName(raw, domain);
+    return {
+        identifier: normalized.tagName || raw,
+        domain: normalized.domain || domain,
+    };
+};
 
 const TYPES_REQUIRING_TRANSPORT_ENCRYPTION = new Set(["password", "notes", "note", "credit_card", "payment-card"]);
 const SUPPORTED_CATEGORIES = ["password", "notes", "credit_card", "contact", "zotp"];
@@ -240,8 +252,7 @@ const stampV4PublicData = (publicData) =>
     });
 
 const createMetadataAndPublicData = async (type, data, authToken) => {
-    const identifier = authToken.tagName || authToken.identifier;
-    const domain = authToken.domain || "zelf";
+    const { identifier, domain } = ownerParts(authToken);
 
     const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
     const protection = resolveProtection(data.protection);
@@ -527,7 +538,12 @@ const storeData = async (data, authToken) => {
 
         const faceBase64 = decryptedParams.face;
 
-        await _validateOwnership(data.faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
+        const ownership = await _validateOwnership(data.faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
+
+        let capacityDecision = null;
+        if (type === "password" || type === "zotp") {
+            capacityDecision = await assertVaultCapacity(type, data, authToken, ownership?.publicData);
+        }
 
         const { metadata, publicData, fullTagName, protection } = await createMetadataAndPublicData(
             type,
@@ -551,9 +567,12 @@ const storeData = async (data, authToken) => {
             decryptedParams.password,
         );
 
+        await retireReplacedRecord(capacityDecision?.replacedId, result);
+
         return {
             ...result,
             type,
+            replacedId: capacityDecision?.replacedId || null,
             message: "Data stored successfully",
         };
     } catch (error) {
@@ -568,6 +587,82 @@ const formatStoreError = (error) => {
     return {
         message: handled.message,
         code: handled.code,
+        ...(error?.details && typeof error.details === "object" ? error.details : {}),
+    };
+};
+
+const assertVaultCapacity = async (kind, item, authToken, tagPublicData) => {
+    const listed = await listData({ category: kind }, authToken);
+    return PlanLimits.assertCanAdd({
+        authUser: authToken,
+        kind,
+        used: listed.totalCount || 0,
+        items: listed.data || [],
+        item,
+        tagPublicData,
+    });
+};
+
+const retireReplacedRecord = async (replacedId, stored) => {
+    if (!replacedId) return;
+    const newId = stored?.ipfs?.id;
+    if (!newId || newId === replacedId) return;
+
+    try {
+        await IPFS.deleteFiles([replacedId]);
+    } catch (error) {
+        try {
+            await IPFS.deleteFiles([newId]);
+        } catch (rollbackError) {
+            console.error("ZelfKey replace rollback failed", rollbackError);
+        }
+        console.error("ZelfKey replace failed", error);
+        throw new Error("409:failed_to_replace_zelf_key");
+    }
+};
+
+const openPasswordCapacity = async (authToken, tagPublicData) => {
+    const listed = await listData({ category: "password" }, authToken);
+    const items = listed.data || [];
+    let used = listed.totalCount || items.length;
+    const entitlement = await PlanLimits.resolveEntitlement(authToken, {
+        tagPublicData: tagPublicData ?? null,
+        skipTagLookup: true,
+        allowIdentifierOwner: true,
+    });
+
+    if (!entitlement) {
+        return {
+            take() {
+                return { allowed: true, isUpdate: false, replacedId: null };
+            },
+            commit() {},
+        };
+    }
+
+    const account = await PlanLimits.loadAccount(entitlement.identity.zelfName);
+    const replacedIds = new Set();
+
+    return {
+        take(item) {
+            const target = PlanLimits.findEditTarget("password", item, items);
+            const replacedId = target ? target.id || target.cid : null;
+            const isUpdate = Boolean(replacedId) && !replacedIds.has(replacedId);
+            const decision = PlanLimits.evaluateLimit({
+                plan: entitlement.plan,
+                kind: "password",
+                used,
+                slots: account.slots,
+                isUpdate,
+                domainConfig: entitlement.domainConfig,
+            });
+            if (!decision.allowed) throw PlanLimits.limitReachedError(decision);
+            return { ...decision, isUpdate, replacedId: isUpdate ? replacedId : null };
+        },
+        commit(decision) {
+            if (decision.isUpdate && decision.replacedId) replacedIds.add(decision.replacedId);
+            else if (!decision.isUpdate) used += 1;
+        },
     };
 };
 
@@ -623,7 +718,8 @@ const storePasswordsBulk = async (data, authToken) => {
 
     const decryptedParams = await decryptKeyCredentials({ faceBase64, removePGP, ...data }, authToken);
 
-    await _validateOwnership(faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
+    const ownership = await _validateOwnership(faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
+    const capacity = await openPasswordCapacity(authToken, ownership?.publicData);
 
     const batchProtection = resolveProtection(data.protection);
     assertProtectionStoreRules(batchProtection, decryptedParams.password);
@@ -655,10 +751,14 @@ const storePasswordsBulk = async (data, authToken) => {
         }
 
         try {
+            const decision = capacity.take(item);
             const stored = await _storePasswordRecord(item, authToken, sharedContext, `${batchTag}_${index}`);
+            await retireReplacedRecord(decision.replacedId, stored);
+            capacity.commit(decision);
             success.push({
                 index,
                 ...stored,
+                replacedId: decision.replacedId || null,
             });
         } catch (error) {
             failed.push({
@@ -942,17 +1042,18 @@ const _listCategoryPrefixesForOwner = (identifier, domain) => {
 const listData = async (data, authToken) => {
     try {
         const { category, tagName: queryTagName } = data;
-        let identifier = authToken.tagName || authToken.identifier;
+        const owned = ownerParts(authToken);
+        let identifier = owned.identifier;
+        let domain = owned.domain;
 
         // Allow tagName override only for staff or when it matches the authenticated user
-        let domain = authToken.domain || "zelf";
         if (queryTagName && queryTagName.trim()) {
             const isStaff = authToken.accountType === "staff";
-            const userTagName = TagsPartsModule.getFullTagName(identifier, domain);
-            if (isStaff || queryTagName === userTagName) {
-                const parts = queryTagName.split(".");
-                identifier = parts[0] || queryTagName;
-                domain = parts[1] || domain;
+            const requested = normalizeZelfName(queryTagName, domain);
+            const userTagName = identifier ? `${identifier}.${domain}` : "";
+            if (isStaff || requested.zelfName === userTagName) {
+                identifier = requested.tagName;
+                domain = requested.domain;
             }
         }
         const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
@@ -1024,14 +1125,20 @@ const listDataForDashboard = async (identifier, category, authToken) => {
     const accountType = authToken.accountType || authToken.publicData?.accountType || "";
     const isPrivileged = ["staff", "staff_account", "lawyer", "lawyer_account"].includes(accountType);
     const userIdentifier = authToken.tagName || authToken.identifier;
+    const requestedOwner = normalizeZelfName(identifier, domainPart);
     if (!isPrivileged && userIdentifier) {
-        const userTagName = TagsPartsModule.getFullTagName(userIdentifier, authToken.domain || "zelf");
-        if (identifier !== userTagName) {
+        const userTagName = normalizeZelfName(userIdentifier, authToken.domain || domainPart).zelfName;
+        if (requestedOwner.zelfName !== userTagName) {
             throw new Error("403:Not authorized to query ZelfKeys for this identifier");
         }
     }
 
-    const syntheticAuthToken = { ...authToken, tagName: identifierPart, identifier: identifierPart, domain: domainPart };
+    const syntheticAuthToken = {
+        ...authToken,
+        tagName: requestedOwner.tagName,
+        identifier: requestedOwner.tagName,
+        domain: requestedOwner.domain,
+    };
 
     if (category) {
         return listData({ category }, syntheticAuthToken);
@@ -1090,8 +1197,7 @@ const listAllData = async (data, authToken) => {
 };
 
 const _assertKeyRecordBelongsToCaller = async (id, authToken) => {
-    const identifier = authToken.tagName || authToken.identifier;
-    const domain = authToken.domain || "zelf";
+    const { identifier, domain } = ownerParts(authToken);
     const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
 
     let item;
@@ -1137,16 +1243,17 @@ const deleteZelfKey = async (data, authToken) => {
 };
 
 const _validateOwnership = async (faceBase64, zelfIdPassword, authToken, extraParams) => {
+    const owner = ownerParts(authToken);
     const sessionParams = {
-        domain: authToken.domain,
+        domain: owner.domain,
         faceBase64,
         password: zelfIdPassword,
-        tagName: authToken.tagName || authToken.identifier,
+        tagName: owner.identifier,
         removePGP: extraParams.removePGP || false,
     };
 
     // this will throw an error if the tag is not found or the password is incorrect or the face is incorrect
-    await TagsModule.decryptTag(sessionParams, authToken);
+    return TagsModule.decryptTag(sessionParams, authToken);
 };
 
 /**
@@ -1191,8 +1298,7 @@ const _isValidCreditCard = (cardNumber) => {
  * @param {Object} authToken
  */
 const getProof = async (data, authToken) => {
-    const identifier = authToken.tagName || authToken.identifier;
-    const domain = authToken.domain || "zelf";
+    const { identifier, domain } = ownerParts(authToken);
     const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
 
     let item;
@@ -1234,8 +1340,7 @@ const getProof = async (data, authToken) => {
 };
 
 const _listOwnedKeyItems = async (authToken) => {
-    const identifier = authToken.tagName || authToken.identifier;
-    const domain = authToken.domain || "zelf";
+    const { identifier, domain } = ownerParts(authToken);
     const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
     const items = [];
     const seenIds = new Set();
@@ -1450,9 +1555,26 @@ const changeMasterPassword = async (data, authToken) => {
     };
 };
 
+const purchaseExtraSlot = async (data, authUser) => {
+    await _validateOwnership(data.faceBase64, resolveZelfIdPasswordForOwnership(data), authUser, data);
+    return PlanLimits.purchaseExtraSlot(data, authUser);
+};
+
+const getVaultLimits = async (authUser) => {
+    PlanLimits.requireZelfIdentity(authUser);
+    const [passwords, zotp] = await Promise.all([
+        listData({ category: "password" }, authUser),
+        listData({ category: "zotp" }, authUser),
+    ]);
+
+    return PlanLimits.getPlanUsage(authUser, {
+        password: passwords.totalCount || 0,
+        zotp: zotp.totalCount || 0,
+    });
+};
+
 const summarizeData = async (_data, authToken) => {
-    const identifier = authToken.tagName || authToken.identifier;
-    const domain = authToken.domain || "zelf";
+    const { identifier, domain } = ownerParts(authToken);
     const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
     const counts = {
         password: 0,
@@ -1492,6 +1614,8 @@ module.exports = {
     listDataForDashboard,
     listAllDataForDashboard,
     summarizeData,
+    getVaultLimits,
+    purchaseExtraSlot,
     deleteZelfKey,
     changeMasterPassword,
     resolveProtection,

@@ -49,6 +49,13 @@ const parsePositiveFloat = (value, fallback) => {
     return Number.isFinite(n) && n > 0 ? n : fallback;
 };
 
+/** Non-negative integer from env; otherwise `fallback`. */
+const parseNonNegativeInt = (value, fallback) => {
+    if (value === undefined || value === null || String(value).trim() === "") return fallback;
+    const n = Math.floor(Number(value));
+    return Number.isFinite(n) && n >= 0 ? n : fallback;
+};
+
 /**
  * USD price of one ZNS token. Presale, rewards, and subscription grants all use this rate.
  * Default matches the historical hard-coded presale and reward price.
@@ -184,6 +191,33 @@ const configuration = {
             const n = Math.floor(Number(raw));
             return Number.isFinite(n) && n >= 0 ? n : 10;
         })(),
+    },
+    /**
+     * Zelf Keys vault caps (passwords and 2FA / zOTP) for the consumer Free, Premium,
+     * and Unlimited plans. `null` means unlimited. Slot USD targets convert to ZNS with
+     * `token.priceUsd` (ceil). A domain license may override a plan via `zelfkeys.planLimits`.
+     * This does not change what Stripe or RevenueCat charges for the plans themselves.
+     */
+    zelfKeysVault: {
+        slotDurationMonths: parseNonNegativeInt(process.env.ZELF_KEYS_SLOT_MONTHS, 12) || 12,
+        slotPriceUsd: {
+            password: parsePositiveFloat(process.env.ZELF_KEYS_PASSWORD_SLOT_USD, 0.5),
+            zotp: parsePositiveFloat(process.env.ZELF_KEYS_ZOTP_SLOT_USD, 1),
+        },
+        plans: {
+            free: {
+                passwords: parseNonNegativeInt(process.env.ZELF_KEYS_FREE_PASSWORD_LIMIT, 5),
+                zotp: parseNonNegativeInt(process.env.ZELF_KEYS_FREE_ZOTP_LIMIT, 3),
+            },
+            premium: {
+                passwords: parseNonNegativeInt(process.env.ZELF_KEYS_PREMIUM_PASSWORD_LIMIT, 100),
+                zotp: parseNonNegativeInt(process.env.ZELF_KEYS_PREMIUM_ZOTP_LIMIT, 20),
+            },
+            unlimited: {
+                passwords: null,
+                zotp: null,
+            },
+        },
     },
     landingUrl: process.env.LANDING_URL || (process.env.NODE_ENV === "development" ? "http://localhost:3009" : "https://zelf.world"),
     pgp: {

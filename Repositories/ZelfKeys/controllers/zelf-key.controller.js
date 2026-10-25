@@ -7,6 +7,17 @@ const Module = require("../modules/zelf-key.module.js");
 const ZelfKeyDomainModule = require("../modules/zelf-key-domain.module");
 const { errorHandler } = require("../../../Core/http-handler");
 
+const sendModuleError = (ctx, error) => {
+	const _exception = errorHandler(error, ctx);
+
+	ctx.status = _exception.status;
+	ctx.body = {
+		message: _exception.message,
+		code: _exception.code,
+		...(error?.details && typeof error.details === "object" ? error.details : {}),
+	};
+};
+
 /**
  * Store website password specifically
  * @param {Object} ctx - Koa context
@@ -23,11 +34,7 @@ const storePassword = async (ctx) => {
 
 		ctx.body = { data };
 	} catch (error) {
-		const _exception = errorHandler(error, ctx);
-
-		ctx.status = _exception.status;
-
-		ctx.body = { message: _exception.message, code: _exception.code };
+		sendModuleError(ctx, error);
 	}
 };
 
@@ -41,11 +48,7 @@ const storePasswordsBulk = async (ctx) => {
 
 		ctx.body = { data };
 	} catch (error) {
-		const _exception = errorHandler(error, ctx);
-
-		ctx.status = _exception.status;
-
-		ctx.body = { message: _exception.message, code: _exception.code };
+		sendModuleError(ctx, error);
 	}
 };
 
@@ -65,11 +68,7 @@ const storeZOTP = async (ctx) => {
 
 		ctx.body = { data };
 	} catch (error) {
-		const _exception = errorHandler(error, ctx);
-
-		ctx.status = _exception.status;
-
-		ctx.body = { message: _exception.message, code: _exception.code };
+		sendModuleError(ctx, error);
 	}
 };
 
@@ -300,6 +299,30 @@ const changeMasterPassword = async (ctx) => {
 };
 
 /**
+ * Plan, usage, extra slots, and token cost for the authenticated Zelf identity.
+ * @param {Object} ctx - Koa context
+ */
+const getVaultLimits = async (ctx) => {
+	try {
+		const data = await Module.getVaultLimits(ctx.state.user);
+
+		ctx.body = { data };
+	} catch (error) {
+		sendModuleError(ctx, error);
+	}
+};
+
+const purchaseExtraSlot = async (ctx) => {
+	try {
+		const data = await Module.purchaseExtraSlot(ctx.request.body, ctx.state.user);
+
+		ctx.body = { data };
+	} catch (error) {
+		sendModuleError(ctx, error);
+	}
+};
+
+/**
  * Delete ZelfKey
  * @param {Object} ctx - Koa context
  */
@@ -341,6 +364,8 @@ module.exports = {
 	listAllDataDashboard,
 	listDomainKeys,
 	summarizeData,
+	getVaultLimits,
+	purchaseExtraSlot,
 	changeMasterPassword,
 	deleteZelfKey,
 };

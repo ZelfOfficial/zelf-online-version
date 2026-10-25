@@ -12,6 +12,7 @@ process.env.FACE_POW_BASE_DIFFICULTY = "8";
 process.env.FACE_ATTEMPT_LOCKOUT_STEPS_SEC = "900,3600,86400";
 process.env.FACE_ATTEMPT_IDENTITY_WINDOW_SEC = "900";
 
+const config = require("../../Core/config");
 const FacePow = require("../../Repositories/Face/modules/face-pow.module");
 const FaceNonce = require("../../Repositories/Face/modules/face-nonce.module");
 const FaceAttemptLimiter = require("../../Repositories/Face/modules/face-attempt-limiter.module");
@@ -76,6 +77,51 @@ describe("face proof-of-work", () => {
             action: "decrypt",
         });
         expect(replay.ok).toBe(false);
+    });
+
+    it("returns a clear 503 when FACE_POW_HMAC_SECRET is missing after failed face attempts", async () => {
+        const original = config.faceSecurity.pow.hmacSecret;
+        config.faceSecurity.pow.hmacSecret = "";
+        try {
+            await FaceAttemptLimiter.recordFailedAttempt({
+                identityKey: "purchase-slot:alice@zelf",
+                deviceKey: "sess-pow-missing",
+                ip: "127.0.0.1",
+            });
+
+            const ctx = {
+                request: {
+                    body: { faceBase64: "ZmFjZQ==", kind: "password", idempotencyKey: "idem-key-01" },
+                    ip: "127.0.0.1",
+                },
+                state: { user: { tagName: "alice", domain: "zelf", session: "sess-pow-missing" } },
+                path: "/api/zelf-keys/slots",
+                status: undefined,
+                body: undefined,
+                set() {},
+                get() {},
+            };
+
+            let loggedSecret = false;
+            const logged = jest.spyOn(console, "error").mockImplementation((...args) => {
+                if (args.some((part) => String(part).includes("FACE_POW_HMAC_SECRET"))) loggedSecret = true;
+            });
+            try {
+                await FaceMiddleware.gate("purchase-slot")(ctx, async () => {
+                    ctx.status = 200;
+                });
+            } finally {
+                logged.mockRestore();
+            }
+
+            expect(ctx.status).toBe(503);
+            expect(ctx.body.code).toBe("face_pow_unconfigured");
+            expect(ctx.body.message).toBe("Face verification is temporarily unavailable");
+            expect(JSON.stringify(ctx.body)).not.toMatch(/FACE_POW_HMAC_SECRET/);
+            expect(loggedSecret).toBe(true);
+        } finally {
+            config.faceSecurity.pow.hmacSecret = original;
+        }
     });
 
     it("rejects expired or wrong-identity challenges", async () => {

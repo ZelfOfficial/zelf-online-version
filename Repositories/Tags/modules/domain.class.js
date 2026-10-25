@@ -56,6 +56,16 @@ class Domain {
 
         this.zelfkeys = {
             plans: domainData.zelfkeys?.plans || [],
+            /**
+             * Optional per-plan password / 2FA caps. Keys are plan names (`free`, `premium`, `unlimited`).
+             * A numeric field replaces the config cap; `null` means unlimited for that kind.
+             * Omitted fields keep the config default. This is separate from `limits.zelfkeys`,
+             * which is the org seat count from the Stripe license, not a password cap.
+             */
+            planLimits:
+                domainData.zelfkeys?.planLimits && typeof domainData.zelfkeys.planLimits === "object"
+                    ? domainData.zelfkeys.planLimits
+                    : {},
             payment: {
                 whitelist: domainData.zelfkeys?.payment?.whitelist || domainData.zelfkeys?.whitelist || {},
                 pricingTable: domainData.zelfkeys?.payment?.pricingTable || domainData.zelfkeys?.pricingTable || {},

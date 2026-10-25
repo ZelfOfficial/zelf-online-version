@@ -75,7 +75,6 @@ const decryptWallet = async (ctx) => {
 	try {
 		const data = await Module.decryptWallet(ctx.request.body, ctx.state.user);
 
-		await SessionModule.deleteSession(ctx.state.user);
 		ctx.body = { data };
 	} catch (error) {
 		console.error(error);
@@ -137,9 +136,6 @@ const seeWallet = async (ctx) => {
 const importWallet = async (ctx) => {
 	try {
 		const data = await Module.importWallet(ctx.request.body, ctx.state.user);
-
-		// delete the session
-		await SessionModule.deleteSession(ctx.state.user);
 
 		ctx.body = { data };
 	} catch (error) {

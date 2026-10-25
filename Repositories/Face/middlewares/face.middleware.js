@@ -51,6 +51,14 @@ const handleFaceSecurityError = (ctx, err) => {
         };
         return true;
     }
+    if (err?.clientCode === "face_pow_unconfigured" || /face_pow_unconfigured/.test(String(err?.message || ""))) {
+        ctx.status = 503;
+        ctx.body = {
+            message: "Face verification is temporarily unavailable",
+            code: "face_pow_unconfigured",
+        };
+        return true;
+    }
     if (err?.clientCode === "face_replay_detected") {
         ctx.status = 409;
         ctx.body = {

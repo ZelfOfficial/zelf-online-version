@@ -8,7 +8,11 @@ const config = require("../../../Core/config");
 const PGPKeyModule = require("../../PGP/modules/pgp-keys.module");
 const MongoORM = require("../../../Core/mongo-orm");
 const moment = require("moment");
+const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
 const populates = [];
+
+/** Same 10-minute window as the session TTL (`activatedAt` expires after 600s). */
+const IDENTITY_VERIFIED_WINDOW_MS = 10 * 60 * 1000;
 
 /**
  * @param {*} params
@@ -31,47 +35,13 @@ const get = async (params, authUser = {}) => {
 };
 
 /**
+ * Every call creates a new session record and a token for that record only.
+ * Lookup by IP, tag, or identifier is intentionally not done: a second token must not
+ * share or clear another session's verification stamp.
  * @param {*} params
  */
 const insert = async (params) => {
-	const queryParams = {
-		findOne: true,
-	};
-
-	queryParams.where_clientIP = params.clientIP;
-
-	if (params.tagName) queryParams["?where_tagName"] = params.tagName;
-	if (params.identifier) queryParams["?where_identifier"] = params.identifier;
-
-	let existingSession = await get(queryParams);
-
-	if (existingSession) {
-		if (params.killSession) {
-			try {
-				await existingSession.deleteOne();
-			} catch (_) {
-				// session was already deleted by a concurrent request, which is fine
-			}
-
-			existingSession = null;
-		} else {
-			return {
-				token: jwt.sign(
-					{
-						domain: existingSession.domain,
-						ethAddress: existingSession.ethAddress,
-						identifier: existingSession.identifier,
-						ip: existingSession.clientIP,
-						session: existingSession._id,
-						tagName: existingSession.tagName,
-					},
-					config.JWT_SECRET
-				),
-				activatedAt: moment(existingSession.activatedAt).utc().unix(),
-				expiresAt: moment(existingSession.activatedAt).utc().add(10, "minutes").unix(),
-			};
-		}
-	}
+	await Model.ensureNonUniqueIdentifierIndex();
 
 	const session = new Model({
 		clientIP: params.clientIP,
@@ -80,8 +50,12 @@ const insert = async (params) => {
 		identifier: params.identifier || params.clientIP,
 		isWebExtension: params.isWebExtension || false,
 		status: "active",
+		// Client tagName and type are stored for compatibility. They do not prove a face check.
 		tagName: params.tagName || null,
 		type: params.type || "general",
+		verifiedTagName: null,
+		verifiedAt: null,
+		verifiedUntil: null,
 	});
 
 	try {
@@ -90,8 +64,9 @@ const insert = async (params) => {
 		console.error({
 			exception,
 			identifier: params.clientIP,
-			...session,
 		});
+
+		throw exception;
 	}
 
 	return {
@@ -312,7 +287,46 @@ const walletDecrypt = async (content, walletScopeKey, password, legacyIdentifier
  * @author Miguel Trevino
  */
 const deleteSession = async (authUser) => {
-	return await Model.deleteMany({ identifier: authUser.identifier });
+	if (authUser?.session) {
+		return await Model.deleteOne({ _id: authUser.session });
+	}
+
+	if (authUser?.identifier) {
+		return await Model.deleteMany({ identifier: authUser.identifier });
+	}
+
+	return null;
+};
+
+/**
+ * Stamp the current session after a successful face check (and master password when the wallet has one).
+ * The name stored is the normalized tag, not whatever the client sent at session create.
+ * @param {Object} authUser
+ * @param {string} tagName
+ * @param {string} [domain]
+ */
+const markSessionIdentityVerified = async (authUser, tagName, domain) => {
+	// Stamp only the session id on the unlock request. Never match by IP or tag.
+	if (!authUser?.session) return null;
+
+	const normalized = normalizeZelfName(tagName, domain || authUser.domain || "zelf");
+	if (!normalized.zelfName) return null;
+
+	const verifiedAt = new Date();
+	const verifiedUntil = new Date(verifiedAt.getTime() + IDENTITY_VERIFIED_WINDOW_MS);
+
+	await Model.updateOne(
+		{ _id: authUser.session },
+		{
+			$set: {
+				verifiedTagName: normalized.zelfName,
+				verifiedAt,
+				verifiedUntil,
+			},
+		}
+	);
+
+	return { ...normalized, verifiedAt, verifiedUntil };
 };
 
 module.exports = {
@@ -328,4 +342,7 @@ module.exports = {
 	walletEncrypt,
 	walletDecrypt,
 	deleteSession,
+	markSessionIdentityVerified,
+	IDENTITY_VERIFIED_WINDOW_MS,
+	normalizeZelfName,
 };
