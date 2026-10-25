@@ -182,20 +182,23 @@ describe("monthly ZNS access", () => {
     });
 
     test("the first open charges once, including parallel requests", async () => {
-        const first = await open({ zelfName: "once.zelf" });
+        const first = await open({ zelfName: "once.zelf", balance: 500 });
         expect(first.charged).toBe(true);
         expect(first.receipt.amountZns).toBe(49);
         expect(first.receipt.charged).toBe(true);
+        expect(first.receipt.spendableBalance).toBe(451);
 
-        const again = await open({ zelfName: "once.zelf" });
+        const again = await open({ zelfName: "once.zelf", balance: 500 });
         expect(again.allowed).toBe(true);
         expect(again.charged).toBe(false);
         expect(again.idempotent).toBe(true);
+        expect(again.receipt.spendableBalance).toBe(451);
 
         const parallelName = "parallel.zelf";
-        const results = await Promise.all(Array.from({ length: 8 }, () => open({ zelfName: parallelName })));
+        const results = await Promise.all(Array.from({ length: 8 }, () => open({ zelfName: parallelName, balance: 500 })));
         expect(results.every((row) => row.allowed)).toBe(true);
         expect(results.filter((row) => row.charged).length).toBe(1);
+        expect(results.every((row) => row.receipt.spendableBalance === 451)).toBe(true);
 
         const once = await SlotAccount.findOne({ zelfName: "once.zelf" }).lean();
         const parallel = await SlotAccount.findOne({ zelfName: parallelName }).lean();
@@ -276,6 +279,66 @@ describe("monthly ZNS access", () => {
         expect(spent).toBeNull();
         expect(await MonthlyAccessAudit.countDocuments({ zelfName: name, event: "grace_opened" })).toBe(1);
         expect(await MonthlyAccessAudit.countDocuments({ zelfName: name, event: "grace_blocked" })).toBe(6);
+        expect(results[0].body.confirmReady).toBe(false);
+        expect(results[0].body.signedDataPrice).toEqual(expect.any(String));
+    });
+
+    test("a grace month with enough ZNS stays blocked until confirm, and the 402 carries that quote", async () => {
+        const name = "paybutton.zelf";
+        await open({ zelfName: name, balance: 0 });
+        const blocked = await open({ zelfName: name, balance: 1000 });
+        expect(blocked.allowed).toBe(false);
+        expect(blocked.body.confirmReady).toBe(true);
+        expect(blocked.body.znsNeeded).toBe(0);
+        expect(blocked.body.amountZns).toBe(49);
+        expect(jwt.verify(blocked.body.signedDataPrice, config.JWT_SECRET).amountZns).toBe(49);
+
+        const paid = await confirmMonthlyAccess({
+            token: blocked.body.signedDataPrice,
+            authUser: { tagName: "paybutton", domain: "zelf" },
+            plan: "free",
+            publicData: freePublic(name),
+            domainConfig,
+            balance: 1000,
+            now: OCTOBER,
+            skipSubscriptionLookup: true,
+        });
+        expect(paid.status).toBe("paid");
+        expect(paid.charged).toBe(true);
+        expect(paid.amountZns).toBe(49);
+    });
+
+    test("monthly-access quotes use MONTHLY_ZNS_ACCESS_QUOTE_SECRET when it is set", async () => {
+        process.env.MONTHLY_ZNS_ACCESS_QUOTE_SECRET = "dedicated-quote-secret";
+        try {
+            const quote = await quoteMonthlyAccess({
+                zelfName: "quoted.zelf",
+                authUser: { tagName: "quoted", domain: "zelf" },
+                plan: "free",
+                publicData: freePublic("quoted.zelf"),
+                domainConfig,
+                balance: 0,
+                tokenPriceUsd: 0.05,
+                floorUsd: 0.1,
+                now: OCTOBER,
+                skipSubscriptionLookup: true,
+            });
+            expect(() => jwt.verify(quote.signedDataPrice, config.JWT_SECRET)).toThrow();
+            expect(jwt.verify(quote.signedDataPrice, "dedicated-quote-secret").amountZns).toBe(49);
+            const paid = await confirmMonthlyAccess({
+                token: quote.signedDataPrice,
+                authUser: { tagName: "quoted", domain: "zelf" },
+                plan: "free",
+                publicData: freePublic("quoted.zelf"),
+                domainConfig,
+                balance: 1000,
+                now: OCTOBER,
+                skipSubscriptionLookup: true,
+            });
+            expect(paid.status).toBe("paid");
+        } finally {
+            delete process.env.MONTHLY_ZNS_ACCESS_QUOTE_SECRET;
+        }
     });
 
     test("parallel first opens with a short balance record grace once", async () => {

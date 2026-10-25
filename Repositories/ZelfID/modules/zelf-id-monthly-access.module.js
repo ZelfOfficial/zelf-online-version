@@ -173,7 +173,13 @@ const quotePayload = (identity, amount, now) => ({
     ttl: moment.utc(now || new Date()).add(QUOTE_HOURS, "hours").unix(),
 });
 
-const signQuote = (payload) => jwt.sign(payload, config.JWT_SECRET);
+const quoteSecret = () => {
+    const dedicated = process.env.MONTHLY_ZNS_ACCESS_QUOTE_SECRET;
+    if (dedicated != null && String(dedicated).trim() !== "") return String(dedicated);
+    return config.JWT_SECRET;
+};
+
+const signQuote = (payload) => jwt.sign(payload, quoteSecret());
 
 const paymentOptions = (quote, spendable) => {
     const balance = Number.isFinite(Number(spendable)) ? Number(spendable) : 0;
@@ -188,8 +194,10 @@ const paymentOptions = (quote, spendable) => {
     };
 };
 
-const paymentRequiredBody = ({ quote, spendable, periodKey }) => {
-    const extra = paymentOptions(quote, spendable);
+const paymentRequiredBody = ({ quote, spendable, periodKey, signedDataPrice }) => {
+    const balance = Number.isFinite(Number(spendable)) ? Number(spendable) : 0;
+    const extra = paymentOptions(quote, balance);
+    const confirmReady = balance >= Number(quote.amountZns);
     return {
         message: "Monthly access payment is required",
         code: "monthly_access_payment_required",
@@ -199,11 +207,31 @@ const paymentRequiredBody = ({ quote, spendable, periodKey }) => {
         tokenPriceUsd: quote.tokenPriceUsd,
         floorUsd: quote.floorUsd,
         premiumYearlyUsd: quote.premiumYearlyUsd,
-        spendableBalance: Number.isFinite(Number(spendable)) ? Number(spendable) : 0,
+        spendableBalance: balance,
         znsNeeded: extra.znsNeeded,
         openAllowed: false,
+        confirmReady,
+        signedDataPrice: signedDataPrice || null,
         options: extra.options,
     };
+};
+
+const signedQuoteFor = (view) => {
+    const payload = quotePayload(
+        view.identity,
+        {
+            premiumYearlyUsd: view.quote.premiumYearlyUsd,
+            amountUsd: view.quote.amountUsd,
+            tokenPriceUsd: view.quote.tokenPriceUsd,
+            floorUsd: view.quote.floorUsd,
+            floorZns: view.quote.floorZns,
+            amountZns: view.quote.amountZns,
+        },
+        view.now,
+    );
+    if (view.quote.quoteId) payload.quoteId = view.quote.quoteId;
+    payload.periodKey = view.periodKey || payload.periodKey;
+    return signQuote(payload);
 };
 
 const presentRecord = (record, extra = {}) => {
@@ -444,6 +472,12 @@ const debitOnce = async ({ identity, cost, periodKey, quoteId, onChain, now }) =
     throw accessError(402, "monthly_access_payment_required", "Monthly access payment is required");
 };
 
+const spendableAfter = async (view) => {
+    if (!view?.identity?.zelfName) return view?.spendable ?? 0;
+    const account = await loadAccount(view.identity.zelfName);
+    return spendableBalance(view.onChain, account.spent || 0);
+};
+
 const blockedResult = async (view, { audit = true } = {}) => {
     if (audit) {
         await writeAudit({
@@ -458,10 +492,20 @@ const blockedResult = async (view, { audit = true } = {}) => {
             at: view.now,
         });
     }
+    const spendable = await spendableAfter(view);
+    let signedDataPrice = null;
+    if (view.identity?.zelfName) {
+        try {
+            signedDataPrice = signedQuoteFor({ ...view, spendable });
+        } catch (_error) {
+            signedDataPrice = null;
+        }
+    }
     const body = paymentRequiredBody({
         quote: view.quote,
-        spendable: view.spendable,
+        spendable,
         periodKey: view.periodKey,
+        signedDataPrice,
     });
     return {
         allowed: false,
@@ -639,11 +683,12 @@ const commitReady = async (view) => {
         }
         if (existing?.status === "reserving") existing = await settleReservation(existing);
         if (existing?.status === "paid") {
+            const spendable = await spendableAfter(view);
             return allowedResult(view, {
                 status: "paid",
                 idempotent: true,
                 charged: false,
-                receipt: presentRecord(existing, { charged: false, idempotent: true, spendableBalance: view.spendable }),
+                receipt: presentRecord(existing, { charged: false, idempotent: true, spendableBalance: spendable }),
             });
         }
         if (existing?.status === "grace") {
@@ -661,11 +706,12 @@ const commitReady = async (view) => {
         if (!paid) {
             const current = await MonthlyAccess.findById(claimed._id).lean();
             if (current?.status === "paid") {
+                const spendable = await spendableAfter(view);
                 return allowedResult(view, {
                     status: "paid",
                     idempotent: true,
                     charged: false,
-                    receipt: presentRecord(current, { charged: false, idempotent: true }),
+                    receipt: presentRecord(current, { charged: false, idempotent: true, spendableBalance: spendable }),
                 });
             }
             throw accessError(409, "monthly_access_in_progress", "Monthly access is being recorded. Retry.");
@@ -723,10 +769,11 @@ const commitReady = async (view) => {
         if (!grace) {
             const current = await MonthlyAccess.findById(claimed._id).lean();
             if (current?.status === "paid") {
+                const spendable = await spendableAfter(view);
                 return allowedResult(view, {
                     status: "paid",
                     idempotent: true,
-                    receipt: presentRecord(current, { charged: false, idempotent: true }),
+                    receipt: presentRecord(current, { charged: false, idempotent: true, spendableBalance: spendable }),
                 });
             }
             if (current?.status === "grace") {
@@ -1050,7 +1097,7 @@ const quoteMonthlyAccess = async (input) => {
 const verifyQuoteToken = (token) => {
     let decoded;
     try {
-        decoded = jwt.verify(token, config.JWT_SECRET);
+        decoded = jwt.verify(token, quoteSecret());
     } catch (_error) {
         throw accessError(401, "monthly_access_quote_invalid", "Monthly access quote is not valid");
     }
@@ -1147,7 +1194,12 @@ const confirmMonthlyAccess = async (input) => {
     };
 
     if (spendable < quote.amountZns) {
-        const body = paymentRequiredBody({ quote, spendable, periodKey: quote.periodKey });
+        const body = paymentRequiredBody({
+            quote,
+            spendable,
+            periodKey: quote.periodKey,
+            signedDataPrice: input.token,
+        });
         throw accessError(402, "monthly_access_payment_required", body.message, body);
     }
 
