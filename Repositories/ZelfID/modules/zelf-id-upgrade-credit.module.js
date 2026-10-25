@@ -138,6 +138,7 @@ const computeUpgradeCredit = async ({ publicData = {}, tagName, domain, targetPl
         planExpiresAt: planExpiresAt || null,
         amountPaidUsd: paid.amountPaidUsd,
         duration: duration ? String(duration) : null,
+        termStartedAt: termStartedAtStamp(term?.termStartedAt) || null,
     };
     if (!duration || normalizePaymentDuration(duration) === "lifetime" || !planExpiresAt) {
         return { ...none, amountPaidUsd: paid.amountPaidUsd, upgradeTerm };
@@ -153,6 +154,17 @@ const computeUpgradeCredit = async ({ publicData = {}, tagName, domain, targetPl
     return { upgradeCreditUsd, amountPaidUsd: paid.amountPaidUsd, listPriceUsd: list, upgradeTerm };
 };
 
+/**
+ * ISO instant, or "" when the term has no stored start.
+ * Both sides empty match, the same way a missing planExpiresAt matches.
+ * One side set and the other empty does not.
+ */
+const termStartedAtStamp = (value) => {
+    if (value == null || value === "") return "";
+    const parsed = moment.utc(value);
+    return parsed.isValid() ? parsed.toISOString() : "";
+};
+
 const sameUpgradeTerm = (signed = {}, current = {}) => {
     const signedPaid = signed.amountPaidUsd == null ? null : Number(signed.amountPaidUsd);
     const currentPaid = current.amountPaidUsd == null ? null : Number(current.amountPaidUsd);
@@ -161,7 +173,8 @@ const sameUpgradeTerm = (signed = {}, current = {}) => {
         String(signed.id || "") === String(current.id || "") &&
         String(signed.planExpiresAt || "") === String(current.planExpiresAt || "") &&
         String(signed.duration || "") === String(current.duration || "") &&
-        paidMatches
+        paidMatches &&
+        termStartedAtStamp(signed.termStartedAt) === termStartedAtStamp(current.termStartedAt)
     );
 };
 
@@ -176,7 +189,7 @@ const termWasQuoted = (term) => Boolean(term && (term.id || term.planExpiresAt |
 /**
  * The signed quote locks the credit for its TTL, the same way it locks a crypto price.
  * Confirm does not recompute that credit from the clock. It rejects when the plan term
- * the credit was based on is no longer the current term.
+ * the credit was based on is no longer the current term, including termStartedAt.
  */
 const assertQuoteUpgradeTerm = async ({ tokenDecoded = {}, publicData, tagName, domain, domainConfig, targetPlan }) => {
     const locked = lockedCreditUsd(tokenDecoded);

@@ -70,7 +70,7 @@ const Coupon = require("../../Repositories/ZelfID/models/zelf-id-coupon.model");
 const PlanTerm = require("../../Repositories/ZelfID/models/zelf-id-plan-term.model");
 const QuoteGrant = require("../../Repositories/ZelfID/models/zelf-id-quote-grant.model");
 const Coupons = require("../../Repositories/ZelfID/modules/zelf-ids-coupons.module");
-const { creditFromPaid, combineAmountPaid } = require("../../Repositories/ZelfID/modules/zelf-id-upgrade-credit.module");
+const { creditFromPaid, combineAmountPaid, sameUpgradeTerm } = require("../../Repositories/ZelfID/modules/zelf-id-upgrade-credit.module");
 const { getPaymentOptions } = require("../../Repositories/ZelfID/modules/zelf-ids-payment.module");
 const { verifyPaymentConfirmation, addDurationToTag } = require("../../Repositories/ZelfID/modules/my-zelf-id.module");
 const { createStripeCheckout } = require("../../Repositories/ZelfID/modules/zelf-ids-stripe.module");
@@ -852,5 +852,104 @@ describe("Premium to Unlimited upgrade credit", () => {
         expect(stored.amountPaidUsd).toBe(84.5);
         expect(new Date(stored.termStartedAt).toISOString()).not.toBe(originalStart.toISOString());
         expect(new Date(stored.termStartedAt).getTime()).toBeGreaterThanOrEqual(before - 1000);
+    });
+
+    test("a signed upgrade quote keeps termStartedAt and confirms when the stored term still matches", async () => {
+        const bare = "startlock";
+        const originalStart = new Date("2026-02-01T00:00:00.000Z");
+        const planExpiresAt = halfwayFrom(moment.utc());
+        tags.set(bare, tagFor(bare, { plan: "premium", planExpiresAt, planDuration: "1" }));
+        await PlanTerm.create({
+            zelfName: `${bare}.zelf`,
+            plan: "premium",
+            planExpiresAt,
+            paymentMethod: "stripe",
+            duration: "1",
+            amountPaidUsd: 29,
+            termStartedAt: originalStart,
+        });
+        await Coupons.createCoupon({ code: "startlock", percentOff: 100, plans: ["unlimited"], maxRedemptions: 3 }, "admin@zelf.world");
+
+        const quote = await getPaymentOptions(bare, "zelf", "1", {}, { requestedPlan: "unlimited", coupon: "startlock" });
+        const decoded = jwt.verify(quote.signedDataPrice, config.JWT_SECRET);
+        expect(decoded.upgradeTerm.termStartedAt).toBe(originalStart.toISOString());
+        expect(decoded.upgradeTerm.planExpiresAt).toBe(planExpiresAt);
+        expect(decoded.upgradeTerm.amountPaidUsd).toBe(29);
+
+        const identity = await allowOwner(bare);
+        const granted = await verifyPaymentConfirmation(bare, "zelf", "FREE", quote.signedDataPrice, identity);
+        expect(granted.confirmed).toBe(true);
+        expect(granted.paymentMethod).toBe("coupon");
+    });
+
+    test("a lapsed renewal between quote and confirm is upgrade_term_changed before payment", async () => {
+        const bare = "startrenew";
+        const originalStart = new Date("2026-01-01T00:00:00.000Z");
+        const planExpiresAt = moment.utc().add(6, "month").format("YYYY-MM-DD HH:mm:ss");
+        const tag = tagFor(bare, { plan: "premium", planExpiresAt, planDuration: "1" });
+        tags.set(bare, tag);
+        await PlanTerm.create({
+            zelfName: `${bare}.zelf`,
+            plan: "premium",
+            planExpiresAt,
+            paymentMethod: "stripe",
+            duration: "1",
+            amountPaidUsd: 29,
+            termStartedAt: originalStart,
+        });
+
+        const quote = await getPaymentOptions(bare, "zelf", "1", {}, { requestedPlan: "unlimited" });
+        const decoded = jwt.verify(quote.signedDataPrice, config.JWT_SECRET);
+        expect(decoded.upgradeTerm.termStartedAt).toBe(originalStart.toISOString());
+        expect(decoded.upgradeTerm.planExpiresAt).toBe(planExpiresAt);
+        expect(decoded.upgradeTerm.amountPaidUsd).toBe(29);
+
+        const lapsed = moment.utc().subtract(30, "day").format("YYYY-MM-DD HH:mm:ss");
+        tag.publicData.planExpiresAt = lapsed;
+        await PlanTerm.updateOne({ zelfName: `${bare}.zelf` }, { $set: { planExpiresAt: lapsed } });
+        await addDurationToTag(purchase(bare, "premium", 29), tag);
+        const stored = await PlanTerm.findOne({ zelfName: `${bare}.zelf` }).lean();
+        expect(new Date(stored.termStartedAt).toISOString()).not.toBe(originalStart.toISOString());
+
+        confirmPayUniqueAddress.mockClear();
+        await expect(verifyPaymentConfirmation(bare, "zelf", "ETH", quote.signedDataPrice, {})).rejects.toMatchObject({
+            clientCode: "upgrade_term_changed",
+            status: 409,
+        });
+        expect(confirmPayUniqueAddress).not.toHaveBeenCalled();
+        const pending = await QuoteGrant.findOne({ zelfName: `${bare}.zelf`, status: "pending" }).lean();
+        expect(pending).toBeNull();
+    });
+
+    test("a legacy quote with no termStartedAt still confirms when the stored term has none", async () => {
+        const bare = "startlegacy";
+        const planExpiresAt = halfwayFrom(moment.utc());
+        tags.set(bare, tagFor(bare, { plan: "premium", planExpiresAt, planDuration: "1" }));
+        await PlanTerm.create({
+            zelfName: `${bare}.zelf`,
+            plan: "premium",
+            planExpiresAt,
+            paymentMethod: "stripe",
+            duration: "1",
+            amountPaidUsd: 29,
+        });
+        await Coupons.createCoupon({ code: "legacyst", percentOff: 100, plans: ["unlimited"], maxRedemptions: 3 }, "admin@zelf.world");
+
+        const quote = await getPaymentOptions(bare, "zelf", "1", {}, { requestedPlan: "unlimited", coupon: "legacyst" });
+        const decoded = jwt.verify(quote.signedDataPrice, config.JWT_SECRET);
+        expect(decoded.upgradeTerm.termStartedAt).toBeNull();
+        expect(
+            sameUpgradeTerm(
+                { ...decoded.upgradeTerm, termStartedAt: undefined },
+                { ...decoded.upgradeTerm, termStartedAt: "2026-01-01T00:00:00.000Z" }
+            )
+        ).toBe(false);
+        delete decoded.upgradeTerm.termStartedAt;
+        const legacy = jwt.sign(decoded, config.JWT_SECRET);
+
+        const identity = await allowOwner(bare);
+        const granted = await verifyPaymentConfirmation(bare, "zelf", "FREE", legacy, identity);
+        expect(granted.confirmed).toBe(true);
+        expect(granted.paymentMethod).toBe("coupon");
     });
 });
