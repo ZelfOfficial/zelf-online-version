@@ -103,4 +103,44 @@ describe("zelf-ids-stripe.module metadata", () => {
 			sessionId: "cs_test_1",
 		});
 	});
+
+	test("upgrade term start round-trips, and a quote without one stays without one", () => {
+		const startedAt = "2026-01-01T00:00:00.000Z";
+		const withStart = buildLeaseStripeMetadata({
+			tagName: "qa99",
+			domain: "zelf",
+			duration: "1",
+			plan: "unlimited",
+			amountUsd: "70",
+			upgradeTerm: {
+				id: "term-1",
+				planExpiresAt: "2027-06-01 00:00:00",
+				amountPaidUsd: 29,
+				duration: "1",
+				termStartedAt: startedAt,
+			},
+		});
+		expect(withStart.upgradeTermStartedAt).toBe(startedAt);
+		expect(parseLeaseStripeMetadata(withStart).upgradeTerm).toMatchObject({
+			planExpiresAt: "2027-06-01 00:00:00",
+			amountPaidUsd: 29,
+			termStartedAt: startedAt,
+		});
+
+		const legacy = buildLeaseStripeMetadata({
+			tagName: "qa99",
+			domain: "zelf",
+			duration: "1",
+			plan: "unlimited",
+			amountUsd: "70",
+			upgradeTerm: {
+				id: "term-1",
+				planExpiresAt: "2027-06-01 00:00:00",
+				amountPaidUsd: 29,
+				duration: "1",
+			},
+		});
+		expect(legacy.upgradeTermStartedAt).toBeUndefined();
+		expect(parseLeaseStripeMetadata(legacy).upgradeTerm.termStartedAt).toBeNull();
+	});
 });

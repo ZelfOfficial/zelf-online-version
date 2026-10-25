@@ -73,6 +73,10 @@ const buildLeaseStripeMetadata = ({ tagName, domain, duration, plan, amountUsd, 
         if (upgradeTerm.planExpiresAt) metadata.upgradeTermExpiresAt = String(upgradeTerm.planExpiresAt);
         if (upgradeTerm.amountPaidUsd != null && upgradeTerm.amountPaidUsd !== "") metadata.upgradeTermPaid = String(upgradeTerm.amountPaidUsd);
         if (upgradeTerm.duration) metadata.upgradeTermDuration = String(upgradeTerm.duration);
+        if (upgradeTerm.termStartedAt) {
+            const started = moment.utc(upgradeTerm.termStartedAt);
+            if (started.isValid()) metadata.upgradeTermStartedAt = started.toISOString();
+        }
     }
     return metadata;
 };
@@ -96,12 +100,13 @@ const parseLeaseStripeMetadata = (metadata = {}) => {
     if (metadata.upgradeCreditUsd != null && metadata.upgradeCreditUsd !== "") {
         parsed.upgradeCreditUsd = Number(metadata.upgradeCreditUsd);
     }
-    if (metadata.upgradeTermId || metadata.upgradeTermExpiresAt || metadata.upgradeTermPaid || metadata.upgradeTermDuration) {
+    if (metadata.upgradeTermId || metadata.upgradeTermExpiresAt || metadata.upgradeTermPaid || metadata.upgradeTermDuration || metadata.upgradeTermStartedAt) {
         parsed.upgradeTerm = {
             id: metadata.upgradeTermId || null,
             planExpiresAt: metadata.upgradeTermExpiresAt || null,
             amountPaidUsd: metadata.upgradeTermPaid != null && metadata.upgradeTermPaid !== "" ? Number(metadata.upgradeTermPaid) : null,
             duration: metadata.upgradeTermDuration || null,
+            termStartedAt: metadata.upgradeTermStartedAt || null,
         };
     }
     return parsed;
