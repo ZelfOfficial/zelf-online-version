@@ -221,9 +221,9 @@ const seeWalletValidation = async (ctx, next) => {
 		return;
 	}
 
-	const { clientId } = ctx.state.user;
-
-	if (!clientId) {
+	// This route is public. Callers have no JWT, so `ctx.state.user` is absent.
+	const user = ctx.state.user;
+	if (user && !user.clientId) {
 		ctx.status = 409;
 
 		ctx.body = { validationError: "Access forbidden. contact us for a valid API Key" };
