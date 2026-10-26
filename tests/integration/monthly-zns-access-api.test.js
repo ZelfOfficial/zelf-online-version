@@ -137,21 +137,21 @@ describe("monthly ZNS access API", () => {
             .set("x-test-user", JSON.stringify(owner))
             .send({ token: jwt.sign(decoded, config.JWT_SECRET) });
         expect(expired.status).toBe(409);
-        expect(expired.body.code).toBe("monthly_access_quote_expired");
+        expect(expired.body.code).toBe("MONTHLY_ACCESS_QUOTE_EXPIRED");
 
         const card = await request(app.callback())
             .post("/api/zelf-ids/monthly-access/confirm")
             .set("x-test-user", JSON.stringify(owner))
             .send({ token: quoted.body.data.signedDataPrice, method: "card" });
         expect(card.status).toBe(409);
-        expect(card.body.code).toBe("monthly_access_card_unavailable");
+        expect(card.body.code).toBe("MONTHLY_ACCESS_CARD_UNAVAILABLE");
 
         const short = await request(app.callback())
             .post("/api/zelf-ids/monthly-access/confirm")
             .set("x-test-user", JSON.stringify(owner))
             .send({ token: quoted.body.data.signedDataPrice, method: "zns" });
         expect(short.status).toBe(402);
-        expect(short.body.code).toBe("monthly_access_payment_required");
+        expect(short.body.code).toBe("MONTHLY_ACCESS_PAYMENT_REQUIRED");
         expect(short.body.amountZns).toBe(quoted.body.data.amountZns);
         expect(short.body.amountUsd).toBe(quoted.body.data.amountUsd);
         expect(short.body.znsNeeded).toBe(quoted.body.data.amountZns);

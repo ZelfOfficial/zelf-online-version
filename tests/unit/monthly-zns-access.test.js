@@ -248,7 +248,7 @@ describe("monthly ZNS access", () => {
 
         const blocked = await open({ zelfName: "export.zelf", balance: 0 });
         expect(blocked.allowed).toBe(false);
-        expect(blocked.body.code).toBe("monthly_access_payment_required");
+        expect(blocked.body.code).toBe("MONTHLY_ACCESS_PAYMENT_REQUIRED");
         expect(await MonthlyAccess.countDocuments({ zelfName: "export.zelf" })).toBe(1);
         const account = await SlotAccount.findOne({ zelfName: "export.zelf" }).lean();
         expect(account).toBeNull();
@@ -266,7 +266,7 @@ describe("monthly ZNS access", () => {
         const results = await Promise.all(Array.from({ length: 6 }, () => open({ zelfName: name, balance: 3 })));
         expect(results.every((row) => row.allowed === false)).toBe(true);
         expect(results[0].body).toMatchObject({
-            code: "monthly_access_payment_required",
+            code: "MONTHLY_ACCESS_PAYMENT_REQUIRED",
             amountZns: 49,
             amountUsd: "2.4166666667",
             znsNeeded: 46,
@@ -382,7 +382,7 @@ describe("monthly ZNS access", () => {
                 now: OCTOBER,
                 skipSubscriptionLookup: true,
             }),
-        ).rejects.toMatchObject({ clientCode: "monthly_access_quote_expired" });
+        ).rejects.toMatchObject({ clientCode: "MONTHLY_ACCESS_QUOTE_EXPIRED" });
         expect(await SlotAccount.countDocuments({ zelfName: name })).toBe(0);
 
         await expect(
@@ -397,7 +397,7 @@ describe("monthly ZNS access", () => {
                 now: OCTOBER,
                 skipSubscriptionLookup: true,
             }),
-        ).rejects.toMatchObject({ clientCode: "monthly_access_card_unavailable" });
+        ).rejects.toMatchObject({ clientCode: "MONTHLY_ACCESS_CARD_UNAVAILABLE" });
 
         const paid = await confirmMonthlyAccess({
             token: quote.signedDataPrice,
@@ -467,7 +467,7 @@ describe("monthly ZNS access", () => {
         await open({ zelfName: unpaid, balance: 0, now: OCTOBER });
         const blocked = await open({ zelfName: unpaid, balance: 0, now: NOVEMBER });
         expect(blocked.allowed).toBe(false);
-        expect(blocked.body.code).toBe("monthly_access_payment_required");
+        expect(blocked.body.code).toBe("MONTHLY_ACCESS_PAYMENT_REQUIRED");
         expect(await MonthlyAccess.countDocuments({ zelfName: unpaid, periodKey: "2026-11" })).toBe(0);
 
         const covered = await open({ zelfName: unpaid, balance: 1000, now: NOVEMBER });

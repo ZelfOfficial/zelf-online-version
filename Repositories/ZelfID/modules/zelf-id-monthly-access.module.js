@@ -139,7 +139,7 @@ const formatAmountUsd = (yearlyUsd) => {
 const describeAmount = ({ tagName, domainConfig, tokenPriceUsd, floorUsd } = {}) => {
     const premiumYearlyUsd = premiumYearlyUsdFor(tagName, domainConfig);
     if (typeof premiumYearlyUsd !== "number") {
-        throw accessError(409, "monthly_access_price_unavailable", "Premium price is not in the license");
+        throw accessError(409, "MONTHLY_ACCESS_PRICE_UNAVAILABLE", "Premium price is not in the license");
     }
 
     const price = tokenPriceUsd == null ? config.getTokenPriceUsd() : Number(tokenPriceUsd);
@@ -200,7 +200,7 @@ const paymentRequiredBody = ({ quote, spendable, periodKey, signedDataPrice }) =
     const confirmReady = balance >= Number(quote.amountZns);
     return {
         message: "Monthly access payment is required",
-        code: "monthly_access_payment_required",
+        code: "MONTHLY_ACCESS_PAYMENT_REQUIRED",
         periodKey: periodKey || quote.periodKey,
         amountZns: quote.amountZns,
         amountUsd: quote.amountUsd,
@@ -269,7 +269,7 @@ const writeAudit = async (entry) => {
             at: entry.at || new Date(),
         });
     } catch (error) {
-        console.error("monthly_access_audit_failed", error?.message || error);
+        console.error("MONTHLY_ACCESS_AUDIT_FAILED", error?.message || error);
     }
 };
 
@@ -407,7 +407,7 @@ const debitOnce = async ({ identity, cost, periodKey, quoteId, onChain, now }) =
 
     const amount = Number(cost);
     if (!Number.isFinite(amount) || amount < 0) {
-        throw accessError(500, "monthly_access_price_unavailable", "Monthly access price is not available");
+        throw accessError(500, "MONTHLY_ACCESS_PRICE_UNAVAILABLE", "Monthly access price is not available");
     }
 
     const chain = Number(onChain);
@@ -444,7 +444,7 @@ const debitOnce = async ({ identity, cost, periodKey, quoteId, onChain, now }) =
     let current = await SlotAccount.findOne({ zelfName: identity.zelfName }).lean();
     if (!current) {
         if (chain < amount) {
-            throw accessError(402, "monthly_access_payment_required", "Monthly access payment is required");
+            throw accessError(402, "MONTHLY_ACCESS_PAYMENT_REQUIRED", "Monthly access payment is required");
         }
         try {
             const created = await SlotAccount.create({
@@ -469,7 +469,7 @@ const debitOnce = async ({ identity, cost, periodKey, quoteId, onChain, now }) =
         return { idempotent: true, spent: current.spent || 0 };
     }
 
-    throw accessError(402, "monthly_access_payment_required", "Monthly access payment is required");
+    throw accessError(402, "MONTHLY_ACCESS_PAYMENT_REQUIRED", "Monthly access payment is required");
 };
 
 const spendableAfter = async (view) => {
@@ -612,7 +612,7 @@ const inspect = async (input) => {
         return view;
     }
     if (record?.status === "reserving") {
-        throw accessError(409, "monthly_access_in_progress", "Monthly access is being recorded. Retry.");
+        throw accessError(409, "MONTHLY_ACCESS_IN_PROGRESS", "Monthly access is being recorded. Retry.");
     }
     if (spendable < amount.amountZns && !graceAllowed) {
         view.kind = "block";
@@ -694,7 +694,7 @@ const commitReady = async (view) => {
         if (existing?.status === "grace") {
             return blockedResult({ ...view, record: existing, quote: { ...quote, ...quoteFromRecord(existing) } });
         }
-        throw accessError(409, "monthly_access_in_progress", "Monthly access is being recorded. Retry.");
+        throw accessError(409, "MONTHLY_ACCESS_IN_PROGRESS", "Monthly access is being recorded. Retry.");
     }
 
     const finishPaid = async (debit) => {
@@ -714,7 +714,7 @@ const commitReady = async (view) => {
                     receipt: presentRecord(current, { charged: false, idempotent: true, spendableBalance: spendable }),
                 });
             }
-            throw accessError(409, "monthly_access_in_progress", "Monthly access is being recorded. Retry.");
+            throw accessError(409, "MONTHLY_ACCESS_IN_PROGRESS", "Monthly access is being recorded. Retry.");
         }
         const account = await loadAccount(view.identity.zelfName);
         const spendable = spendableBalance(view.onChain, account.spent || 0);
@@ -753,7 +753,7 @@ const commitReady = async (view) => {
             });
             return finishPaid(debit);
         } catch (error) {
-            if (error?.status !== 402 && error?.clientCode !== "monthly_access_payment_required") {
+            if (error?.status !== 402 && error?.clientCode !== "MONTHLY_ACCESS_PAYMENT_REQUIRED") {
                 await MonthlyAccess.deleteOne({ _id: claimed._id, status: "reserving" });
                 throw error;
             }
@@ -779,7 +779,7 @@ const commitReady = async (view) => {
             if (current?.status === "grace") {
                 return blockedResult({ ...view, record: current, quote });
             }
-            throw accessError(409, "monthly_access_in_progress", "Monthly access is being recorded. Retry.");
+            throw accessError(409, "MONTHLY_ACCESS_IN_PROGRESS", "Monthly access is being recorded. Retry.");
         }
         await writeAudit({
             zelfName: view.identity.zelfName,
@@ -1045,7 +1045,7 @@ const getMonthlyAccessStatus = (input) => statusPayload(input);
 const quoteMonthlyAccess = async (input) => {
     const now = input.now ? new Date(input.now) : new Date();
     if (!isEnabled()) {
-        throw accessError(409, "monthly_access_disabled", "Monthly access is not enabled");
+        throw accessError(409, "MONTHLY_ACCESS_DISABLED", "Monthly access is not enabled");
     }
     const context = await resolveContext(input);
     if (!context?.identity?.zelfName) {
@@ -1099,17 +1099,17 @@ const verifyQuoteToken = (token) => {
     try {
         decoded = jwt.verify(token, quoteSecret());
     } catch (_error) {
-        throw accessError(401, "monthly_access_quote_invalid", "Monthly access quote is not valid");
+        throw accessError(401, "MONTHLY_ACCESS_QUOTE_INVALID", "Monthly access quote is not valid");
     }
     if (!decoded || decoded.typ !== QUOTE_TYPE || !decoded.zelfName || !decoded.periodKey) {
-        throw accessError(401, "monthly_access_quote_invalid", "Monthly access quote is not valid");
+        throw accessError(401, "MONTHLY_ACCESS_QUOTE_INVALID", "Monthly access quote is not valid");
     }
     return decoded;
 };
 
 const confirmMonthlyAccess = async (input) => {
     if (!isEnabled()) {
-        throw accessError(409, "monthly_access_disabled", "Monthly access is not enabled");
+        throw accessError(409, "MONTHLY_ACCESS_DISABLED", "Monthly access is not enabled");
     }
     const method = input.method === "card" ? "card" : "zns";
     const decoded = verifyQuoteToken(input.token);
@@ -1122,7 +1122,7 @@ const confirmMonthlyAccess = async (input) => {
     }
 
     if (Number(decoded.ttl) < moment.utc(now).unix() || decoded.periodKey !== currentPeriod) {
-        throw accessError(409, "monthly_access_quote_expired", "Monthly access quote has expired. Request a new quote.");
+        throw accessError(409, "MONTHLY_ACCESS_QUOTE_EXPIRED", "Monthly access quote has expired. Request a new quote.");
     }
 
     const context = await resolveContext({ ...input, zelfName: decoded.zelfName });
@@ -1143,7 +1143,7 @@ const confirmMonthlyAccess = async (input) => {
     }
 
     if (method === "card") {
-        throw accessError(409, "monthly_access_card_unavailable", "Card payment for this month is not available yet", {
+        throw accessError(409, "MONTHLY_ACCESS_CARD_UNAVAILABLE", "Card payment for this month is not available yet", {
             periodKey: decoded.periodKey,
             amountUsd: decoded.amountUsd,
             amountZns: decoded.amountZns,
@@ -1200,7 +1200,7 @@ const confirmMonthlyAccess = async (input) => {
             periodKey: quote.periodKey,
             signedDataPrice: input.token,
         });
-        throw accessError(402, "monthly_access_payment_required", body.message, body);
+        throw accessError(402, "MONTHLY_ACCESS_PAYMENT_REQUIRED", body.message, body);
     }
 
     await ensureIndexes();
