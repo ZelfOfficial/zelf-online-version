@@ -17,9 +17,9 @@ const scPayTxCache = new NodeCache({ stdTTL: 172800, maxKeys: 50000, useClones: 
 
 const throwPaymentConfirmationTagNotFound = (tagName, domain) => {
     const fullTag = `${tagName}.${domain}`;
-    console.warn("[payment_confirmation] tag_not_found", { tagName, domain, fullTag });
-    const err = new Error("404:tag_not_found");
-    err.clientCode = "tag_not_found";
+    console.warn("[payment_confirmation] TAG_NOT_FOUND", { tagName, domain, fullTag });
+    const err = new Error("404:TAG_NOT_FOUND");
+    err.clientCode = "TAG_NOT_FOUND";
     err.clientMessage = "Tag not found or not indexed";
     throw err;
 };
@@ -637,7 +637,7 @@ async function extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecod
                 cryptoSymbol: resolvedNetwork,
                 cryptoAmount: amountToPay,
                 source: resolvedNetwork,
-                violationCode: error.clientCode || "coupon_invalid",
+                violationCode: error.clientCode || "COUPON_INVALID",
                 txHash,
                 paymentNetwork: resolvedNetwork,
                 paymentInitiatedAt: tokenDecoded.initiatedAt,

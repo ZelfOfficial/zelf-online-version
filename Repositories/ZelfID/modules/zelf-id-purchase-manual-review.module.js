@@ -118,7 +118,7 @@ const recordPurchaseManualReview = async ({
         duration: `${duration ?? ""}`,
         price: Number(price) || 0,
         source: String(source || "unknown"),
-        violationCode: String(violationCode || "409:plan_downgrade_not_allowed"),
+        violationCode: String(violationCode || "409:PLAN_DOWNGRADE_NOT_ALLOWED"),
         status: "needs_manual_review",
         paymentKey: paymentKey || undefined,
         context,

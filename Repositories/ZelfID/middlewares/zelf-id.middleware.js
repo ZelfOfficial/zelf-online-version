@@ -297,7 +297,7 @@ const stripeSessionValidation = async (ctx, next) => {
 
     if (raw === undefined || raw === null || trimmed === "") {
         ctx.status = 400;
-        ctx.body = { message: "Checkout session id is required", code: "invalid_session_id" };
+        ctx.body = { message: "Checkout session id is required", code: "INVALID_SESSION_ID" };
         return;
     }
 
@@ -305,7 +305,7 @@ const stripeSessionValidation = async (ctx, next) => {
 
     if (valid.error) {
         ctx.status = 400;
-        ctx.body = { message: "Checkout session id format is invalid", code: "invalid_session_id" };
+        ctx.body = { message: "Checkout session id format is invalid", code: "INVALID_SESSION_ID" };
         return;
     }
 
@@ -335,7 +335,7 @@ const paymentConfirmationValidation = async (ctx, next) => {
 
     if (!tokenDecoded) {
         ctx.status = 409;
-        ctx.body = { validationError: "invalid_token" };
+        ctx.body = { validationError: "INVALID_TOKEN" };
         return;
     }
 
@@ -355,7 +355,7 @@ const paymentConfirmationValidation = async (ctx, next) => {
     const cryptoConfirm = ["ETH", "SOL", "BTC", "AVAX", "BDAG", "BNB", "POL", "BASE"].includes(String(network || "").toUpperCase());
     if (tokenDecoded.ttl < moment().unix() && !cryptoConfirm) {
         ctx.status = 409;
-        ctx.body = { validationError: "token_expired" };
+        ctx.body = { validationError: "TOKEN_EXPIRED" };
         return;
     }
 
@@ -364,7 +364,7 @@ const paymentConfirmationValidation = async (ctx, next) => {
 
     if (!freeOk && !tokenDecoded.prices?.[network]) {
         ctx.status = 409;
-        ctx.body = { validationError: "invalid_network" };
+        ctx.body = { validationError: "INVALID_NETWORK" };
         return;
     }
 

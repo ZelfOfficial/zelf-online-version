@@ -180,8 +180,8 @@ describe("Zelf ID plan coupons", () => {
         expect(created.id).toEqual(expect.any(String));
         expect(spy).toHaveBeenCalledWith("[zelf-id-coupon] created", expect.objectContaining({ code: "SAVE100", createdBy: "admin@zelf.world" }));
         await expect(Coupons.createCoupon({ code: "SAVE100", percentOff: 10, plans: ["premium"], maxRedemptions: 1 }, "admin@zelf.world")).rejects.toMatchObject({
-            clientCode: "coupon_code_taken",
-            clientMessage: "coupon_code_taken",
+            clientCode: "COUPON_CODE_TAKEN",
+            clientMessage: "COUPON_CODE_TAKEN",
         });
         spy.mockRestore();
     });
@@ -190,7 +190,7 @@ describe("Zelf ID plan coupons", () => {
         expect((await Coupons.describeCoupon({ code: "missing", plan: "premium", duration: "1", zelfId: "myname.zelf", listPrice: 24 })).coupon).toEqual({
             code: "MISSING",
             valid: false,
-            reason: "not_found",
+            reason: "NOT_FOUND",
         });
 
         const expired = await Coupons.createCoupon(
@@ -199,11 +199,11 @@ describe("Zelf ID plan coupons", () => {
         );
         const expiredQuote = await Coupons.describeCoupon({ code: "OLD", plan: "premium", duration: "1", zelfId: "myname.zelf", listPrice: 24 });
         expect(expiredQuote).toMatchObject({ valid: false, percentOff: 0, amountDue: 24, listPrice: 24, currency: "USD" });
-        expect(expiredQuote.coupon).toEqual({ code: "OLD", valid: false, reason: "expired" });
+        expect(expiredQuote.coupon).toEqual({ code: "OLD", valid: false, reason: "EXPIRED" });
 
         await Coupons.deactivateCoupon(expired.id);
         const inactive = await Coupons.describeCoupon({ code: "old", plan: "premium", duration: "1", zelfId: "myname.zelf", listPrice: 24 });
-        expect(inactive.coupon.reason).toBe("inactive");
+        expect(inactive.coupon.reason).toBe("INACTIVE");
 
         const limited = await Coupons.createCoupon(
             { code: "once", percentOff: 100, plans: ["unlimited"], durations: ["lifetime"], maxRedemptions: 1, perZelfIdLimit: 1 },
@@ -211,10 +211,10 @@ describe("Zelf ID plan coupons", () => {
         );
         expect(
             (await Coupons.describeCoupon({ code: "once", plan: "premium", duration: "1", zelfId: "myname.zelf", listPrice: 24 })).coupon.reason
-        ).toBe("plan_not_allowed");
+        ).toBe("PLAN_NOT_ALLOWED");
         expect(
             (await Coupons.describeCoupon({ code: "once", plan: "unlimited", duration: "1", zelfId: "myname.zelf", listPrice: 24 })).coupon.reason
-        ).toBe("duration_not_allowed");
+        ).toBe("DURATION_NOT_ALLOWED");
 
         await Coupons.claimForGrant({
             code: limited.code,
@@ -228,7 +228,7 @@ describe("Zelf ID plan coupons", () => {
         });
         expect(
             (await Coupons.describeCoupon({ code: "once", plan: "unlimited", duration: "lifetime", zelfId: "other.zelf", listPrice: 24 })).coupon.reason
-        ).toBe("max_redemptions");
+        ).toBe("MAX_REDEMPTIONS");
 
         const perName = await Coupons.createCoupon(
             { code: "perid", percentOff: 100, plans: ["premium"], maxRedemptions: 5, perZelfIdLimit: 1 },
@@ -246,7 +246,7 @@ describe("Zelf ID plan coupons", () => {
         });
         expect(
             (await Coupons.describeCoupon({ code: "perid", plan: "premium", duration: "1", zelfId: "MyName.zelf", listPrice: 24 })).coupon.reason
-        ).toBe("zelf_id_limit");
+        ).toBe("ZELF_ID_LIMIT");
 
         const stored = await Coupon.findOne({ code: "PERID" }).lean();
         expect(stored.redemptions).toHaveLength(1);
@@ -286,7 +286,7 @@ describe("Zelf ID plan coupons", () => {
             "admin@zelf.world"
         );
         const rejected = await getPaymentOptions("myname", "zelf", "1", {}, { requestedPlan: "premium", coupon: "gone" });
-        expect(rejected.coupon).toEqual({ code: "GONE", valid: false, reason: "expired" });
+        expect(rejected.coupon).toEqual({ code: "GONE", valid: false, reason: "EXPIRED" });
         expect(rejected.percentOff).toBe(0);
         expect(rejected.amountDue).toBe(rejected.listPrice);
         expect(rejected.freeCheckout).toBe(false);
@@ -301,7 +301,7 @@ describe("Zelf ID plan coupons", () => {
 
         const freePlan = await getPaymentOptions("myname", "zelf", "1", {}, { requestedPlan: "free", coupon: "save25" });
         expect(freePlan.plan).toBe("free");
-        expect(freePlan.coupon).toEqual({ code: "SAVE25", valid: false, reason: "plan_not_allowed" });
+        expect(freePlan.coupon).toEqual({ code: "SAVE25", valid: false, reason: "PLAN_NOT_ALLOWED" });
         expect(freePlan.percentOff).toBe(0);
         expect(freePlan.freeCheckout).toBe(false);
         expect(freePlan.billableUsdPrice).not.toBe(quote.listPrice);
@@ -359,7 +359,7 @@ describe("Zelf ID plan coupons", () => {
 
         const later = signQuote(bare, created, { initiatedAt: moment().add(1, "minute").unix() });
         await expect(verifyPaymentConfirmation(bare, "zelf", "FREE", later, identity)).rejects.toMatchObject({
-            clientCode: "max_redemptions",
+            clientCode: "MAX_REDEMPTIONS",
         });
         expect((await Coupon.findOne({ code: "REPLAY1" }).lean()).redemptions).toHaveLength(1);
     });
@@ -435,8 +435,8 @@ describe("Zelf ID plan coupons", () => {
         expect(rejected).toHaveLength(1);
         expect(fulfilled[0].value.confirmed).toBe(true);
         expect(fulfilled[0].value.paymentMethod).toBe("coupon");
-        expect(rejected[0].reason.clientCode).toBe("max_redemptions");
-        expect(rejected[0].reason.message).toContain("coupon_invalid");
+        expect(rejected[0].reason.clientCode).toBe("MAX_REDEMPTIONS");
+        expect(rejected[0].reason.message).toContain("COUPON_INVALID");
         const saved = await Coupon.findOne({ code: "RACE" }).lean();
         expect(saved.redemptions).toHaveLength(1);
     });
@@ -456,8 +456,8 @@ describe("Zelf ID plan coupons", () => {
             ipfs: [],
         });
         await expect(verifyPaymentConfirmation("downgrade", "zelf", "FREE", signQuote("downgrade", created), await allowOwner("downgrade"))).rejects.toMatchObject({
-            clientCode: "downgrade_not_allowed",
-            clientMessage: "downgrade_not_allowed",
+            clientCode: "DOWNGRADE_NOT_ALLOWED",
+            clientMessage: "DOWNGRADE_NOT_ALLOWED",
         });
 
         ZelfIdModule.searchTag.mockResolvedValue({
@@ -467,7 +467,7 @@ describe("Zelf ID plan coupons", () => {
             ipfs: [],
         });
         await expect(verifyPaymentConfirmation("ab", "zelf", "FREE", signQuote("ab", created), await allowOwner("ab"))).rejects.toMatchObject({
-            clientCode: "plan_not_allowed_for_name",
+            clientCode: "PLAN_NOT_ALLOWED_FOR_NAME",
         });
 
         ZelfIdModule.searchTag.mockResolvedValue({
@@ -481,7 +481,7 @@ describe("Zelf ID plan coupons", () => {
             ipfs: [],
         });
         await expect(verifyPaymentConfirmation("lifetime", "zelf", "FREE", signQuote("lifetime", created), await allowOwner("lifetime"))).rejects.toMatchObject({
-            clientCode: "lifetime_already_owned",
+            clientCode: "LIFETIME_ALREADY_OWNED",
         });
 
         const saved = await Coupon.findOne({ code: "RULES" }).lean();
@@ -535,17 +535,17 @@ describe("Zelf ID plan coupons", () => {
     test("Stripe keeps a 50-cent minimum and rejects a discounted total under it", () => {
         expect(unitAmountForCharge(18, { coupon: true })).toBe(1800);
         expect(unitAmountForCharge(0.2)).toBe(50);
-        expect(() => unitAmountForCharge(0.4, { coupon: true })).toThrow("409:stripe_amount_below_minimum");
+        expect(() => unitAmountForCharge(0.4, { coupon: true })).toThrow("409:STRIPE_AMOUNT_BELOW_MINIMUM");
         try {
             unitAmountForCharge(0.4, { coupon: true });
         } catch (error) {
-            expect(error.clientCode).toBe("stripe_amount_below_minimum");
+            expect(error.clientCode).toBe("STRIPE_AMOUNT_BELOW_MINIMUM");
             expect(error.clientMessage).toBe("Discounted total is below the Stripe minimum of $0.50");
         }
         try {
             unitAmountForCharge(0, { coupon: true });
         } catch (error) {
-            expect(error.clientCode).toBe("invalid_quote_amount");
+            expect(error.clientCode).toBe("INVALID_QUOTE_AMOUNT");
             expect(error.clientMessage).toContain("payment confirmation");
         }
     });
@@ -555,7 +555,7 @@ describe("Zelf ID plan coupons", () => {
         const denied = { state: { user: { tagName: "someone.zelf" } }, request: { body: {} }, status: 200, body: undefined };
         await CouponMiddleware.requireSuperAdmin(denied, next);
         expect(denied.status).toBe(403);
-        expect(denied.body).toEqual({ error: "Super-admin access required", code: "super_admin_required" });
+        expect(denied.body).toEqual({ error: "Super-admin access required", code: "SUPER_ADMIN_REQUIRED" });
         expect(next).not.toHaveBeenCalled();
 
         const allowed = { state: { user: { superAdminId: "admin-id" } }, status: 200 };
@@ -612,7 +612,7 @@ describe("Zelf ID plan coupons", () => {
         expect(deactivated.active).toBe(false);
         expect(deactivated.code).toBe("LISTME");
         expect(deactivated.redemptions).toEqual([]);
-        await expect(Coupons.deactivateCoupon("missing-id")).rejects.toMatchObject({ clientCode: "coupon_not_found" });
+        await expect(Coupons.deactivateCoupon("missing-id")).rejects.toMatchObject({ clientCode: "COUPON_NOT_FOUND" });
     });
 
     test("mongo dropping during identity returns 503 and does not redeem", async () => {
@@ -626,8 +626,8 @@ describe("Zelf ID plan coupons", () => {
             verifyPaymentConfirmation("mongodown", "zelf", "FREE", token, { authUser: { session: "session-id", tagName: "mongodown", domain: "zelf" } })
         ).rejects.toMatchObject({
             status: 503,
-            clientCode: "quote_store_unavailable",
-            message: "503:quote_store_unavailable",
+            clientCode: "QUOTE_STORE_UNAVAILABLE",
+            message: "503:QUOTE_STORE_UNAVAILABLE",
         });
 
         spy.mockRestore();

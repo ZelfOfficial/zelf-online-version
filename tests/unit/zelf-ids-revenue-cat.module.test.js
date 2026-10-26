@@ -136,7 +136,7 @@ describe("inspectRevenueCatEvent", () => {
 
     test("short names cannot take premium: rejected, not converted to unlimited", async () => {
         await expect(webhookHandler(rcEvent({ product_id: "zelf_premium_1y" }, { zelfName: "abc.zelf", plan: "premium" }))).rejects.toThrow(
-            "409:plan_not_allowed_for_name"
+            "409:PLAN_NOT_ALLOWED_FOR_NAME"
         );
         expect(addDurationToTag).not.toHaveBeenCalled();
     });
@@ -153,12 +153,12 @@ describe("inspectRevenueCatEvent", () => {
     });
 
     test("skips unrelated events", () => {
-        expect(inspectRevenueCatEvent(rcEvent({ type: "CANCELLATION" })).reason).toBe("ignored_cancellation");
-        expect(inspectRevenueCatEvent(rcEvent({ product_id: "zelf_keys_plan" })).reason).toBe("not_zelf_id_product");
+        expect(inspectRevenueCatEvent(rcEvent({ type: "CANCELLATION" })).reason).toBe("IGNORED_CANCELLATION");
+        expect(inspectRevenueCatEvent(rcEvent({ product_id: "zelf_keys_plan" })).reason).toBe("NOT_ZELF_ID_PRODUCT");
     });
 
     test("sandbox purchases are not credited unless allowed", () => {
-        expect(inspectRevenueCatEvent(rcEvent({ environment: "SANDBOX" })).reason).toBe("sandbox_event");
+        expect(inspectRevenueCatEvent(rcEvent({ environment: "SANDBOX" })).reason).toBe("SANDBOX_EVENT");
         expect(inspectRevenueCatEvent(rcEvent({ environment: "SANDBOX" }), { allowSandbox: true }).ok).toBe(true);
     });
 });
@@ -246,7 +246,7 @@ describe("webhookHandler", () => {
             tagObject: { publicData: { tagName: "alicebob.zelf", ethAddress: "0xdead" } },
         });
 
-        await expect(webhookHandler(rcEvent())).rejects.toThrow("409:zelfProof_does_not_match");
+        await expect(webhookHandler(rcEvent())).rejects.toThrow("409:ZELFPROOF_DOES_NOT_MATCH");
     });
 
     const tag = (publicData) =>
@@ -316,7 +316,7 @@ describe("webhookHandler", () => {
 
         const result = await webhookHandler(rcEvent({ type: "EXPIRATION", id: "evt_e2", expiration_at_ms: Date.parse("2027-09-29T21:01:00Z") }));
 
-        expect(result).toMatchObject({ status: "skipped", reason: "superseded_by_later_purchase" });
+        expect(result).toMatchObject({ status: "skipped", reason: "SUPERSEDED_BY_LATER_PURCHASE" });
         expect(revertZelfIdToFreePlan).not.toHaveBeenCalled();
     });
 
@@ -325,15 +325,15 @@ describe("webhookHandler", () => {
 
         const result = await webhookHandler(rcEvent({ type: "EXPIRATION", id: "evt_e3", expiration_at_ms: Date.parse("2027-09-29T21:01:00Z") }));
 
-        expect(result).toMatchObject({ status: "skipped", reason: "extended_beyond_subscription" });
+        expect(result).toMatchObject({ status: "skipped", reason: "EXTENDED_BEYOND_SUBSCRIPTION" });
         expect(revertZelfIdToFreePlan).not.toHaveBeenCalled();
     });
 
     test("(d) EXPIRATION skips lifetime and already-free names", async () => {
         tag({ plan: "unlimited", duration: "lifetime", revenueCatOriginalTransactionId: "orig_txn_1" });
-        expect((await webhookHandler(rcEvent({ type: "EXPIRATION", id: "evt_e4" }))).reason).toBe("extended_beyond_subscription");
+        expect((await webhookHandler(rcEvent({ type: "EXPIRATION", id: "evt_e4" }))).reason).toBe("EXTENDED_BEYOND_SUBSCRIPTION");
         tag({ plan: "free", revenueCatOriginalTransactionId: "orig_txn_1" });
-        expect((await webhookHandler(rcEvent({ type: "EXPIRATION", id: "evt_e5" }))).reason).toBe("already_free");
+        expect((await webhookHandler(rcEvent({ type: "EXPIRATION", id: "evt_e5" }))).reason).toBe("ALREADY_FREE");
         expect(revertZelfIdToFreePlan).not.toHaveBeenCalled();
     });
 
@@ -355,18 +355,18 @@ describe("webhookHandler", () => {
         const result = await webhookHandler(
             rcEvent({ type: "PRODUCT_CHANGE", id: "evt_pc2", product_id: "zelf_unlimited_1y", new_product_id: "zelf_premium_1y" })
         );
-        expect(result).toMatchObject({ status: "skipped", reason: "deferred_downgrade" });
+        expect(result).toMatchObject({ status: "skipped", reason: "DEFERRED_DOWNGRADE" });
         expect(changeZelfIdPlan).not.toHaveBeenCalled();
     });
 
     test("(f) premium product on a 5-char name is rejected", async () => {
         await expect(webhookHandler(rcEvent({ product_id: "zelf_premium_lifetime" }, { zelfName: "abcde.zelf" }))).rejects.toThrow(
-            "409:plan_not_allowed_for_name"
+            "409:PLAN_NOT_ALLOWED_FOR_NAME"
         );
     });
 
     test("(g) sandbox events are skipped unless allowed, then credited", async () => {
-        expect(await webhookHandler(rcEvent({ environment: "SANDBOX" }))).toMatchObject({ status: "skipped", reason: "sandbox_event" });
+        expect(await webhookHandler(rcEvent({ environment: "SANDBOX" }))).toMatchObject({ status: "skipped", reason: "SANDBOX_EVENT" });
 
         tag({ plan: "free" });
         addDurationToTag.mockResolvedValue({ expiresAt: "2027-09-29 21:01:00" });

@@ -409,8 +409,8 @@ describe("Premium to Unlimited upgrade credit", () => {
         const identity = await allowOwner(bare);
 
         await expect(verifyPaymentConfirmation(bare, "zelf", "FREE", quote.signedDataPrice, identity)).rejects.toMatchObject({
-            message: "409:upgrade_term_changed",
-            clientCode: "upgrade_term_changed",
+            message: "409:UPGRADE_TERM_CHANGED",
+            clientCode: "UPGRADE_TERM_CHANGED",
         });
 
         const saved = await Coupon.findOne({ code: created.code }).lean();
@@ -459,7 +459,7 @@ describe("Premium to Unlimited upgrade credit", () => {
             },
             config.JWT_SECRET
         );
-        await expect(verifyPaymentConfirmation(bare, "zelf", "FREE", token, {})).rejects.toThrow(/token_expired/);
+        await expect(verifyPaymentConfirmation(bare, "zelf", "FREE", token, {})).rejects.toThrow(/TOKEN_EXPIRED/);
     });
 
     test("a different plan term is rejected before crypto payment", async () => {
@@ -481,7 +481,7 @@ describe("Premium to Unlimited upgrade credit", () => {
         confirmPayUniqueAddress.mockClear();
 
         await expect(verifyPaymentConfirmation(bare, "zelf", "ETH", quote.signedDataPrice, {})).rejects.toMatchObject({
-            clientCode: "upgrade_term_changed",
+            clientCode: "UPGRADE_TERM_CHANGED",
         });
         expect(confirmPayUniqueAddress).not.toHaveBeenCalled();
     });
@@ -519,15 +519,15 @@ describe("Premium to Unlimited upgrade credit", () => {
                 plan: "unlimited",
                 token: jwt.sign(decoded, config.JWT_SECRET),
             })
-        ).rejects.toMatchObject({ clientCode: "quote_expiring" });
+        ).rejects.toMatchObject({ clientCode: "QUOTE_EXPIRING" });
     });
 
     test("an unlimited lifetime name is not quoted", async () => {
         const bare = "lifename";
         tags.set(bare, tagFor(bare, { plan: "unlimited", duration: "lifetime", planDuration: "lifetime" }));
         await expect(getPaymentOptions(bare, "zelf", "1", {}, { requestedPlan: "unlimited" })).rejects.toMatchObject({
-            clientCode: "already_lifetime",
-            clientMessage: "plan_not_upgradable",
+            clientCode: "ALREADY_LIFETIME",
+            clientMessage: "PLAN_NOT_UPGRADABLE",
         });
     });
 
@@ -581,7 +581,7 @@ describe("Premium to Unlimited upgrade credit", () => {
                 plan: "unlimited",
                 token: quote.signedDataPrice,
             })
-        ).rejects.toMatchObject({ clientCode: "stripe_amount_below_minimum" });
+        ).rejects.toMatchObject({ clientCode: "STRIPE_AMOUNT_BELOW_MINIMUM" });
         expect(Stripe.__create).not.toHaveBeenCalled();
     });
 
@@ -731,7 +731,7 @@ describe("Premium to Unlimited upgrade credit", () => {
             paidAt: moment().unix(),
         });
         await expect(verifyPaymentConfirmation(late, "zelf", "ETH", lateToken, {})).rejects.toMatchObject({
-            clientCode: "token_expired",
+            clientCode: "TOKEN_EXPIRED",
         });
     });
 
@@ -755,7 +755,7 @@ describe("Premium to Unlimited upgrade credit", () => {
         );
         await expect(
             createStripeCheckout({ tagName: bare, domain: "zelf", duration: "1", plan: "premium", token })
-        ).rejects.toMatchObject({ clientCode: "stripe_amount_below_minimum" });
+        ).rejects.toMatchObject({ clientCode: "STRIPE_AMOUNT_BELOW_MINIMUM" });
     });
 
     const purchase = (bare, plan, billableUsdPrice) => ({
@@ -882,7 +882,7 @@ describe("Premium to Unlimited upgrade credit", () => {
         expect(granted.paymentMethod).toBe("coupon");
     });
 
-    test("a lapsed renewal between quote and confirm is upgrade_term_changed before payment", async () => {
+    test("a lapsed renewal between quote and confirm is UPGRADE_TERM_CHANGED before payment", async () => {
         const bare = "startrenew";
         const originalStart = new Date("2026-01-01T00:00:00.000Z");
         const planExpiresAt = moment.utc().add(6, "month").format("YYYY-MM-DD HH:mm:ss");
@@ -913,7 +913,7 @@ describe("Premium to Unlimited upgrade credit", () => {
 
         confirmPayUniqueAddress.mockClear();
         await expect(verifyPaymentConfirmation(bare, "zelf", "ETH", quote.signedDataPrice, {})).rejects.toMatchObject({
-            clientCode: "upgrade_term_changed",
+            clientCode: "UPGRADE_TERM_CHANGED",
             status: 409,
         });
         expect(confirmPayUniqueAddress).not.toHaveBeenCalled();

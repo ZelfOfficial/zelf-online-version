@@ -5,6 +5,7 @@
  * Legacy char-bucket products (zns_char_* / zelf_name_service_char_*) remain supported.
  */
 const moment = require("moment");
+const { codedError } = require("../../../Core/http-handler");
 const { parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { getBareName, getBareNameLength, resolvePaidPlan } = require("./zelf-id-plan.module");
@@ -26,16 +27,16 @@ const LEGACY_PRODUCT_ID_PATTERNS = [
 
 /** Reasons RevenueCat should not retry: the event is simply not ours. */
 const SKIP_REASONS = new Set([
-    "ignored_event_type",
-    "ignored_cancellation",
-    "not_zelf_id_product",
-    "sandbox_event",
-    "not_subscription_product",
-    "superseded_by_later_purchase",
-    "extended_beyond_subscription",
-    "already_free",
-    "deferred_downgrade",
-    "plan_unchanged",
+    "IGNORED_EVENT_TYPE",
+    "IGNORED_CANCELLATION",
+    "NOT_ZELF_ID_PRODUCT",
+    "SANDBOX_EVENT",
+    "NOT_SUBSCRIPTION_PRODUCT",
+    "SUPERSEDED_BY_LATER_PURCHASE",
+    "EXTENDED_BEYOND_SUBSCRIPTION",
+    "ALREADY_FREE",
+    "DEFERRED_DOWNGRADE",
+    "PLAN_UNCHANGED",
 ]);
 
 /**
@@ -139,7 +140,7 @@ const resolveNameFromAttributes = (attributes = {}) => {
 
 /**
  * Plan for a purchase. v4 products carry the plan and it is never rewritten:
- * premium on a 1–5 character name is rejected later (`plan_not_allowed_for_name`).
+ * premium on a 1–5 character name is rejected later (`PLAN_NOT_ALLOWED_FOR_NAME`).
  * Legacy char-bucket products have no plan: use the attribute when the name allows it.
  * @param {Object} product
  * @param {string} tagName
@@ -184,23 +185,23 @@ const inspectRevenueCatEvent = (event = {}, { allowSandbox = false } = {}) => {
     const eventType = String(event.type || "");
 
     if (eventType === "CANCELLATION") {
-        return { ok: false, reason: "ignored_cancellation" };
+        return { ok: false, reason: "IGNORED_CANCELLATION" };
     }
 
     const isExpiration = EXPIRATION_EVENT_TYPES.has(eventType);
     const isProductChange = PRODUCT_CHANGE_EVENT_TYPES.has(eventType);
 
     if (!isExpiration && !isProductChange && !PURCHASE_EVENT_TYPES.has(eventType)) {
-        return { ok: false, reason: "ignored_event_type" };
+        return { ok: false, reason: "IGNORED_EVENT_TYPE" };
     }
 
     const productId = isProductChange ? event.new_product_id || event.product_id : event.product_id;
     const product = parseRevenueCatProduct(productId);
-    if (!product) return { ok: false, reason: "not_zelf_id_product" };
-    if (isExpiration && !product.subscription) return { ok: false, reason: "not_subscription_product" };
+    if (!product) return { ok: false, reason: "NOT_ZELF_ID_PRODUCT" };
+    if (isExpiration && !product.subscription) return { ok: false, reason: "NOT_SUBSCRIPTION_PRODUCT" };
 
     if (isSandbox(event) && !allowSandbox) {
-        return { ok: false, reason: "sandbox_event" };
+        return { ok: false, reason: "SANDBOX_EVENT" };
     }
 
     const attributes = readSubscriberAttributes(event);
@@ -263,19 +264,19 @@ const inspectRevenueCatEvent = (event = {}, { allowSandbox = false } = {}) => {
 const validatePurchase = (inspected) => {
     const { tagName, domain, product, attributes, ethAddress } = inspected;
 
-    if (!tagName) return { ok: false, reason: "zelf_name_missing" };
+    if (!tagName) return { ok: false, reason: "ZELF_NAME_MISSING" };
 
     const nameLength = getBareNameLength(tagName);
     if (product.legacy && !productCoversNameLength(product, nameLength)) {
-        return { ok: false, reason: "product_does_not_cover_name", tagName, domain, product };
+        return { ok: false, reason: "PRODUCT_DOES_NOT_COVER_NAME", tagName, domain, product };
     }
 
     const plan = resolvePlanForPurchase(product, tagName, attributes);
     if (!licenseAllowsPlan(domain, tagName, plan, inspected.duration)) {
-        return { ok: false, reason: "plan_not_allowed_for_name", tagName, domain, plan };
+        return { ok: false, reason: "PLAN_NOT_ALLOWED_FOR_NAME", tagName, domain, plan };
     }
 
-    if (!ethAddress) return { ok: false, reason: "eth_address_missing", tagName, domain };
+    if (!ethAddress) return { ok: false, reason: "ETH_ADDRESS_MISSING", tagName, domain };
 
     return { ...inspected, ok: true, plan };
 };
@@ -368,7 +369,7 @@ const applyRevenueCatPurchase = async (inspected) => {
     const owner = String(tagObject.publicData.ethAddress || "").toLowerCase();
 
     if (!owner || owner !== ethAddress.toLowerCase()) {
-        throw new Error("409:zelfProof_does_not_match");
+        throw codedError("409:ZELFPROOF_DOES_NOT_MATCH");
     }
 
     if (alreadyAppliedToRecord(tagObject.publicData, inspected)) {
@@ -442,19 +443,19 @@ const applyRevenueCatPurchase = async (inspected) => {
  * @returns {string|null}
  */
 const expirationSkipReason = (publicData = {}, { originalTransactionId, expirationAtMs }) => {
-    if (publicData.plan === "free") return "already_free";
+    if (publicData.plan === "free") return "ALREADY_FREE";
 
     const current = String(publicData.revenueCatOriginalTransactionId || "").trim();
     if (current && originalTransactionId && current !== String(originalTransactionId).trim()) {
-        return "superseded_by_later_purchase";
+        return "SUPERSEDED_BY_LATER_PURCHASE";
     }
 
-    if (String(publicData.duration || "").toLowerCase() === "lifetime") return "extended_beyond_subscription";
+    if (String(publicData.duration || "").toLowerCase() === "lifetime") return "EXTENDED_BEYOND_SUBSCRIPTION";
 
     const expiresAt = publicData.expiresAt ? parseLeaseDate(publicData.expiresAt) : null;
     const periodEnd = expirationAtMs ? moment(expirationAtMs) : moment();
     if (expiresAt?.isValid() && expiresAt.valueOf() > periodEnd.valueOf() + EXPIRATION_EXTENSION_TOLERANCE_MS) {
-        return "extended_beyond_subscription";
+        return "EXTENDED_BEYOND_SUBSCRIPTION";
     }
 
     return null;
@@ -468,7 +469,7 @@ const applyRevenueCatExpiration = async (inspected) => {
     const { tagName, domain, eventId, originalTransactionId } = inspected;
 
     if (!tagName) {
-        throw new Error("409:zelf_name_missing");
+        throw codedError("409:ZELF_NAME_MISSING");
     }
 
     const { revertZelfIdToFreePlan } = require("./my-zelf-id.module");
@@ -526,33 +527,33 @@ const applyRevenueCatExpiration = async (inspected) => {
 const applyRevenueCatProductChange = async (inspected) => {
     const { tagName, domain, eventId, plan, originalTransactionId } = inspected;
 
-    if (!tagName) throw new Error("409:zelf_name_missing");
+    if (!tagName) throw codedError("409:ZELF_NAME_MISSING");
     if (plan !== "unlimited") {
-        return { status: "skipped", reason: "deferred_downgrade", confirmed: false, tagName, domain };
+        return { status: "skipped", reason: "DEFERRED_DOWNGRADE", confirmed: false, tagName, domain };
     }
 
-    if (!licenseAllowsPlan(domain, tagName, plan)) throw new Error("409:plan_not_allowed_for_name");
+    if (!licenseAllowsPlan(domain, tagName, plan)) throw codedError("409:PLAN_NOT_ALLOWED_FOR_NAME");
 
     const { changeZelfIdPlan } = require("./my-zelf-id.module");
     const { domainConfig, tagObject } = await loadTag({ tagName, domain });
     const publicData = tagObject.publicData;
 
     if (inspected.ethAddress && String(publicData.ethAddress || "").toLowerCase() !== inspected.ethAddress.toLowerCase()) {
-        throw new Error("409:zelfProof_does_not_match");
+        throw codedError("409:ZELFPROOF_DOES_NOT_MATCH");
     }
 
     const current = String(publicData.revenueCatOriginalTransactionId || "").trim();
     if (current && originalTransactionId && current !== originalTransactionId) {
-        return { status: "skipped", reason: "superseded_by_later_purchase", confirmed: false, tagName, domain };
+        return { status: "skipped", reason: "SUPERSEDED_BY_LATER_PURCHASE", confirmed: false, tagName, domain };
     }
 
     if (publicData.eventID === eventId || publicData.plan === "unlimited") {
-        return { status: "skipped", reason: "plan_unchanged", confirmed: false, tagName, domain, plan: publicData.plan };
+        return { status: "skipped", reason: "PLAN_UNCHANGED", confirmed: false, tagName, domain, plan: publicData.plan };
     }
 
     if (publicData.plan !== "premium") {
         // A free (expired) name has nothing to upgrade; the purchase event will credit it.
-        return { status: "skipped", reason: "plan_unchanged", confirmed: false, tagName, domain, plan: publicData.plan };
+        return { status: "skipped", reason: "PLAN_UNCHANGED", confirmed: false, tagName, domain, plan: publicData.plan };
     }
 
     const result = await changeZelfIdPlan(
@@ -594,28 +595,28 @@ const webhookHandler = async (event, { allowSandbox = false } = {}) => {
             return { status: "skipped", reason: inspected.reason, confirmed: false };
         }
 
-        throw new Error(`409:${inspected.reason}`);
+        throw codedError(`409:${inspected.reason}`);
     }
 
     // Validate purchases before claiming, so a permanent 409 never holds a claim.
     if (inspected.action === "purchase" && !inspected.lookupByTransaction) {
         const early = validatePurchase(inspected);
-        if (!early.ok) throw new Error(`409:${early.reason}`);
+        if (!early.ok) throw codedError(`409:${early.reason}`);
     }
 
     const { claimEvent, releaseEvent, markEventProcessed, findCreditedTransaction } = require("./zelf-ids-revenue-cat-events.module");
     const eventId = inspected.eventId;
 
     if (eventId && !(await claimEvent(inspected))) {
-        return { status: "skipped", ignored: "duplicate_event", reason: "duplicate_event", confirmed: false };
+        return { status: "skipped", ignored: "DUPLICATE_EVENT", reason: "DUPLICATE_EVENT", confirmed: false };
     }
 
     // Same store purchase under a different event.id (v3 and v4 webhooks, legacy zns_* replays): credit once.
     if (eventId && inspected.action === "purchase" && inspected.transactionId && typeof findCreditedTransaction === "function") {
         const prior = await findCreditedTransaction({ transactionId: inspected.transactionId, eventId });
         if (prior) {
-            await markEventProcessed(eventId, { status: "skipped", action: "duplicate_transaction" }).catch(() => undefined);
-            return { status: "skipped", ignored: "duplicate_transaction", reason: "duplicate_transaction", confirmed: false };
+            await markEventProcessed(eventId, { status: "skipped", action: "DUPLICATE_TRANSACTION" }).catch(() => undefined);
+            return { status: "skipped", ignored: "DUPLICATE_TRANSACTION", reason: "DUPLICATE_TRANSACTION", confirmed: false };
         }
     }
 
@@ -647,7 +648,7 @@ const applyInspectedEvent = async (claimed) => {
     if (inspected.action === "change_plan") return applyRevenueCatProductChange(inspected);
 
     const validated = validatePurchase(inspected);
-    if (!validated.ok) throw new Error(`409:${validated.reason}`);
+    if (!validated.ok) throw codedError(`409:${validated.reason}`);
 
     return applyRevenueCatPurchase(validated);
 };

@@ -32,13 +32,13 @@ describe("license-derived duration/plan validation", () => {
         expect((await run(paymentOptionsValidation, "query", { tagName: "abcdefgh.zelf", domain: "zelf", duration: "999" })).next).toBe(1);
         for (const duration of ["4", "5"]) {
             const r = await run(paymentOptionsValidation, "query", { tagName: "abcdefgh.zelf", domain: "zelf", duration, plan: "premium" });
-            expect(r).toMatchObject({ status: 409, next: 0, body: { validationError: "plan_duration_not_offered_by_license" } });
+            expect(r).toMatchObject({ status: 409, next: 0, body: { validationError: "PLAN_DURATION_NOT_OFFERED_BY_LICENSE" } });
         }
     });
 
     test("payment-options: premium on a 5-char name is rejected; unlimited ok", async () => {
         const r = await run(paymentOptionsValidation, "query", { tagName: "abcde.zelf", domain: "zelf", duration: "1", plan: "premium" });
-        expect(r).toMatchObject({ status: 409, body: { validationError: "plan_not_offered_for_name" } });
+        expect(r).toMatchObject({ status: 409, body: { validationError: "PLAN_NOT_OFFERED_FOR_NAME" } });
         expect((await run(paymentOptionsValidation, "query", { tagName: "abcde.zelf", domain: "zelf", duration: "1" })).next).toBe(1);
     });
 

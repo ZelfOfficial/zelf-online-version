@@ -24,17 +24,17 @@ const isClientError = (error) => {
 };
 
 const unavailable = () => {
-    const error = new Error("503:quote_store_unavailable");
-    error.clientCode = "quote_store_unavailable";
-    error.clientMessage = "quote_store_unavailable";
+    const error = new Error("503:QUOTE_STORE_UNAVAILABLE");
+    error.clientCode = "QUOTE_STORE_UNAVAILABLE";
+    error.clientMessage = "QUOTE_STORE_UNAVAILABLE";
     error.status = 503;
     return error;
 };
 
 const genericFailure = () => {
-    const error = new Error("500:service_unavailable");
-    error.clientCode = "service_unavailable";
-    error.clientMessage = "service_unavailable";
+    const error = new Error("500:SERVICE_UNAVAILABLE");
+    error.clientCode = "SERVICE_UNAVAILABLE";
+    error.clientMessage = "SERVICE_UNAVAILABLE";
     error.status = 500;
     return error;
 };
@@ -46,7 +46,7 @@ const genericFailure = () => {
 const mapGrantError = (error) => {
     if (isClientError(error) && !isMongoConnectivityError(error)) return error;
     if (isMongoConnectivityError(error)) {
-        console.error("[zelf-id-grant] quote_store_unavailable", error);
+        console.error("[zelf-id-grant] QUOTE_STORE_UNAVAILABLE", error);
         return unavailable();
     }
     const status = Number(error?.status);

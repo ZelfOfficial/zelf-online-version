@@ -6,17 +6,18 @@
  * - Existing name: stamped with the same code a paid upgrade uses (addDurationToTag), price 0, paymentMethod "gift".
  */
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
+const { codedError } = require("../../../Core/http-handler");
 const { assertLicenseOffersPlan, assertPurchaseKeepsPaidValue, getBareName } = require("./zelf-id-plan.module");
 
 const STAFF_TYPES = new Set(["staff", "staff_account"]);
 const WRITE_ROLES = new Set(["write", "admin"]);
 
-const httpError = (code) => new Error(code);
+const httpError = (code) => codedError(code);
 
 const assertStaffWriter = (jwt) => {
-    if (!jwt) throw httpError("401:unauthorized");
-    if (!STAFF_TYPES.has(jwt.accountType)) throw httpError("403:staff_only");
-    if (!WRITE_ROLES.has(String(jwt.role || "read"))) throw httpError("403:write_access_required");
+    if (!jwt) throw httpError("401:UNAUTHORIZED");
+    if (!STAFF_TYPES.has(jwt.accountType)) throw httpError("403:STAFF_ONLY");
+    if (!WRITE_ROLES.has(String(jwt.role || "read"))) throw httpError("403:WRITE_ACCESS_REQUIRED");
 };
 
 const linksOf = (tagObject = {}) => {
@@ -45,12 +46,12 @@ const giftZelfId = async (params = {}, jwt, deps = {}) => {
     const plan = String(params.plan || "").trim().toLowerCase();
     const duration = `${params.duration ?? ""}`.trim().toLowerCase();
     const reason = String(params.reason || "").trim();
-    if (!domain || !bare || !plan || !duration || !reason) throw httpError("409:missing_gift_fields");
+    if (!domain || !bare || !plan || !duration || !reason) throw httpError("409:MISSING_GIFT_FIELDS");
 
     await resolveAuthorizedDomain(jwt, domain);
 
     const domainConfig = getConfig(domain);
-    if (!domainConfig) throw httpError("409:unsupported_domain");
+    if (!domainConfig) throw httpError("409:UNSUPPORTED_DOMAIN");
     const fullName = `${bare}.${domain}`;
 
     assertLicenseOffersPlan({ domainConfig, tagName: fullName, plan, duration });
@@ -60,7 +61,7 @@ const giftZelfId = async (params = {}, jwt, deps = {}) => {
     let search = await ZelfIdModule.searchTag({ tagName: fullName, domain, domainConfig, environment: "all" }, jwt);
 
     if (search.available || !search.tagObject) {
-        if (!params.zelfProof && !params.zelfProofQRCode) throw httpError("409:zelf_proof_required_to_rebuild");
+        if (!params.zelfProof && !params.zelfProofQRCode) throw httpError("409:ZELF_PROOF_REQUIRED_TO_REBUILD");
         const rebuilt = await Offline.leaseOffline(
             {
                 tagName: fullName,
@@ -74,7 +75,7 @@ const giftZelfId = async (params = {}, jwt, deps = {}) => {
         provenance = rebuilt.provenance;
         action = "rebuilt_and_gifted";
         search = await ZelfIdModule.searchTag({ tagName: fullName, domain, domainConfig, environment: "all" }, jwt);
-        if (search.available || !search.tagObject) throw httpError("409:rebuild_not_visible_yet");
+        if (search.available || !search.tagObject) throw httpError("409:REBUILD_NOT_VISIBLE_YET");
     }
 
     const tagObject = search.tagObject;
@@ -85,7 +86,7 @@ const giftZelfId = async (params = {}, jwt, deps = {}) => {
             const { extractZelfProofFromQR } = deps.QR || require("../../Tags/modules/qr-zelfproof-extractor.module");
             proof = await extractZelfProofFromQR(params.zelfProofQRCode);
         }
-        if (!proof) throw httpError("409:zelf_proof_required_to_preserve_provenance");
+        if (!proof) throw httpError("409:ZELF_PROOF_REQUIRED_TO_PRESERVE_PROVENANCE");
         const { publicData: proofPublic } = await Offline.previewHumanAuthn({ zelfProof: proof });
         provenance = Offline.detectProofProvenance(proofPublic);
         tagObject.publicData = { ...(tagObject.publicData || {}), v: provenance.version, origin: provenance.type };

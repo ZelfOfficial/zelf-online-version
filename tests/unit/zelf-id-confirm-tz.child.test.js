@@ -219,7 +219,7 @@ confirmDescribe(`confirm under ${process.env.TZ || "default"}`, () => {
 
         expect(granted).toHaveLength(1);
         expect(fulfilled.length + rejected.length).toBe(3);
-        expect(rejected.every((result) => result.reason.clientCode === "in_progress")).toBe(true);
+        expect(rejected.every((result) => result.reason.clientCode === "IN_PROGRESS")).toBe(true);
         expect(await QuoteGrant.countDocuments({ source: "whitelist", status: "done" })).toBe(1);
     });
 
@@ -241,7 +241,7 @@ confirmDescribe(`confirm under ${process.env.TZ || "default"}`, () => {
             prices: { ETH: { amountToSend: 0.01, price: 29 } },
             paymentAddress: { ethAddress: "0xabc" },
         });
-        await expect(verifyPaymentConfirmation(bare, "zelf", "ETH", other, {})).rejects.toThrow("403:tag_not_owned");
+        await expect(verifyPaymentConfirmation(bare, "zelf", "ETH", other, {})).rejects.toThrow("403:TAG_NOT_OWNED");
     });
 
     test("stripe confirm grants once for the session instead of the pin clock", async () => {

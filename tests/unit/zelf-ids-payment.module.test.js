@@ -383,7 +383,7 @@ describe("zelf-ids-payment.module", () => {
 
 		await expect(
 			addDurationToTag({ tagName: "zid12345", domain: "zelf", duration: 1, price: 29, plan: "premium", domainConfig }, tagObject)
-		).rejects.toThrow("409:plan_downgrade_not_allowed");
+		).rejects.toThrow("409:PLAN_DOWNGRADE_NOT_ALLOWED");
 	});
 
 	test("buildMetadata keeps v=3 on a legacy Tags proof while still stamping plan", () => {

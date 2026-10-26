@@ -6,6 +6,7 @@ const Stripe = require("stripe");
 const jwt = require("jsonwebtoken");
 const moment = require("moment");
 const config = require("../../../Core/config");
+const { codedError } = require("../../../Core/http-handler");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { normalizePaymentDuration } = require("./zelf-id-plan.module");
 
@@ -16,6 +17,24 @@ const isPlanSlug = (plan) => /^[a-z0-9_-]+$/i.test(String(plan || ""));
 const isDurationStamp = (duration) => duration === "lifetime" || /^\d+$/.test(String(duration || ""));
 
 const { retrieveCheckoutSession } = require("../../Stripe/modules/stripe-checkout-session.module");
+
+const PLAN_CHECKOUT_CODES = {
+    session_not_found: "SESSION_NOT_FOUND",
+    stripe_unavailable: "STRIPE_UNAVAILABLE",
+};
+
+const retrievePlanCheckoutSession = async (stripe, sessionId) => {
+    try {
+        return await retrieveCheckoutSession(stripe, sessionId);
+    } catch (error) {
+        const upper = PLAN_CHECKOUT_CODES[error?.clientCode];
+        if (upper) {
+            if (typeof error.message === "string") error.message = error.message.replace(error.clientCode, upper);
+            error.clientCode = upper;
+        }
+        throw error;
+    }
+};
 
 const getStripeClient = () => Stripe(config.stripe.secretKey);
 
@@ -39,14 +58,14 @@ const unitAmountForCharge = (amountUsd, { coupon = false } = {}) => {
     const cents = Math.round(Number(amountUsd) * 100);
     if (coupon) {
         if (!(cents > 0)) {
-            const err = new Error("409:invalid_quote_amount");
-            err.clientCode = "invalid_quote_amount";
+            const err = new Error("409:INVALID_QUOTE_AMOUNT");
+            err.clientCode = "INVALID_QUOTE_AMOUNT";
             err.clientMessage = "A 100% coupon is granted with payment confirmation and no network";
             throw err;
         }
         if (cents < STRIPE_MINIMUM_CENTS) {
-            const err = new Error("409:stripe_amount_below_minimum");
-            err.clientCode = "stripe_amount_below_minimum";
+            const err = new Error("409:STRIPE_AMOUNT_BELOW_MINIMUM");
+            err.clientCode = "STRIPE_AMOUNT_BELOW_MINIMUM";
             err.clientMessage = "Discounted total is below the Stripe minimum of $0.50";
             throw err;
         }
@@ -116,11 +135,11 @@ const inspectStripeLeaseSession = (session = {}) => {
     const metadata = parseLeaseStripeMetadata(session.metadata || {});
 
     if (!metadata) {
-        return { ok: false, reason: "not_zelf_id_lease" };
+        return { ok: false, reason: "NOT_ZELF_ID_LEASE" };
     }
 
     if (session.payment_status !== "paid") {
-        return { ok: false, reason: "unpaid", metadata };
+        return { ok: false, reason: "UNPAID", metadata };
     }
 
     return {
@@ -158,17 +177,17 @@ const pricingPathPrefix = (locale) => {
 
 const createStripeCheckout = async ({ tagName, domain, duration, plan, token, locale, email }) => {
     if (!config.stripe?.secretKey) {
-        throw new Error("500:stripe_not_configured");
+        throw codedError("500:STRIPE_NOT_CONFIGURED");
     }
 
     const tokenDecoded = jwt.verify(token, config.JWT_SECRET);
 
     if (!tokenDecoded || !tokenDecoded.tagName) {
-        throw new Error("409:invalid_token");
+        throw codedError("409:INVALID_TOKEN");
     }
 
     if (tokenDecoded.ttl < moment().unix()) {
-        throw new Error("409:token_expired");
+        throw codedError("409:TOKEN_EXPIRED");
     }
 
     const localName = String(tagName || "")
@@ -182,13 +201,13 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
     const expectedFull = `${localName}.${domainName}`;
 
     if (tokenDecoded.tagName !== expectedFull) {
-        throw new Error("403:tag_not_owned");
+        throw codedError("403:TAG_NOT_OWNED");
     }
 
     const expectedDuration = durationStamp(duration);
 
     if (tokenDurationStamp(tokenDecoded) !== expectedDuration) {
-        throw new Error("409:duration_mismatch");
+        throw codedError("409:DURATION_MISMATCH");
     }
 
     const { assertLicenseOffersPlan, resolvePaidPlan } = require("./zelf-id-plan.module");
@@ -196,11 +215,11 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
     const resolvedPlan = plan || tokenDecoded.plan || resolvePaidPlan({ tagName: expectedFull, domainConfig: licenseConfig });
 
     if (plan && tokenDecoded.plan && tokenDecoded.plan !== plan) {
-        throw new Error("409:plan_mismatch");
+        throw codedError("409:PLAN_MISMATCH");
     }
 
     if (!resolvedPlan) {
-        throw new Error("409:invalid_plan");
+        throw codedError("409:INVALID_PLAN");
     }
 
     // The license decides which plan/durations exist for this name length.
@@ -222,9 +241,9 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
     const STRIPE_MIN_SESSION_SECONDS = 30 * 60;
     const quoteRemaining = Number(tokenDecoded.ttl) - moment().unix();
     if (!(quoteRemaining >= STRIPE_MIN_SESSION_SECONDS)) {
-        const error = new Error("409:quote_expiring");
-        error.clientCode = "quote_expiring";
-        error.clientMessage = "quote_expiring";
+        const error = new Error("409:QUOTE_EXPIRING");
+        error.clientCode = "QUOTE_EXPIRING";
+        error.clientMessage = "QUOTE_EXPIRING";
         error.status = 409;
         throw error;
     }
@@ -264,7 +283,7 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
         });
         if (!priced.valid) throw Coupons.couponInvalid(priced.reason);
         if (tokenDecoded.amountDue != null && Math.abs(Number(tokenDecoded.amountDue) - priced.amountDue) > 0.009) {
-            throw Coupons.httpError(409, "Quoted total no longer matches the license price", "quote_price_changed");
+            throw Coupons.httpError(409, "Quoted total no longer matches the license price", "QUOTE_PRICE_CHANGED");
         }
         amountUsd = priced.amountDue;
         couponId = priced.coupon.id;
@@ -277,14 +296,14 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
         const raw = hasDevFraction ? afterCredit * devFraction : afterCredit;
         const expected = roundBillableUsdPrice(raw, { keepPositive: hasDevFraction && raw > 0 });
         if (Math.abs(amountUsd - expected) > 0.009) {
-            throw Coupons.httpError(409, "Quoted total no longer matches the license price", "quote_price_changed");
+            throw Coupons.httpError(409, "Quoted total no longer matches the license price", "QUOTE_PRICE_CHANGED");
         }
         amountUsd = expected;
     }
     const unitAmount = unitAmountForCharge(amountUsd, { coupon: Boolean(couponCode) || creditApplied || hasDevFraction });
 
     if (!(amountUsd > 0)) {
-        throw new Error("409:invalid_quote_amount");
+        throw codedError("409:INVALID_QUOTE_AMOUNT");
     }
 
     const metadata = buildLeaseStripeMetadata({
@@ -351,7 +370,7 @@ const confirmPaidStripeSession = async (session) => {
 
     if (!inspected.ok) {
         return {
-            status: inspected.reason === "unpaid" ? "unpaid" : "skipped",
+            status: inspected.reason === "UNPAID" ? "unpaid" : "skipped",
             reason: inspected.reason,
             confirmed: false,
             ...(inspected.metadata || {}),
@@ -460,7 +479,7 @@ const confirmPaidStripeSession = async (session) => {
                 price,
                 billableUsdPrice: price,
                 source: "stripe",
-                violationCode: error.clientCode || "coupon_invalid",
+                violationCode: error.clientCode || "COUPON_INVALID",
                 sessionId: inspected.sessionId,
                 paymentNetwork: "stripe",
                 tagObject,
@@ -471,7 +490,7 @@ const confirmPaidStripeSession = async (session) => {
                 action: "needs_manual_review",
                 confirmed: false,
                 manualReview: true,
-                reason: error.clientCode || "coupon_invalid",
+                reason: error.clientCode || "COUPON_INVALID",
                 tagName,
                 domain,
                 duration,
@@ -568,10 +587,10 @@ const confirmFromSessionId = async (sessionId) => {
     const id = String(sessionId || "").trim();
 
     if (!config.stripe?.secretKey) {
-        throw new Error("500:stripe_not_configured");
+        throw codedError("500:STRIPE_NOT_CONFIGURED");
     }
 
-    const session = await retrieveCheckoutSession(getStripeClient(), id);
+    const session = await retrievePlanCheckoutSession(getStripeClient(), id);
 
     return confirmPaidStripeSessionGuarded(session);
 };
@@ -609,16 +628,16 @@ const pollStripeSession = async ({ sessionId, authUser, token }) => {
     const id = String(sessionId || "").trim();
 
     if (!config.stripe?.secretKey) {
-        throw new Error("500:stripe_not_configured");
+        throw codedError("500:STRIPE_NOT_CONFIGURED");
     }
 
-    const session = await retrieveCheckoutSession(getStripeClient(), id);
+    const session = await retrievePlanCheckoutSession(getStripeClient(), id);
     const inspected = inspectStripeLeaseSession(session);
     const owner = await callerOwnsLease({ authUser, token, metadata: inspected.metadata });
 
     if (!inspected.ok) {
         const body = {
-            status: inspected.reason === "unpaid" ? "unpaid" : "skipped",
+            status: inspected.reason === "UNPAID" ? "unpaid" : "skipped",
             reason: inspected.reason,
             confirmed: false,
             ...(inspected.metadata || {}),
@@ -627,9 +646,9 @@ const pollStripeSession = async ({ sessionId, authUser, token }) => {
     }
 
     if (!owner) {
-        const error = new Error("403:tag_not_owned");
-        error.clientCode = "tag_not_owned";
-        error.clientMessage = "tag_not_owned";
+        const error = new Error("403:TAG_NOT_OWNED");
+        error.clientCode = "TAG_NOT_OWNED";
+        error.clientMessage = "TAG_NOT_OWNED";
         error.status = 403;
         throw error;
     }

@@ -253,7 +253,7 @@ describe("Zelf ID purchase guards", () => {
         expect(result.status).toBe("needs_manual_review");
         expect(recordPurchaseManualReview).toHaveBeenCalledWith(
             expect.objectContaining({
-                violationCode: "409:plan_downgrade_not_allowed",
+                violationCode: "409:PLAN_DOWNGRADE_NOT_ALLOWED",
                 source: "stripe",
             })
         );

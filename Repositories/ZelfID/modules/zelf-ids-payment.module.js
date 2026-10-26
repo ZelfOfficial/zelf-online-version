@@ -5,6 +5,7 @@ const moment = require("moment");
 const jwt = require("jsonwebtoken");
 const { keccak256, solidityPacked, parseUnits, getAddress } = require("ethers");
 const config = require("../../../Core/config");
+const { codedError, identifiedError } = require("../../../Core/http-handler");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { buildSearchablePinPages, fitExtraParamsForPin, resolveEncryptVersion, stampExtraParamsVersion } = require("../../Tags/modules/tags-addresses.module");
 const { formatLeaseDate, parseLeaseDate } = require("../../Tags/modules/lease-date.util");
@@ -103,16 +104,16 @@ const expectedWeiFromUsd = (usdPrice, tokenUsdPerTokenStr, zeroError) => {
     const usdScaled = parseUnits(decimalStringForParseUnits(usdPrice), 18);
     const pxScaled = parseUnits(decimalStringForParseUnits(tokenUsdPerTokenStr), 18);
     if (pxScaled === 0n) {
-        throw new Error(zeroError);
+        throw identifiedError(zeroError);
     }
     return (usdScaled * WAD) / pxScaled;
 };
 
-const avaxExpectedWeiFromUsd = (usdPrice, avaxUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, avaxUsdPerTokenStr, "avax_usd_price_zero");
-const bnbExpectedWeiFromUsd = (usdPrice, bnbUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, bnbUsdPerTokenStr, "bnb_usd_price_zero");
-const ethExpectedWeiFromUsd = (usdPrice, ethUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, ethUsdPerTokenStr, "eth_usd_price_zero");
-const polExpectedWeiFromUsd = (usdPrice, polUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, polUsdPerTokenStr, "pol_usd_price_zero");
-const bdagExpectedWeiFromUsd = (usdPrice, bdagUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, bdagUsdPerTokenStr, "bdag_usd_price_zero");
+const avaxExpectedWeiFromUsd = (usdPrice, avaxUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, avaxUsdPerTokenStr, "AVAX_USD_PRICE_ZERO");
+const bnbExpectedWeiFromUsd = (usdPrice, bnbUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, bnbUsdPerTokenStr, "BNB_USD_PRICE_ZERO");
+const ethExpectedWeiFromUsd = (usdPrice, ethUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, ethUsdPerTokenStr, "ETH_USD_PRICE_ZERO");
+const polExpectedWeiFromUsd = (usdPrice, polUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, polUsdPerTokenStr, "POL_USD_PRICE_ZERO");
+const bdagExpectedWeiFromUsd = (usdPrice, bdagUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, bdagUsdPerTokenStr, "BDAG_USD_PRICE_ZERO");
 
 const POL_NATIVE_DISPLAY_DECIMALS = 7;
 const POL_WEI_PER_TOKEN = 10n ** 18n;
@@ -297,7 +298,7 @@ const attachStableQuote = ({
             expectedBn = 1n;
         }
         if (expectedBn <= 0n) {
-            throw new Error(errorLabel);
+            throw identifiedError(errorLabel);
         }
         returnData[contractKey][tokenKey] = {
             tokenAddress: getAddress(addressRaw),
@@ -348,7 +349,7 @@ const attachEvmPayQuote = ({
             expectedWeiBn = 1n;
         }
         if (expectedWeiBn <= 0n) {
-            throw new Error(weiError);
+            throw identifiedError(weiError);
         }
         if (alignPolDisplay) {
             prices.POL.amountToSend = polNativeDisplayAmountFromWei(expectedWeiBn);
@@ -372,7 +373,7 @@ const attachEvmPayQuote = ({
                 decimals: stableDecimals,
                 humanDigits: stableHumanDigits,
                 priceKey: usdcPriceKey,
-                errorLabel: `expectedUsdc_${contractKey}_non_positive`,
+                errorLabel: `expectedUsdc_${contractKey}_non_positive`.toUpperCase(),
                 devAmountFraction,
             });
         }
@@ -388,7 +389,7 @@ const attachEvmPayQuote = ({
                 decimals: stableDecimals,
                 humanDigits: stableHumanDigits,
                 priceKey: usdtPriceKey,
-                errorLabel: `expectedUsdt_${contractKey}_non_positive`,
+                errorLabel: `expectedUsdt_${contractKey}_non_positive`.toUpperCase(),
                 devAmountFraction,
             });
         }
@@ -622,12 +623,12 @@ const resolveCheckoutReferral = async ({ tagName, domain, domainConfig, publicDa
     const bare = `${referralTagName}`.trim().toLowerCase().split(".")[0];
     const fullName = `${bare}.${domain}`;
 
-    if (!bare || bare === `${tagName}`.toLowerCase().split(".")[0]) throw new Error("409:invalid_referral");
+    if (!bare || bare === `${tagName}`.toLowerCase().split(".")[0]) throw codedError("409:INVALID_REFERRAL");
 
     const ZelfIdModule = require("./zelf-id.module");
     const referrer = await ZelfIdModule._validateReferral(fullName, authUser, domainConfig);
 
-    if (!referrer) throw new Error("404:referral_not_found");
+    if (!referrer) throw codedError("404:REFERRAL_NOT_FOUND");
 
     return { referralTagName: fullName, referralSolanaAddress: referrer.publicData?.solanaAddress || "" };
 };
@@ -637,15 +638,21 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
     const domainConfig = getDomainConfig(domain);
     const tagData = await ZelfIdModule.searchTag({ tagName, domain, domainConfig }, authUser);
 
-    if (tagData.available) throw new Error("404:tag_not_found");
+    if (tagData.available) {
+        const error = new Error("404:TAG_NOT_FOUND");
+        error.clientCode = "TAG_NOT_FOUND";
+        error.clientMessage = "TAG_NOT_FOUND";
+        error.status = 404;
+        throw error;
+    }
 
     const tagObject = tagData.tagObject;
     const currentPlan = effectivePlan(tagObject.publicData, domainConfig);
     const currentDuration = normalizePaymentDuration(tagObject.publicData.planDuration || tagObject.publicData.duration);
     if (currentPlan === "unlimited" && currentDuration === "lifetime") {
-        const error = new Error("409:already_lifetime");
-        error.clientCode = "already_lifetime";
-        error.clientMessage = "plan_not_upgradable";
+        const error = new Error("409:ALREADY_LIFETIME");
+        error.clientCode = "ALREADY_LIFETIME";
+        error.clientMessage = "PLAN_NOT_UPGRADABLE";
         error.status = 409;
         throw error;
     }
@@ -759,8 +766,9 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
     );
 
     if (!renewTagPayObject) {
-        const error = new Error("tagPayRecord_not_found");
+        const error = new Error("TAGPAYRECORD_NOT_FOUND");
         error.status = 404;
+        error.code = "TAGPAYRECORD_NOT_FOUND";
         throw error;
     }
 
@@ -919,7 +927,7 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
                 expectedWeiBn = 1n;
             }
             if (expectedWeiBn <= 0n) {
-                throw new Error("expectedWei_non_positive");
+                throw identifiedError("EXPECTED_WEI_NON_POSITIVE");
             }
             const contractAddr = getAddress(config.avalanche.tagPayContractAddress);
             returnData.smartContractAVAX = {
@@ -937,7 +945,7 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
                         expectedUsdcBn = 1n;
                     }
                     if (expectedUsdcBn <= 0n) {
-                        throw new Error("expectedUsdc_non_positive");
+                        throw identifiedError("EXPECTED_USDC_NON_POSITIVE");
                     }
                     returnData.smartContractAVAX.usdc = {
                         tokenAddress: getAddress(usdcAddrRaw),
@@ -969,7 +977,7 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         configBlock: config.bsc,
         versionPrefix: "ZELF_BSC_PAY_v1",
         expectedWeiFn: bnbExpectedWeiFromUsd,
-        weiError: "expectedWei_bsc_non_positive",
+        weiError: "EXPECTED_WEI_BSC_NON_POSITIVE",
         contractKey: "smartContractBSC",
         chainId: config.bsc.chainId,
         usdcAddr: config.bsc.tagPayUsdcAddress,
@@ -989,7 +997,7 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         configBlock: config.ethereum,
         versionPrefix: "ZELF_ETH_PAY_v1",
         expectedWeiFn: ethExpectedWeiFromUsd,
-        weiError: "expectedWei_eth_non_positive",
+        weiError: "EXPECTED_WEI_ETH_NON_POSITIVE",
         contractKey: "smartContractETH",
         chainId: config.ethereum.chainId,
         usdcAddr: config.ethereum.tagPayUsdcAddress,
@@ -1010,7 +1018,7 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         configBlock: config.polygon,
         versionPrefix: "ZELF_POLYGON_PAY_v1",
         expectedWeiFn: polExpectedWeiFromUsd,
-        weiError: "expectedWei_pol_non_positive",
+        weiError: "EXPECTED_WEI_POL_NON_POSITIVE",
         contractKey: "smartContractPOLYGON",
         chainId: config.polygon.chainId,
         usdcAddr: config.polygon.tagPayUsdcAddress,
@@ -1036,7 +1044,7 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         configBlock: config.base,
         versionPrefix: "ZELF_BASE_PAY_v1",
         expectedWeiFn: ethExpectedWeiFromUsd,
-        weiError: "expectedWei_base_non_positive",
+        weiError: "EXPECTED_WEI_BASE_NON_POSITIVE",
         contractKey: "smartContractBASE",
         chainId: config.base.chainId,
         usdcAddr: config.base.tagPayUsdcAddress,
@@ -1057,7 +1065,7 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         configBlock: config.blockdag,
         versionPrefix: "ZELF_BLOCKDAG_PAY_v1",
         expectedWeiFn: bdagExpectedWeiFromUsd,
-        weiError: "expectedWei_bdag_non_positive",
+        weiError: "EXPECTED_WEI_BDAG_NON_POSITIVE",
         contractKey: "smartContractBDAG",
         chainId: config.blockdag.chainId,
         billableUsdPrice,
@@ -1102,16 +1110,18 @@ const ensureZelfProofQRCode = async (tagObject) => {
     const zelfProof = tagObject.zelfProof || tagObject.publicData?.zelfProof;
 
     if (!zelfProof) {
-        const err = new Error("zelf_proof_qr_unavailable");
+        const err = new Error("ZELF_PROOF_QR_UNAVAILABLE");
         err.status = 500;
+        err.code = "ZELF_PROOF_QR_UNAVAILABLE";
         throw err;
     }
 
     const qr = await generateQRFromZelfProof(zelfProof);
 
     if (!qr || typeof qr !== "string") {
-        const err = new Error("zelf_proof_qr_regeneration_failed");
+        const err = new Error("ZELF_PROOF_QR_REGENERATION_FAILED");
         err.status = 500;
+        err.code = "ZELF_PROOF_QR_REGENERATION_FAILED";
         throw err;
     }
 

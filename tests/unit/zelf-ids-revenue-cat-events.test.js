@@ -94,7 +94,7 @@ describe("RevenueCat event-id dedupe", () => {
         const [a, b] = await Promise.all([webhookHandler(ev("evt_c")), webhookHandler(ev("evt_c"))]);
         expect(addDurationToTag).toHaveBeenCalledTimes(1);
         const statuses = [a, b].map((r) => r.ignored || r.action).sort();
-        expect(statuses).toEqual(["duplicate_event", "zelf_id_lease_extended"]);
+        expect(statuses).toEqual(["DUPLICATE_EVENT", "zelf_id_lease_extended"]);
         expect(docs.get("evt_c")).toMatchObject({ status: "processed", result: { status: "success", action: "zelf_id_lease_extended" } });
         expect(docs.get("evt_c").processedAt).toBeInstanceOf(Date);
     });
@@ -115,20 +115,20 @@ describe("RevenueCat event-id dedupe", () => {
         expect(record.eventID).toBe("evt_new");
 
         const late = await webhookHandler(ev("evt_old"));
-        expect(late).toMatchObject({ ignored: "duplicate_event", confirmed: false });
+        expect(late).toMatchObject({ ignored: "DUPLICATE_EVENT", confirmed: false });
         expect(addDurationToTag).toHaveBeenCalledTimes(2);
     });
 
     test("a permanent 409 does not leave a claim behind", async () => {
         await expect(webhookHandler(ev("evt_bad", { subscriber_attributes: { zelfName: { value: "abc.zelf" }, ethAddress: { value: OWNER } } }))).rejects.toThrow(
-            "plan_not_allowed_for_name"
+            "PLAN_NOT_ALLOWED_FOR_NAME"
         );
         expect(Model.create).not.toHaveBeenCalled();
     });
 
     test("skipped events (sandbox, unhandled) never claim", async () => {
         const out = await webhookHandler(ev("evt_sb", { environment: "SANDBOX" }));
-        expect(out).toMatchObject({ status: "skipped", reason: "sandbox_event" });
+        expect(out).toMatchObject({ status: "skipped", reason: "SANDBOX_EVENT" });
         expect(Model.create).not.toHaveBeenCalled();
     });
 
@@ -148,9 +148,9 @@ describe("RevenueCat event-id dedupe", () => {
     test("same store transaction under a new event.id (v3 + v4, zns_* replay) is credited once", async () => {
         await webhookHandler(ev("evt_v4", { transaction_id: "store_tx_1", original_transaction_id: "store_tx_1" }));
         const dup = await webhookHandler(ev("evt_v3", { transaction_id: "store_tx_1", original_transaction_id: "store_tx_1" }));
-        expect(dup).toMatchObject({ status: "skipped", ignored: "duplicate_transaction", confirmed: false });
+        expect(dup).toMatchObject({ status: "skipped", ignored: "DUPLICATE_TRANSACTION", confirmed: false });
         expect(addDurationToTag).toHaveBeenCalledTimes(1);
-        expect(docs.get("evt_v3")).toMatchObject({ status: "processed", result: { action: "duplicate_transaction" } });
+        expect(docs.get("evt_v3")).toMatchObject({ status: "processed", result: { action: "DUPLICATE_TRANSACTION" } });
     });
 
     test("a renewal (new transaction_id, same original) still credits", async () => {

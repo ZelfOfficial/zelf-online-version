@@ -31,10 +31,10 @@ describe("Zelf ID plan prices come only from license planPricing", () => {
 
     test("no fallback to the Tags pricingTable or the hardcoded 24", () => {
         const d = live();
-        expect(() => price(d, "abcdefgh.zelf", "4", "premium")).toThrow("409:plan_duration_not_offered_by_license");
-        expect(() => price(d, "abcd.zelf", "1", "premium")).toThrow("409:plan_duration_not_offered_by_license");
+        expect(() => price(d, "abcdefgh.zelf", "4", "premium")).toThrow("409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE");
+        expect(() => price(d, "abcd.zelf", "1", "premium")).toThrow("409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE");
         const empty = license(undefined);
-        expect(() => price(empty, "abcdefgh.zelf", "1", "premium")).toThrow("409:plan_duration_not_offered_by_license");
+        expect(() => price(empty, "abcdefgh.zelf", "1", "premium")).toThrow("409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE");
     });
 
     test("Tags (no plan) still use pricingTable", () => {
@@ -54,10 +54,10 @@ describe("Zelf ID plan prices come only from license planPricing", () => {
     test("assertLicenseOffersPlan rejects 4/5y and premium on 1–5", () => {
         const d = live();
         expect(() => assertLicenseOffersPlan({ domainConfig: d, tagName: "abcdefgh.zelf", plan: "premium", duration: "4" })).toThrow(
-            "409:plan_duration_not_offered_by_license"
+            "409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE"
         );
         expect(() => assertLicenseOffersPlan({ domainConfig: d, tagName: "abcde.zelf", plan: "premium", duration: "1" })).toThrow(
-            "409:plan_not_offered_for_name"
+            "409:PLAN_NOT_OFFERED_FOR_NAME"
         );
         expect(() => assertLicenseOffersPlan({ domainConfig: d, tagName: "abcde.zelf", plan: "unlimited", duration: "999" })).not.toThrow();
     });

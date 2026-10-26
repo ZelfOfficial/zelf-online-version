@@ -23,7 +23,7 @@ const createSchema = Joi.object({
 const requireSuperAdmin = async (ctx, next) => {
     if (!ctx.state.user || !ctx.state.user.superAdminId) {
         ctx.status = 403;
-        ctx.body = { error: "Super-admin access required", code: "super_admin_required" };
+        ctx.body = { error: "Super-admin access required", code: "SUPER_ADMIN_REQUIRED" };
         return;
     }
     await next();
