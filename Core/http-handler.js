@@ -143,6 +143,30 @@ const tryCatchLog = async (status = "failed", message, code, exception, ctx = nu
 
 const isZelfClientErrorCode = (value) => typeof value === "string" && /^ERR_[A-Z0-9_]+$/.test(value);
 
+/**
+ * `409:SOME_CODE` where the HTTP `code` and `message` are both SOME_CODE.
+ * Status stays the numeric prefix. Underscores in the message stay.
+ */
+const codedError = (statusAndCode) => {
+	const error = new Error(statusAndCode);
+	const code = String(statusAndCode).split(":").slice(1).join(":");
+	error.clientCode = code;
+	error.clientMessage = code;
+	return error;
+};
+
+/**
+ * A bare plan code (`SOME_CODE`) whose HTTP message is already that string.
+ * `code` becomes the same string. Status stays `status` (500 when omitted).
+ */
+const identifiedError = (message, status = 500) => {
+	const error = new Error(message);
+	error.status = status;
+	error.clientMessage = message;
+	error.code = message;
+	return error;
+};
+
 const resolveErrorCode = (defaultCode, optionalMessage) =>
 	isZelfClientErrorCode(optionalMessage) ? optionalMessage : defaultCode;
 
@@ -326,4 +350,6 @@ const errorHandler = (exception, ctx = null, optionalMessage) => {
 module.exports = {
 	tryCatchLog,
 	errorHandler,
+	codedError,
+	identifiedError,
 };

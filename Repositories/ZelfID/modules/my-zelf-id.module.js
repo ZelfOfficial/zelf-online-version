@@ -4,6 +4,7 @@
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const config = require("../../../Core/config");
+const { codedError } = require("../../../Core/http-handler");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { coerceInitiatedAtUnix } = require("../../Tags/modules/tag-pay-session-tx.util");
 const {
@@ -241,9 +242,9 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
     const tokenDecoded = jwt.verify(token, config.JWT_SECRET);
     const domainConfig = getDomainConfig(domain);
 
-    if (!tokenDecoded || !tokenDecoded.tagName || !tokenDecoded.tagPayName) throw new Error("401:TAG_NOT_AUTHENTICATED");
+    if (!tokenDecoded || !tokenDecoded.tagName || !tokenDecoded.tagPayName) throw codedError("401:TAG_NOT_AUTHENTICATED");
 
-    if (tokenDecoded.tagName !== `${tagName}.${domain}`) throw new Error("403:TAG_NOT_OWNED");
+    if (tokenDecoded.tagName !== `${tagName}.${domain}`) throw codedError("403:TAG_NOT_OWNED");
 
     const quoteExpired = quoteIsExpired(tokenDecoded);
 
@@ -558,7 +559,7 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
 
     if (Number(priceQuote.price) !== 0 && !coveredByCredit) {
         await releaseQuoteGrant(quoteKey);
-        throw new Error("409:CHECKOUT_TOTAL_NOT_ZERO");
+        throw codedError("409:CHECKOUT_TOTAL_NOT_ZERO");
     }
 
     if (referralTagName && !tagObject.publicData.referralTagName) {
@@ -782,7 +783,7 @@ const addDurationToTag = async (params, tagObject) => {
                 expiresAt: tagObject.publicData?.expiresAt || null,
             };
         }
-        throw new Error(violation);
+        throw codedError(violation);
     }
 
     const built = ZelfIdsPaymentModule.buildMetadata(params, tagObject, domainConfig);

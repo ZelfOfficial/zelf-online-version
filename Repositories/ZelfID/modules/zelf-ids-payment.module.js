@@ -5,6 +5,7 @@ const moment = require("moment");
 const jwt = require("jsonwebtoken");
 const { keccak256, solidityPacked, parseUnits, getAddress } = require("ethers");
 const config = require("../../../Core/config");
+const { codedError, identifiedError } = require("../../../Core/http-handler");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { buildSearchablePinPages, fitExtraParamsForPin, resolveEncryptVersion, stampExtraParamsVersion } = require("../../Tags/modules/tags-addresses.module");
 const { formatLeaseDate, parseLeaseDate } = require("../../Tags/modules/lease-date.util");
@@ -103,7 +104,7 @@ const expectedWeiFromUsd = (usdPrice, tokenUsdPerTokenStr, zeroError) => {
     const usdScaled = parseUnits(decimalStringForParseUnits(usdPrice), 18);
     const pxScaled = parseUnits(decimalStringForParseUnits(tokenUsdPerTokenStr), 18);
     if (pxScaled === 0n) {
-        throw new Error(zeroError);
+        throw identifiedError(zeroError);
     }
     return (usdScaled * WAD) / pxScaled;
 };
@@ -297,7 +298,7 @@ const attachStableQuote = ({
             expectedBn = 1n;
         }
         if (expectedBn <= 0n) {
-            throw new Error(errorLabel);
+            throw identifiedError(errorLabel);
         }
         returnData[contractKey][tokenKey] = {
             tokenAddress: getAddress(addressRaw),
@@ -348,7 +349,7 @@ const attachEvmPayQuote = ({
             expectedWeiBn = 1n;
         }
         if (expectedWeiBn <= 0n) {
-            throw new Error(weiError);
+            throw identifiedError(weiError);
         }
         if (alignPolDisplay) {
             prices.POL.amountToSend = polNativeDisplayAmountFromWei(expectedWeiBn);
@@ -622,12 +623,12 @@ const resolveCheckoutReferral = async ({ tagName, domain, domainConfig, publicDa
     const bare = `${referralTagName}`.trim().toLowerCase().split(".")[0];
     const fullName = `${bare}.${domain}`;
 
-    if (!bare || bare === `${tagName}`.toLowerCase().split(".")[0]) throw new Error("409:INVALID_REFERRAL");
+    if (!bare || bare === `${tagName}`.toLowerCase().split(".")[0]) throw codedError("409:INVALID_REFERRAL");
 
     const ZelfIdModule = require("./zelf-id.module");
     const referrer = await ZelfIdModule._validateReferral(fullName, authUser, domainConfig);
 
-    if (!referrer) throw new Error("404:REFERRAL_NOT_FOUND");
+    if (!referrer) throw codedError("404:REFERRAL_NOT_FOUND");
 
     return { referralTagName: fullName, referralSolanaAddress: referrer.publicData?.solanaAddress || "" };
 };
@@ -767,6 +768,7 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
     if (!renewTagPayObject) {
         const error = new Error("TAGPAYRECORD_NOT_FOUND");
         error.status = 404;
+        error.code = "TAGPAYRECORD_NOT_FOUND";
         throw error;
     }
 
@@ -925,7 +927,7 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
                 expectedWeiBn = 1n;
             }
             if (expectedWeiBn <= 0n) {
-                throw new Error("EXPECTED_WEI_NON_POSITIVE");
+                throw identifiedError("EXPECTED_WEI_NON_POSITIVE");
             }
             const contractAddr = getAddress(config.avalanche.tagPayContractAddress);
             returnData.smartContractAVAX = {
@@ -943,7 +945,7 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
                         expectedUsdcBn = 1n;
                     }
                     if (expectedUsdcBn <= 0n) {
-                        throw new Error("EXPECTED_USDC_NON_POSITIVE");
+                        throw identifiedError("EXPECTED_USDC_NON_POSITIVE");
                     }
                     returnData.smartContractAVAX.usdc = {
                         tokenAddress: getAddress(usdcAddrRaw),
@@ -1110,6 +1112,7 @@ const ensureZelfProofQRCode = async (tagObject) => {
     if (!zelfProof) {
         const err = new Error("ZELF_PROOF_QR_UNAVAILABLE");
         err.status = 500;
+        err.code = "ZELF_PROOF_QR_UNAVAILABLE";
         throw err;
     }
 
@@ -1118,6 +1121,7 @@ const ensureZelfProofQRCode = async (tagObject) => {
     if (!qr || typeof qr !== "string") {
         const err = new Error("ZELF_PROOF_QR_REGENERATION_FAILED");
         err.status = 500;
+        err.code = "ZELF_PROOF_QR_REGENERATION_FAILED";
         throw err;
     }
 

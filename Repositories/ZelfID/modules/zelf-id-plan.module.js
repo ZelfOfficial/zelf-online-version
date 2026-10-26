@@ -11,6 +11,7 @@
  * active paid lease (v4 premium/unlimited, or v3.6 planless with renewedAt / price > 0).
  */
 const moment = require("moment");
+const { codedError } = require("../../../Core/http-handler");
 const { formatLeaseDate, parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 
 /** Unpaid short-name hold window. Override via `ZELF_ID_RESERVATION_AMOUNT` / `ZELF_ID_RESERVATION_UNIT` (e.g. `5` + `hour` to revert). */
@@ -213,7 +214,7 @@ const resolvePaidPlan = (tagNameOrParams, requestedPlan) => {
  */
 const getZelfIdPrice = ({ tagName, duration = "1", referralTagName = "", domainConfig, requestedPlan } = {}) => {
     if (typeof domainConfig?.getPrice !== "function") {
-        throw new Error("409:LICENSE_PRICE_REQUIRED");
+        throw codedError("409:LICENSE_PRICE_REQUIRED");
     }
 
     // An explicit paid plan is quoted as-is: getPrice throws 409 when the license does not price it.
@@ -241,12 +242,12 @@ const getZelfIdPrice = ({ tagName, duration = "1", referralTagName = "", domainC
  * @param {string|number} params.duration
  */
 const assertLicenseOffersPlan = ({ domainConfig, tagName, plan, duration }) => {
-    if (typeof domainConfig?.licensePlanDurations !== "function") throw new Error("409:LICENSE_PRICE_REQUIRED");
+    if (typeof domainConfig?.licensePlanDurations !== "function") throw codedError("409:LICENSE_PRICE_REQUIRED");
     const offered = domainConfig.licensePlanDurations(plan, getBareNameLength(tagName));
     const raw = `${duration ?? ""}`.trim().toLowerCase();
     const wanted = raw === "999" ? "lifetime" : raw;
     if (!offered.includes(wanted)) {
-        throw new Error(offered.length ? "409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE" : "409:PLAN_NOT_OFFERED_FOR_NAME");
+        throw codedError(offered.length ? "409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE" : "409:PLAN_NOT_OFFERED_FOR_NAME");
     }
 };
 
@@ -583,7 +584,7 @@ const getPurchaseKeepsPaidValueViolation = ({ publicData = {}, requestedPlan, ta
 
 const assertPurchaseKeepsPaidValue = (params = {}) => {
     const violation = getPurchaseKeepsPaidValueViolation(params);
-    if (violation) throw new Error(violation);
+    if (violation) throw codedError(violation);
 };
 
 module.exports = {

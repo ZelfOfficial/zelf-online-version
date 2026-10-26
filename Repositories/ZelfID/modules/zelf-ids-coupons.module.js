@@ -5,6 +5,7 @@
  * or the per-Zelf-ID limit.
  */
 const crypto = require("crypto");
+const { codedError } = require("../../../Core/http-handler");
 const Coupon = require("../models/zelf-id-coupon.model");
 const { getZelfIdCheckoutPrice, normalizePaymentDuration } = require("./zelf-id-plan.module");
 
@@ -295,7 +296,7 @@ const claimForGrant = async ({ code, couponId, zelfId, plan, duration, domainCon
     const price = listPrice != null ? Number(listPrice) : licenseListPrice({ tagName: tagName || zelfId, duration, domainConfig, plan });
     const described = await describeCoupon({ code: resolvedCode, plan, duration, zelfId, listPrice: price });
     if (!described.valid) throw couponInvalid(described.reason);
-    if (requireZero && described.amountDue !== 0) throw new Error("409:CHECKOUT_TOTAL_NOT_ZERO");
+    if (requireZero && described.amountDue !== 0) throw codedError("409:CHECKOUT_TOTAL_NOT_ZERO");
     if (signedAmount != null && Math.abs(Number(signedAmount) - described.amountDue) > 0.009) {
         throw httpError(409, "Quoted total no longer matches the license price", "QUOTE_PRICE_CHANGED");
     }

@@ -6,12 +6,13 @@
  * - Existing name: stamped with the same code a paid upgrade uses (addDurationToTag), price 0, paymentMethod "gift".
  */
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
+const { codedError } = require("../../../Core/http-handler");
 const { assertLicenseOffersPlan, assertPurchaseKeepsPaidValue, getBareName } = require("./zelf-id-plan.module");
 
 const STAFF_TYPES = new Set(["staff", "staff_account"]);
 const WRITE_ROLES = new Set(["write", "admin"]);
 
-const httpError = (code) => new Error(code);
+const httpError = (code) => codedError(code);
 
 const assertStaffWriter = (jwt) => {
     if (!jwt) throw httpError("401:UNAUTHORIZED");

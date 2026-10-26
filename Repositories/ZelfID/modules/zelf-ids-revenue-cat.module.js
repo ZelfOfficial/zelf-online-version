@@ -5,6 +5,7 @@
  * Legacy char-bucket products (zns_char_* / zelf_name_service_char_*) remain supported.
  */
 const moment = require("moment");
+const { codedError } = require("../../../Core/http-handler");
 const { parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { getBareName, getBareNameLength, resolvePaidPlan } = require("./zelf-id-plan.module");
@@ -368,7 +369,7 @@ const applyRevenueCatPurchase = async (inspected) => {
     const owner = String(tagObject.publicData.ethAddress || "").toLowerCase();
 
     if (!owner || owner !== ethAddress.toLowerCase()) {
-        throw new Error("409:ZELFPROOF_DOES_NOT_MATCH");
+        throw codedError("409:ZELFPROOF_DOES_NOT_MATCH");
     }
 
     if (alreadyAppliedToRecord(tagObject.publicData, inspected)) {
@@ -468,7 +469,7 @@ const applyRevenueCatExpiration = async (inspected) => {
     const { tagName, domain, eventId, originalTransactionId } = inspected;
 
     if (!tagName) {
-        throw new Error("409:ZELF_NAME_MISSING");
+        throw codedError("409:ZELF_NAME_MISSING");
     }
 
     const { revertZelfIdToFreePlan } = require("./my-zelf-id.module");
@@ -526,19 +527,19 @@ const applyRevenueCatExpiration = async (inspected) => {
 const applyRevenueCatProductChange = async (inspected) => {
     const { tagName, domain, eventId, plan, originalTransactionId } = inspected;
 
-    if (!tagName) throw new Error("409:ZELF_NAME_MISSING");
+    if (!tagName) throw codedError("409:ZELF_NAME_MISSING");
     if (plan !== "unlimited") {
         return { status: "skipped", reason: "DEFERRED_DOWNGRADE", confirmed: false, tagName, domain };
     }
 
-    if (!licenseAllowsPlan(domain, tagName, plan)) throw new Error("409:PLAN_NOT_ALLOWED_FOR_NAME");
+    if (!licenseAllowsPlan(domain, tagName, plan)) throw codedError("409:PLAN_NOT_ALLOWED_FOR_NAME");
 
     const { changeZelfIdPlan } = require("./my-zelf-id.module");
     const { domainConfig, tagObject } = await loadTag({ tagName, domain });
     const publicData = tagObject.publicData;
 
     if (inspected.ethAddress && String(publicData.ethAddress || "").toLowerCase() !== inspected.ethAddress.toLowerCase()) {
-        throw new Error("409:ZELFPROOF_DOES_NOT_MATCH");
+        throw codedError("409:ZELFPROOF_DOES_NOT_MATCH");
     }
 
     const current = String(publicData.revenueCatOriginalTransactionId || "").trim();
@@ -594,13 +595,13 @@ const webhookHandler = async (event, { allowSandbox = false } = {}) => {
             return { status: "skipped", reason: inspected.reason, confirmed: false };
         }
 
-        throw new Error(`409:${inspected.reason}`);
+        throw codedError(`409:${inspected.reason}`);
     }
 
     // Validate purchases before claiming, so a permanent 409 never holds a claim.
     if (inspected.action === "purchase" && !inspected.lookupByTransaction) {
         const early = validatePurchase(inspected);
-        if (!early.ok) throw new Error(`409:${early.reason}`);
+        if (!early.ok) throw codedError(`409:${early.reason}`);
     }
 
     const { claimEvent, releaseEvent, markEventProcessed, findCreditedTransaction } = require("./zelf-ids-revenue-cat-events.module");
@@ -647,7 +648,7 @@ const applyInspectedEvent = async (claimed) => {
     if (inspected.action === "change_plan") return applyRevenueCatProductChange(inspected);
 
     const validated = validatePurchase(inspected);
-    if (!validated.ok) throw new Error(`409:${validated.reason}`);
+    if (!validated.ok) throw codedError(`409:${validated.reason}`);
 
     return applyRevenueCatPurchase(validated);
 };

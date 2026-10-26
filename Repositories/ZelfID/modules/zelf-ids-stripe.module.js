@@ -6,6 +6,7 @@ const Stripe = require("stripe");
 const jwt = require("jsonwebtoken");
 const moment = require("moment");
 const config = require("../../../Core/config");
+const { codedError } = require("../../../Core/http-handler");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { normalizePaymentDuration } = require("./zelf-id-plan.module");
 
@@ -176,17 +177,17 @@ const pricingPathPrefix = (locale) => {
 
 const createStripeCheckout = async ({ tagName, domain, duration, plan, token, locale, email }) => {
     if (!config.stripe?.secretKey) {
-        throw new Error("500:STRIPE_NOT_CONFIGURED");
+        throw codedError("500:STRIPE_NOT_CONFIGURED");
     }
 
     const tokenDecoded = jwt.verify(token, config.JWT_SECRET);
 
     if (!tokenDecoded || !tokenDecoded.tagName) {
-        throw new Error("409:INVALID_TOKEN");
+        throw codedError("409:INVALID_TOKEN");
     }
 
     if (tokenDecoded.ttl < moment().unix()) {
-        throw new Error("409:TOKEN_EXPIRED");
+        throw codedError("409:TOKEN_EXPIRED");
     }
 
     const localName = String(tagName || "")
@@ -200,13 +201,13 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
     const expectedFull = `${localName}.${domainName}`;
 
     if (tokenDecoded.tagName !== expectedFull) {
-        throw new Error("403:TAG_NOT_OWNED");
+        throw codedError("403:TAG_NOT_OWNED");
     }
 
     const expectedDuration = durationStamp(duration);
 
     if (tokenDurationStamp(tokenDecoded) !== expectedDuration) {
-        throw new Error("409:DURATION_MISMATCH");
+        throw codedError("409:DURATION_MISMATCH");
     }
 
     const { assertLicenseOffersPlan, resolvePaidPlan } = require("./zelf-id-plan.module");
@@ -214,11 +215,11 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
     const resolvedPlan = plan || tokenDecoded.plan || resolvePaidPlan({ tagName: expectedFull, domainConfig: licenseConfig });
 
     if (plan && tokenDecoded.plan && tokenDecoded.plan !== plan) {
-        throw new Error("409:PLAN_MISMATCH");
+        throw codedError("409:PLAN_MISMATCH");
     }
 
     if (!resolvedPlan) {
-        throw new Error("409:INVALID_PLAN");
+        throw codedError("409:INVALID_PLAN");
     }
 
     // The license decides which plan/durations exist for this name length.
@@ -302,7 +303,7 @@ const createStripeCheckout = async ({ tagName, domain, duration, plan, token, lo
     const unitAmount = unitAmountForCharge(amountUsd, { coupon: Boolean(couponCode) || creditApplied || hasDevFraction });
 
     if (!(amountUsd > 0)) {
-        throw new Error("409:INVALID_QUOTE_AMOUNT");
+        throw codedError("409:INVALID_QUOTE_AMOUNT");
     }
 
     const metadata = buildLeaseStripeMetadata({
@@ -586,7 +587,7 @@ const confirmFromSessionId = async (sessionId) => {
     const id = String(sessionId || "").trim();
 
     if (!config.stripe?.secretKey) {
-        throw new Error("500:STRIPE_NOT_CONFIGURED");
+        throw codedError("500:STRIPE_NOT_CONFIGURED");
     }
 
     const session = await retrievePlanCheckoutSession(getStripeClient(), id);
@@ -627,7 +628,7 @@ const pollStripeSession = async ({ sessionId, authUser, token }) => {
     const id = String(sessionId || "").trim();
 
     if (!config.stripe?.secretKey) {
-        throw new Error("500:STRIPE_NOT_CONFIGURED");
+        throw codedError("500:STRIPE_NOT_CONFIGURED");
     }
 
     const session = await retrievePlanCheckoutSession(getStripeClient(), id);

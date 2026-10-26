@@ -4,6 +4,7 @@ const { assertTagAvailable } = require("../../Tags/modules/tag-availability");
  * Field names stay `tagName` / `tagObject` for client compatibility with `/api/tags`.
  */
 const moment = require("moment");
+const { codedError } = require("../../../Core/http-handler");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
 const { NO_PASSWORD_PLACEHOLDER, effectivePassword, resolveSecurityType, decryptWithPasswordFallback } = require("./zelf-id-password.module");
 const TagsSearchModule = require("../../Tags/modules/tags-search.module");
@@ -610,7 +611,7 @@ const attachAvailableZelfIdPricing = (result, { tagName, duration, domainConfig,
 
     // An explicit plan must be one the license prices for this length (same rule as payment-options).
     if (requestedPlan && domainConfig?.tags?.payment?.planPricing && !plans[requestedPlan]) {
-        throw new Error("409:PLAN_NOT_OFFERED_FOR_NAME");
+        throw codedError("409:PLAN_NOT_OFFERED_FOR_NAME");
     }
 
     const upgradeQuote = getZelfIdCheckoutPrice({
