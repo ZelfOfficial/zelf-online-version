@@ -218,6 +218,10 @@ const decryptWallet = async (params, authUser) => {
 		faceBase64: face,
 		password,
 		addServerPassword: Boolean(params.addServerPassword),
+		publicData: params.publicData,
+		v: params.v,
+		encryptVersion: params.encryptVersion,
+		stack: params.stack,
 	});
 
 	if (decryptedWallet.error) {
@@ -265,6 +269,10 @@ const validateZkProof = async (params, authUser) => {
 		faceBase64: face,
 		password,
 		addServerPassword: Boolean(params.addServerPassword),
+		publicData: params.publicData,
+		v: params.v,
+		encryptVersion: params.encryptVersion,
+		stack: params.stack,
 	});
 
 	if (decryptedZelfProof.error) {
@@ -293,6 +301,10 @@ const seeWallet = async (params) => {
 	const decryptedWallet = await preview({
 		zelfProof,
 		addServerPassword: Boolean(addServerPassword),
+		publicData: params.publicData,
+		v: params.v,
+		encryptVersion: params.encryptVersion,
+		stack: params.stack,
 	});
 
 	return decryptedWallet;

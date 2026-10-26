@@ -159,6 +159,33 @@ const decryptWalletValidation = async (ctx, next) => {
 	await next();
 };
 
+/**
+ * Wallet export accepts an API client or an extension session JWT.
+ */
+const exportWalletValidation = async (ctx, next) => {
+	const valid = validate(schemas.decryptWallet, ctx.request.body);
+
+	if (valid.error) {
+		ctx.status = 409;
+
+		ctx.body = { validationError: valid.error.message };
+
+		return;
+	}
+
+	const user = ctx.state.user || {};
+
+	if (!user.clientId && !user.session) {
+		ctx.status = 409;
+
+		ctx.body = { validationError: "Access forbidden. contact us for a valid API Key" };
+
+		return;
+	}
+
+	await next();
+};
+
 const zkProofValidation = async (ctx, next) => {
 	const valid = validate(schemas.zkProof, ctx.request.body);
 
@@ -194,9 +221,9 @@ const seeWalletValidation = async (ctx, next) => {
 		return;
 	}
 
-	const { clientId } = ctx.state.user;
-
-	if (!clientId) {
+	// This route is public. Callers have no JWT, so `ctx.state.user` is absent.
+	const user = ctx.state.user;
+	if (user && !user.clientId) {
 		ctx.status = 409;
 
 		ctx.body = { validationError: "Access forbidden. contact us for a valid API Key" };
@@ -310,6 +337,7 @@ module.exports = {
 	showValidation,
 	createValidation,
 	decryptWalletValidation,
+	exportWalletValidation,
 	seeWalletValidation,
 	updateValidation,
 	importValidation,

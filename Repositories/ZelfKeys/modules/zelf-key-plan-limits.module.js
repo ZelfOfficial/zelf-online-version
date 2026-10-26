@@ -732,6 +732,8 @@ module.exports = {
     requireZelfIdentity,
     resolveEntitlement,
     slotTokenCost,
+    readOnChainBalance,
+    spendableBalance,
     tokensForUsd,
     vaultPlanFromTag,
 };

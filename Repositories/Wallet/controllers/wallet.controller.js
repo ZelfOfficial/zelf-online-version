@@ -1,5 +1,6 @@
 const Module = require("../modules/wallet.module");
 const SessionModule = require("../../Session/modules/session.module");
+const { runMonthlyAccess } = require("../../ZelfID/modules/zelf-id-monthly-access.module");
 
 /**
  * @param {*} request
@@ -72,6 +73,23 @@ const create = async (ctx) => {
  * @author Miguel Trevino
  */
 const decryptWallet = async (ctx) => {
+	try {
+		await runMonthlyAccess(ctx, "wallet-decrypt", () => Module.decryptWallet(ctx.request.body, ctx.state.user));
+	} catch (error) {
+		console.error(error);
+
+		ctx.status = error.status || 500;
+
+		await SessionModule.deleteSession(ctx.state.user);
+
+		ctx.body = { error: error.message };
+	}
+};
+
+/**
+ * Export of the owner's wallet. Same decrypt as unlock, and it does not record monthly access.
+ */
+const exportWallet = async (ctx) => {
 	try {
 		const data = await Module.decryptWallet(ctx.request.body, ctx.state.user);
 
@@ -180,6 +198,7 @@ module.exports = {
 	show,
 	create,
 	decryptWallet,
+	exportWallet,
 	seeWallet,
 	importWallet,
 	searchOpenWallets,
