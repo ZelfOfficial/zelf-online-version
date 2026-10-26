@@ -178,9 +178,17 @@ const buildMyPlan = async (tagObject, { zelfName, domainConfig, createBillingPor
     return result;
 };
 
+const tagNotFound = () => {
+    const error = new Error("404:TAG_NOT_FOUND");
+    error.clientCode = "TAG_NOT_FOUND";
+    error.clientMessage = "TAG_NOT_FOUND";
+    error.status = 404;
+    return error;
+};
+
 const getMyPlan = async ({ zelfName, authUser } = {}, deps = {}) => {
     const normalized = normalizeZelfName(zelfName);
-    if (!normalized.zelfName) throw new Error("404:tag_not_found");
+    if (!normalized.zelfName) throw tagNotFound();
 
     const domainConfig = (deps.getDomainConfig || getDomainConfig)(normalized.domain);
     const searchTag = deps.searchTag || require("./zelf-id.module").searchTag;
@@ -189,7 +197,7 @@ const getMyPlan = async ({ zelfName, authUser } = {}, deps = {}) => {
         deps.authUser || authUser || {}
     );
 
-    if (!found || found.available || !found.tagObject) throw new Error("404:tag_not_found");
+    if (!found || found.available || !found.tagObject) throw tagNotFound();
 
     return buildMyPlan(found.tagObject, {
         zelfName: normalized.zelfName,

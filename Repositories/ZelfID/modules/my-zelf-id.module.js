@@ -253,7 +253,11 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
     }
 
     if (network === "AVAX") {
-        throw new Error("409:AVAX_USE_SMART_CONTRACT_CONFIRMATION");
+        const error = new Error("409:AVAX_USE_SMART_CONTRACT_CONFIRMATION");
+        error.clientCode = "AVAX_USE_SMART_CONTRACT_CONFIRMATION";
+        error.clientMessage = "AVAX_USE_SMART_CONTRACT_CONFIRMATION";
+        error.status = 409;
+        throw error;
     }
 
     const tagData = await ZelfIdModule.searchTag({ tagName, domain, domainConfig, environment: "all" }, {});

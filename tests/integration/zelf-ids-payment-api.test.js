@@ -130,6 +130,7 @@ describe("Zelf IDs payment API", () => {
 			.query({ tagName: uniqueTagName(), domain: TEST_DOMAIN, duration: "1" });
 
 		expect(response.status).toBe(404);
+		expect(response.body).toEqual({ message: "TAG_NOT_FOUND", code: "TAG_NOT_FOUND" });
 	});
 
 	it("GET /zelf-ids/payment-options — returns unique addresses, prices, and a JWT", async () => {

@@ -637,7 +637,13 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
     const domainConfig = getDomainConfig(domain);
     const tagData = await ZelfIdModule.searchTag({ tagName, domain, domainConfig }, authUser);
 
-    if (tagData.available) throw new Error("404:tag_not_found");
+    if (tagData.available) {
+        const error = new Error("404:TAG_NOT_FOUND");
+        error.clientCode = "TAG_NOT_FOUND";
+        error.clientMessage = "TAG_NOT_FOUND";
+        error.status = 404;
+        throw error;
+    }
 
     const tagObject = tagData.tagObject;
     const currentPlan = effectivePlan(tagObject.publicData, domainConfig);

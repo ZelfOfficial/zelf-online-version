@@ -98,12 +98,12 @@ describe("tag-pay-session-tx.util", () => {
 
 describe("errorHandler payment_confirmation tag_not_found", () => {
 	it("returns distinct client code and message", () => {
-		const err = new Error("404:tag_not_found");
-		err.clientCode = "tag_not_found";
+		const err = new Error("404:TAG_NOT_FOUND");
+		err.clientCode = "TAG_NOT_FOUND";
 		err.clientMessage = "Tag not found or not indexed";
 		const r = errorHandler(err);
 		expect(r.status).toBe(404);
-		expect(r.code).toBe("tag_not_found");
+		expect(r.code).toBe("TAG_NOT_FOUND");
 		expect(r.message).toBe("Tag not found or not indexed");
 	});
 });
