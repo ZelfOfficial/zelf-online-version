@@ -80,7 +80,7 @@ const checkoutUrl = (zelfName, plan) => {
 };
 
 const openStripePortal = async (customerId) => {
-    if (!config.stripe?.secretKey) throw new Error("500:stripe_not_configured");
+    if (!config.stripe?.secretKey) throw new Error("500:STRIPE_NOT_CONFIGURED");
     const Stripe = require("stripe");
     const stripe = Stripe(config.stripe.secretKey);
     const origin = String(config.landingUrl || "https://zelf.world").replace(/\/$/, "");
@@ -102,7 +102,7 @@ const upgradeFor = async ({ paymentMethod, plan, duration, nextPlans, zelfName, 
 
     if (paymentMethod === "stripe_subscription") {
         const customerId = publicData.stripeCustomerId || publicData.payment?.stripeCustomerId;
-        if (!customerId) throw new Error("409:stripe_customer_missing");
+        if (!customerId) throw new Error("409:STRIPE_CUSTOMER_MISSING");
         const openPortal = createBillingPortal || openStripePortal;
         const url = await openPortal(customerId);
         return { action: "stripe_portal", url };

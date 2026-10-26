@@ -9,10 +9,10 @@ const Coupon = require("../models/zelf-id-coupon.model");
 const { getZelfIdCheckoutPrice, normalizePaymentDuration } = require("./zelf-id-plan.module");
 
 const PLAN_RULE_CODES = {
-    plan_downgrade_not_allowed: "downgrade_not_allowed",
-    plan_not_offered_for_name: "plan_not_allowed_for_name",
-    plan_not_allowed_for_name: "plan_not_allowed_for_name",
-    lifetime_already_owned: "lifetime_already_owned",
+    PLAN_DOWNGRADE_NOT_ALLOWED: "DOWNGRADE_NOT_ALLOWED",
+    PLAN_NOT_OFFERED_FOR_NAME: "PLAN_NOT_ALLOWED_FOR_NAME",
+    PLAN_NOT_ALLOWED_FOR_NAME: "PLAN_NOT_ALLOWED_FOR_NAME",
+    LIFETIME_ALREADY_OWNED: "LIFETIME_ALREADY_OWNED",
 };
 
 const httpError = (status, message, code = message) => {
@@ -22,7 +22,7 @@ const httpError = (status, message, code = message) => {
     return err;
 };
 
-const couponInvalid = (reason) => httpError(409, "coupon_invalid", reason || "coupon_invalid");
+const couponInvalid = (reason) => httpError(409, "COUPON_INVALID", reason || "COUPON_INVALID");
 
 const mapPlanRuleError = (error) => {
     const raw = String(error?.message || "");
@@ -91,20 +91,20 @@ const toPublic = (doc) => {
  * @returns {string|null}
  */
 const rejectionReason = (coupon, { plan, duration, zelfId, now = new Date() } = {}) => {
-    if (!coupon) return "not_found";
-    if (coupon.active === false) return "inactive";
-    if (coupon.expiresAt && new Date(coupon.expiresAt).getTime() <= now.getTime()) return "expired";
+    if (!coupon) return "NOT_FOUND";
+    if (coupon.active === false) return "INACTIVE";
+    if (coupon.expiresAt && new Date(coupon.expiresAt).getTime() <= now.getTime()) return "EXPIRED";
     const redemptions = coupon.redemptions || [];
-    if (redemptions.length >= Number(coupon.maxRedemptions)) return "max_redemptions";
+    if (redemptions.length >= Number(coupon.maxRedemptions)) return "MAX_REDEMPTIONS";
     const plans = (coupon.plans || []).map((entry) => String(entry).toLowerCase());
-    if (!plans.includes(String(plan || "").toLowerCase())) return "plan_not_allowed";
+    if (!plans.includes(String(plan || "").toLowerCase())) return "PLAN_NOT_ALLOWED";
     const token = durationToken(duration);
     const allowed = coupon.durations || [];
-    if (allowed.length && !allowed.includes(token)) return "duration_not_allowed";
+    if (allowed.length && !allowed.includes(token)) return "DURATION_NOT_ALLOWED";
     const zelfKey = normalizeZelfId(zelfId);
     const usedByZelfId = redemptions.filter((redemption) => normalizeZelfId(redemption.zelfId) === zelfKey).length;
     const limit = Number(coupon.perZelfIdLimit ?? 1);
-    if (usedByZelfId >= limit) return "zelf_id_limit";
+    if (usedByZelfId >= limit) return "ZELF_ID_LIMIT";
     return null;
 };
 
@@ -166,38 +166,38 @@ const priceCoupon = async ({ code, plan, duration, zelfId, tagName, domainConfig
 
 const createCoupon = async (input = {}, createdBy) => {
     const code = normalizeCode(input.code);
-    if (!code) throw httpError(409, "coupon_code_taken", "coupon_code_taken");
+    if (!code) throw httpError(409, "COUPON_CODE_TAKEN", "COUPON_CODE_TAKEN");
     const percentOff = Number(input.percentOff);
     if (!Number.isInteger(percentOff) || percentOff < 1 || percentOff > 100) {
-        throw httpError(409, '"percentOff" must be between 1 and 100', "validation_error");
+        throw httpError(409, '"percentOff" must be between 1 and 100', "VALIDATION_ERROR");
     }
     const plans = [...new Set((input.plans || []).map((plan) => String(plan).toLowerCase()))];
     if (!plans.length || plans.some((plan) => plan !== "premium" && plan !== "unlimited")) {
-        throw httpError(409, "plans must be premium and/or unlimited", "validation_error");
+        throw httpError(409, "plans must be premium and/or unlimited", "VALIDATION_ERROR");
     }
     const durations = [...new Set((input.durations || []).map((duration) => String(duration).toLowerCase()))];
     const allowedDurations = new Set(["1y", "2y", "3y", "lifetime"]);
     if (durations.some((duration) => !allowedDurations.has(duration))) {
-        throw httpError(409, "durations must be 1y, 2y, 3y, or lifetime", "validation_error");
+        throw httpError(409, "durations must be 1y, 2y, 3y, or lifetime", "VALIDATION_ERROR");
     }
     const maxRedemptions = Number(input.maxRedemptions);
     if (!Number.isInteger(maxRedemptions) || maxRedemptions < 1) {
-        throw httpError(409, "maxRedemptions must be at least 1", "validation_error");
+        throw httpError(409, "maxRedemptions must be at least 1", "VALIDATION_ERROR");
     }
     const perZelfIdLimit = input.perZelfIdLimit == null ? 1 : Number(input.perZelfIdLimit);
     if (!Number.isInteger(perZelfIdLimit) || perZelfIdLimit < 1) {
-        throw httpError(409, "perZelfIdLimit must be at least 1", "validation_error");
+        throw httpError(409, "perZelfIdLimit must be at least 1", "VALIDATION_ERROR");
     }
     let expiresAt = null;
     if (input.expiresAt) {
         expiresAt = new Date(input.expiresAt);
-        if (Number.isNaN(expiresAt.getTime())) throw httpError(409, "expiresAt must be an ISO-8601 time", "validation_error");
+        if (Number.isNaN(expiresAt.getTime())) throw httpError(409, "expiresAt must be an ISO-8601 time", "VALIDATION_ERROR");
     }
     const author = String(createdBy || "").trim();
-    if (!author) throw httpError(409, "createdBy is required", "validation_error");
+    if (!author) throw httpError(409, "createdBy is required", "VALIDATION_ERROR");
 
     const existing = await Coupon.findOne({ code }).select("id").lean();
-    if (existing) throw httpError(409, "coupon_code_taken", "coupon_code_taken");
+    if (existing) throw httpError(409, "COUPON_CODE_TAKEN", "COUPON_CODE_TAKEN");
 
     const coupon = new Coupon({
         id: crypto.randomUUID(),
@@ -216,7 +216,7 @@ const createCoupon = async (input = {}, createdBy) => {
     try {
         await coupon.save();
     } catch (error) {
-        if (error && error.code === 11000) throw httpError(409, "coupon_code_taken", "coupon_code_taken");
+        if (error && error.code === 11000) throw httpError(409, "COUPON_CODE_TAKEN", "COUPON_CODE_TAKEN");
         throw error;
     }
 
@@ -238,7 +238,7 @@ const listCoupons = async () => {
 
 const deactivateCoupon = async (id) => {
     const coupon = await Coupon.findOneAndUpdate({ id: String(id || "").trim() }, { $set: { active: false } }, { new: true });
-    if (!coupon) throw httpError(404, "coupon_not_found", "coupon_not_found");
+    if (!coupon) throw httpError(404, "COUPON_NOT_FOUND", "COUPON_NOT_FOUND");
     return toPublic(coupon);
 };
 
@@ -295,9 +295,9 @@ const claimForGrant = async ({ code, couponId, zelfId, plan, duration, domainCon
     const price = listPrice != null ? Number(listPrice) : licenseListPrice({ tagName: tagName || zelfId, duration, domainConfig, plan });
     const described = await describeCoupon({ code: resolvedCode, plan, duration, zelfId, listPrice: price });
     if (!described.valid) throw couponInvalid(described.reason);
-    if (requireZero && described.amountDue !== 0) throw new Error("409:checkout_total_not_zero");
+    if (requireZero && described.amountDue !== 0) throw new Error("409:CHECKOUT_TOTAL_NOT_ZERO");
     if (signedAmount != null && Math.abs(Number(signedAmount) - described.amountDue) > 0.009) {
-        throw httpError(409, "Quoted total no longer matches the license price", "quote_price_changed");
+        throw httpError(409, "Quoted total no longer matches the license price", "QUOTE_PRICE_CHANGED");
     }
 
     const coupon = await Coupon.findOne({ code: resolvedCode });
@@ -312,7 +312,7 @@ const claimForGrant = async ({ code, couponId, zelfId, plan, duration, domainCon
         : null;
     if (!claimed) {
         const again = await describeCoupon({ code: resolvedCode, plan, duration, zelfId: zelfKey, listPrice: price });
-        throw couponInvalid(again.reason || "max_redemptions");
+        throw couponInvalid(again.reason || "MAX_REDEMPTIONS");
     }
 
     console.info("[zelf-id-coupon] redeemed", {

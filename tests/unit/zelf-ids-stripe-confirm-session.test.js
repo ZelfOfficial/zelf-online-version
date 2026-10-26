@@ -30,7 +30,7 @@ describe("confirmFromSessionId", () => {
 		mockRetrieve.mockReset();
 	});
 
-	test("maps unknown Stripe session to 404 session_not_found", async () => {
+	test("maps unknown Stripe session to 404 SESSION_NOT_FOUND", async () => {
 		const stripeError = new Error("No such checkout.session");
 		stripeError.type = "StripeInvalidRequestError";
 		stripeError.code = "resource_missing";
@@ -39,11 +39,11 @@ describe("confirmFromSessionId", () => {
 
 		const error = await confirmFromSessionId(VALID_SESSION_ID).catch((caught) => caught);
 
-		expect(error).toMatchObject({ clientCode: "session_not_found" });
+		expect(error).toMatchObject({ clientCode: "SESSION_NOT_FOUND" });
 
 		const handled = errorHandler(error);
 		expect(handled.status).toBe(404);
-		expect(handled.code).toBe("session_not_found");
+		expect(handled.code).toBe("SESSION_NOT_FOUND");
 	});
 
 	test("retrieves session and runs confirmPaidStripeSession for a valid paid lease session", async () => {
@@ -66,7 +66,7 @@ describe("confirmFromSessionId", () => {
 		expect(mockRetrieve).toHaveBeenCalledWith(VALID_SESSION_ID, undefined);
 		expect(result).toEqual({
 			status: "unpaid",
-			reason: "unpaid",
+			reason: "UNPAID",
 			confirmed: false,
 			tagName: "qa99",
 			domain: "zelf",
@@ -132,7 +132,7 @@ describe("pollStripeSession", () => {
 
 		const error = await pollStripeSession({ sessionId: VALID_SESSION_ID, authUser: {} }).catch((caught) => caught);
 
-		expect(error).toMatchObject({ clientCode: "tag_not_owned" });
+		expect(error).toMatchObject({ clientCode: "TAG_NOT_OWNED" });
 		expect(mockRetrieve).toHaveBeenCalledTimes(1);
 	});
 });

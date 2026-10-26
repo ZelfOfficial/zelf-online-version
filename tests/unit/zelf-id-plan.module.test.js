@@ -283,7 +283,7 @@ describe("zelf-id-plan.module", () => {
 	});
 
 	test("getZelfIdPrice requires a license getPrice", () => {
-		expect(() => getZelfIdPrice({ tagName: "mik.zelf" })).toThrow("409:license_price_required");
+		expect(() => getZelfIdPrice({ tagName: "mik.zelf" })).toThrow("409:LICENSE_PRICE_REQUIRED");
 	});
 
 	test("effectivePlan: short mainnet with plan free stays free", () => {
@@ -660,7 +660,7 @@ describe("active paid lease keeps its value", () => {
     test("downgrade unlimited -> premium is refused on an active lease", () => {
         const publicData = { ...base, plan: "unlimited", duration: "1", expiresAt: fmt(moment().add(1, "year")) };
         expect(() => P.assertPurchaseKeepsPaidValue({ publicData, requestedPlan: "premium", domainConfig })).toThrow(
-            "409:plan_downgrade_not_allowed"
+            "409:PLAN_DOWNGRADE_NOT_ALLOWED"
         );
         expect(() => P.assertPurchaseKeepsPaidValue({ publicData, requestedPlan: "unlimited", domainConfig })).not.toThrow();
     });
@@ -668,7 +668,7 @@ describe("active paid lease keeps its value", () => {
     test("lifetime: same plan refused, upgrade allowed", () => {
         const publicData = { ...base, plan: "premium", duration: "lifetime", expiresAt: fmt(moment().add(100, "year")) };
         expect(() => P.assertPurchaseKeepsPaidValue({ publicData, requestedPlan: "premium", domainConfig })).toThrow(
-            "409:lifetime_already_owned"
+            "409:LIFETIME_ALREADY_OWNED"
         );
         expect(() => P.assertPurchaseKeepsPaidValue({ publicData, requestedPlan: "unlimited", domainConfig })).not.toThrow();
     });

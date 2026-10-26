@@ -637,7 +637,7 @@ async function extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecod
                 cryptoSymbol: resolvedNetwork,
                 cryptoAmount: amountToPay,
                 source: resolvedNetwork,
-                violationCode: error.clientCode || "coupon_invalid",
+                violationCode: error.clientCode || "COUPON_INVALID",
                 txHash,
                 paymentNetwork: resolvedNetwork,
                 paymentInitiatedAt: tokenDecoded.initiatedAt,

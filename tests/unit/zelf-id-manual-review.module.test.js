@@ -53,7 +53,7 @@ describe("zelf-id-purchase-manual-review.module", () => {
             price: 29,
             billableUsdPrice: 29,
             source: "stripe",
-            violationCode: "409:plan_downgrade_not_allowed",
+            violationCode: "409:PLAN_DOWNGRADE_NOT_ALLOWED",
             sessionId: "cs_test_once",
             tagObject,
             domainConfig,

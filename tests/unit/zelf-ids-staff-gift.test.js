@@ -26,16 +26,16 @@ const body = { tagName: "bas", domain: "bdag", plan: "premium", duration: "1", r
 
 describe("staff gift", () => {
     test("rejects non-staff and read-only staff", async () => {
-        await expect(giftZelfId(body, { email: "owner" }, deps())).rejects.toThrow("403:staff_only");
-        await expect(giftZelfId(body, { ...staff, role: "read" }, deps())).rejects.toThrow("403:write_access_required");
+        await expect(giftZelfId(body, { email: "owner" }, deps())).rejects.toThrow("403:STAFF_ONLY");
+        await expect(giftZelfId(body, { ...staff, role: "read" }, deps())).rejects.toThrow("403:WRITE_ACCESS_REQUIRED");
     });
     test("rejects staff of another domain", async () => {
         const d = deps({ resolveAuthorizedDomain: jest.fn().mockRejectedValue(new Error("403:domain_not_managed_by_account")) });
         await expect(giftZelfId(body, staff, d)).rejects.toThrow("403:domain_not_managed_by_account");
     });
     test("refuses plan/duration missing from license", async () => {
-        await expect(giftZelfId(body, staff, deps({ getDomainConfig: () => licensed([]) }))).rejects.toThrow("409:plan_not_offered_for_name");
-        await expect(giftZelfId({ ...body, duration: "5" }, staff, deps())).rejects.toThrow("409:plan_duration_not_offered_by_license");
+        await expect(giftZelfId(body, staff, deps({ getDomainConfig: () => licensed([]) }))).rejects.toThrow("409:PLAN_NOT_OFFERED_FOR_NAME");
+        await expect(giftZelfId({ ...body, duration: "5" }, staff, deps())).rejects.toThrow("409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE");
     });
     test("existing name: stamps via paid-upgrade path with price 0 gift and audits", async () => {
         const d = deps();

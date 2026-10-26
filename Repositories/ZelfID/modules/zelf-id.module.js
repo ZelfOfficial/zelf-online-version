@@ -610,7 +610,7 @@ const attachAvailableZelfIdPricing = (result, { tagName, duration, domainConfig,
 
     // An explicit plan must be one the license prices for this length (same rule as payment-options).
     if (requestedPlan && domainConfig?.tags?.payment?.planPricing && !plans[requestedPlan]) {
-        throw new Error("409:plan_not_offered_for_name");
+        throw new Error("409:PLAN_NOT_OFFERED_FOR_NAME");
     }
 
     const upgradeQuote = getZelfIdCheckoutPrice({

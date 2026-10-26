@@ -213,9 +213,9 @@ const assertQuoteUpgradeTerm = async ({ tokenDecoded = {}, publicData, tagName, 
         listPriceUsd: priced.priceWithoutDiscount ?? priced.price,
     });
     if (!fresh.upgradeTerm || !sameUpgradeTerm(signedTerm, fresh.upgradeTerm)) {
-        const error = new Error("409:upgrade_term_changed");
-        error.clientCode = "upgrade_term_changed";
-        error.clientMessage = "upgrade_term_changed";
+        const error = new Error("409:UPGRADE_TERM_CHANGED");
+        error.clientCode = "UPGRADE_TERM_CHANGED";
+        error.clientMessage = "UPGRADE_TERM_CHANGED";
         error.status = 409;
         throw error;
     }
@@ -241,9 +241,9 @@ const assertSignedUpgradeCredit = async ({ tokenDecoded = {}, publicData, tagNam
     const signed = tokenDecoded.upgradeCreditUsd;
     if (signed == null && fresh.upgradeCreditUsd === 0) return fresh;
     if (Math.abs(Number(signed || 0) - fresh.upgradeCreditUsd) > 0.009) {
-        const error = new Error("409:upgrade_credit_changed");
-        error.clientCode = "upgrade_credit_changed";
-        error.clientMessage = "upgrade_credit_changed";
+        const error = new Error("409:UPGRADE_CREDIT_CHANGED");
+        error.clientCode = "UPGRADE_CREDIT_CHANGED";
+        error.clientMessage = "UPGRADE_CREDIT_CHANGED";
         error.status = 409;
         throw error;
     }

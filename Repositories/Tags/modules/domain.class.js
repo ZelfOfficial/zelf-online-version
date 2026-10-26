@@ -247,7 +247,7 @@ class Domain {
             // Zelf ID plans: ONLY the license planPricing. No Tags table, no hardcoded default.
             price = this.licensePlanPrice(plan, length, `${duration}`);
             if (price === undefined) {
-                throw new Error("409:plan_duration_not_offered_by_license");
+                throw new Error("409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE");
             }
         } else {
             price = this._lookupTablePrice(fallbackTable, length, duration);

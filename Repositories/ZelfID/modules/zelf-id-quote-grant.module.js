@@ -27,17 +27,17 @@ const normalizedName = (zelfName, domain) => {
 };
 
 const unavailable = () => {
-    const error = new Error("503:quote_store_unavailable");
-    error.clientCode = "quote_store_unavailable";
-    error.clientMessage = "quote_store_unavailable";
+    const error = new Error("503:QUOTE_STORE_UNAVAILABLE");
+    error.clientCode = "QUOTE_STORE_UNAVAILABLE";
+    error.clientMessage = "QUOTE_STORE_UNAVAILABLE";
     error.status = 503;
     return error;
 };
 
 const inProgress = () => {
-    const error = new Error("409:in_progress");
-    error.clientCode = "in_progress";
-    error.clientMessage = "in_progress";
+    const error = new Error("409:IN_PROGRESS");
+    error.clientCode = "IN_PROGRESS";
+    error.clientMessage = "IN_PROGRESS";
     error.status = 409;
     return error;
 };

@@ -19,9 +19,9 @@ const { txUnixSeconds } = require("../../Tags/modules/tag-pay-session-tx.util");
 const quoteIsExpired = (tokenDecoded) => Number(tokenDecoded?.ttl) < Math.floor(Date.now() / 1000);
 
 const expiredQuoteError = () => {
-    const error = new Error("409:token_expired");
-    error.clientCode = "token_expired";
-    error.clientMessage = "token_expired";
+    const error = new Error("409:TOKEN_EXPIRED");
+    error.clientCode = "TOKEN_EXPIRED";
+    error.clientMessage = "TOKEN_EXPIRED";
     error.status = 409;
     return error;
 };
@@ -123,7 +123,7 @@ const claimCouponAfterPayment = async ({
             cryptoSymbol,
             cryptoAmount,
             source: source || "coupon",
-            violationCode: error.clientCode || "coupon_invalid",
+            violationCode: error.clientCode || "COUPON_INVALID",
             sessionId,
             txHash,
             paymentNetwork,
@@ -138,7 +138,7 @@ const claimCouponAfterPayment = async ({
                 tagObject,
                 confirmed: false,
                 manualReview: true,
-                reason: error.clientCode || "coupon_invalid",
+                reason: error.clientCode || "COUPON_INVALID",
                 amountReceived: amountReceived ?? 0,
             },
         };
@@ -241,9 +241,9 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
     const tokenDecoded = jwt.verify(token, config.JWT_SECRET);
     const domainConfig = getDomainConfig(domain);
 
-    if (!tokenDecoded || !tokenDecoded.tagName || !tokenDecoded.tagPayName) throw new Error("401:tag_not_authenticated");
+    if (!tokenDecoded || !tokenDecoded.tagName || !tokenDecoded.tagPayName) throw new Error("401:TAG_NOT_AUTHENTICATED");
 
-    if (tokenDecoded.tagName !== `${tagName}.${domain}`) throw new Error("403:tag_not_owned");
+    if (tokenDecoded.tagName !== `${tagName}.${domain}`) throw new Error("403:TAG_NOT_OWNED");
 
     const quoteExpired = quoteIsExpired(tokenDecoded);
 
@@ -253,7 +253,7 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
     }
 
     if (network === "AVAX") {
-        throw new Error("409:avax_use_smart_contract_confirmation");
+        throw new Error("409:AVAX_USE_SMART_CONTRACT_CONFIRMATION");
     }
 
     const tagData = await ZelfIdModule.searchTag({ tagName, domain, domainConfig, environment: "all" }, {});
@@ -554,7 +554,7 @@ const confirmFreeCheckout = async (tagName, domain, tokenDecoded, domainConfig, 
 
     if (Number(priceQuote.price) !== 0 && !coveredByCredit) {
         await releaseQuoteGrant(quoteKey);
-        throw new Error("409:checkout_total_not_zero");
+        throw new Error("409:CHECKOUT_TOTAL_NOT_ZERO");
     }
 
     if (referralTagName && !tagObject.publicData.referralTagName) {

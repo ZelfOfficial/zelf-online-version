@@ -71,7 +71,7 @@ describe("zelf-ids-stripe.module metadata", () => {
 
 		expect(inspectStripeLeaseSession({ metadata, payment_status: "unpaid" })).toEqual({
 			ok: false,
-			reason: "unpaid",
+			reason: "UNPAID",
 			metadata: {
 				tagName: "qa99",
 				domain: "zelf",

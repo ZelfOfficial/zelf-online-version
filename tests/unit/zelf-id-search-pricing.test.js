@@ -241,13 +241,13 @@ describe("zelf-id search plan-aware pricing (license planPricing only)", () => {
 
 	test("plan=premium on a short name is rejected", async () => {
 		await expect(searchTag({ tagName: "abc", domain: "zelf", domainConfig: licensed, plan: "premium" }, {})).rejects.toThrow(
-			"409:plan_not_offered_for_name"
+			"409:PLAN_NOT_OFFERED_FOR_NAME"
 		);
 	});
 
 	test("duration the license does not price for the plan is rejected", async () => {
 		await expect(
 			searchTag({ tagName: "miguelito", domain: "zelf", domainConfig: licensed, plan: "premium", duration: "3" }, {})
-		).rejects.toThrow("409:plan_duration_not_offered_by_license");
+		).rejects.toThrow("409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE");
 	});
 });

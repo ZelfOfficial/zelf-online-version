@@ -197,7 +197,7 @@ describe("Zelf IDs payment API", () => {
 			});
 
 		expect(response.status).toBe(409);
-		expect(`${response.body.code || ""} ${response.body.message || ""}`).toMatch(/avax_use_smart_contract_confirmation/i);
+		expect(`${response.body.code || ""} ${response.body.message || ""}`).toMatch(/AVAX_USE_SMART_CONTRACT_CONFIRMATION/);
 	});
 
 	it("POST /zelf-ids/payment-confirmation — rejects a valid quote used for another name", async () => {
@@ -213,7 +213,7 @@ describe("Zelf IDs payment API", () => {
 			});
 
 		expect(response.status).toBe(403);
-		expect(`${response.body.code || ""} ${response.body.message || ""}`).toMatch(/tag_not_owned/i);
+		expect(`${response.body.code || ""} ${response.body.message || ""}`).toMatch(/TAG_NOT_OWNED/);
 	});
 
 	it("POST /zelf-ids/payment-confirmation — rejects an expired crypto quote that has no in-time payment", async () => {
@@ -238,7 +238,7 @@ describe("Zelf IDs payment API", () => {
 			});
 
 		expect(response.status).toBe(409);
-		expect(`${response.body.validationError || ""} ${response.body.code || ""} ${response.body.message || ""}`).toMatch(/token_expired/);
+		expect(`${response.body.validationError || ""} ${response.body.code || ""} ${response.body.message || ""}`).toMatch(/TOKEN_EXPIRED/);
 	});
 
 	it("POST /zelf-ids/stripe-checkout — 401 without auth", async () => {
@@ -290,7 +290,7 @@ describe("Zelf IDs payment API", () => {
 		expect(response.status).toBe(400);
 		expect(response.body).toEqual({
 			message: "Checkout session id is required",
-			code: "invalid_session_id",
+			code: "INVALID_SESSION_ID",
 		});
 	});
 

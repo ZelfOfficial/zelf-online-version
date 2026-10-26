@@ -213,7 +213,7 @@ const resolvePaidPlan = (tagNameOrParams, requestedPlan) => {
  */
 const getZelfIdPrice = ({ tagName, duration = "1", referralTagName = "", domainConfig, requestedPlan } = {}) => {
     if (typeof domainConfig?.getPrice !== "function") {
-        throw new Error("409:license_price_required");
+        throw new Error("409:LICENSE_PRICE_REQUIRED");
     }
 
     // An explicit paid plan is quoted as-is: getPrice throws 409 when the license does not price it.
@@ -241,12 +241,12 @@ const getZelfIdPrice = ({ tagName, duration = "1", referralTagName = "", domainC
  * @param {string|number} params.duration
  */
 const assertLicenseOffersPlan = ({ domainConfig, tagName, plan, duration }) => {
-    if (typeof domainConfig?.licensePlanDurations !== "function") throw new Error("409:license_price_required");
+    if (typeof domainConfig?.licensePlanDurations !== "function") throw new Error("409:LICENSE_PRICE_REQUIRED");
     const offered = domainConfig.licensePlanDurations(plan, getBareNameLength(tagName));
     const raw = `${duration ?? ""}`.trim().toLowerCase();
     const wanted = raw === "999" ? "lifetime" : raw;
     if (!offered.includes(wanted)) {
-        throw new Error(offered.length ? "409:plan_duration_not_offered_by_license" : "409:plan_not_offered_for_name");
+        throw new Error(offered.length ? "409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE" : "409:PLAN_NOT_OFFERED_FOR_NAME");
     }
 };
 
@@ -559,8 +559,8 @@ const resolveV4PaymentStamp = ({ tagName, encryptVersion, durationYears, duratio
 /**
  * Refuse purchases that would take paid value away from an active lease.
  * Tier order is the license's own (plans sorted by cheapest license price), nothing hardcoded.
- * - Downgrade (e.g. unlimited -> premium) on an active paid lease: 409 plan_downgrade_not_allowed.
- * - Same or lower plan on an active lifetime lease: 409 lifetime_already_owned.
+ * - Downgrade (e.g. unlimited -> premium) on an active paid lease: 409 PLAN_DOWNGRADE_NOT_ALLOWED.
+ * - Same or lower plan on an active lifetime lease: 409 LIFETIME_ALREADY_OWNED.
  * @param {Object} params
  * @param {Object} [params.publicData] current Zelf ID public data
  * @param {string} [params.requestedPlan]
@@ -576,8 +576,8 @@ const getPurchaseKeepsPaidValueViolation = ({ publicData = {}, requestedPlan, ta
     const currentRank = offered.indexOf(current);
     const targetRank = offered.indexOf(target);
     if (currentRank < 0 || targetRank < 0) return null;
-    if (targetRank < currentRank) return "409:plan_downgrade_not_allowed";
-    if (publicData.duration === "lifetime" && targetRank <= currentRank) return "409:lifetime_already_owned";
+    if (targetRank < currentRank) return "409:PLAN_DOWNGRADE_NOT_ALLOWED";
+    if (publicData.duration === "lifetime" && targetRank <= currentRank) return "409:LIFETIME_ALREADY_OWNED";
     return null;
 };
 

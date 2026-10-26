@@ -35,7 +35,7 @@ describe("quote grant claim", () => {
 
         expect(claimed).toHaveLength(1);
         expect(rejected).toHaveLength(2);
-        expect(rejected.every((result) => result.reason.clientCode === "in_progress")).toBe(true);
+        expect(rejected.every((result) => result.reason.clientCode === "IN_PROGRESS")).toBe(true);
         expect(await QuoteGrant.countDocuments({ status: "pending" })).toBe(1);
     });
 
@@ -60,7 +60,7 @@ describe("quote grant claim", () => {
     test("a pending claim inside its lease cannot be taken, and an expired one can", async () => {
         const fresh = { zelfName: "fresh.zelf", token: "quote-fresh", source: "whitelist" };
         await claimQuoteGrant(fresh);
-        await expect(claimQuoteGrant(fresh)).rejects.toMatchObject({ clientCode: "in_progress" });
+        await expect(claimQuoteGrant(fresh)).rejects.toMatchObject({ clientCode: "IN_PROGRESS" });
 
         const expired = { zelfName: "lease.zelf", token: "quote-lease", source: "whitelist" };
         const first = await claimQuoteGrant(expired);
@@ -126,7 +126,7 @@ describe("quote grant without mongo", () => {
         if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
         await expect(claimQuoteGrant({ zelfName: "down.zelf", token: "quote", source: "whitelist" })).rejects.toMatchObject({
             status: 503,
-            clientCode: "quote_store_unavailable",
+            clientCode: "QUOTE_STORE_UNAVAILABLE",
         });
     });
 });

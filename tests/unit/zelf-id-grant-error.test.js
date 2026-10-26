@@ -10,7 +10,7 @@ describe("grant error responses", () => {
         const body = errorHandler(mapped, null);
 
         expect(mapped.status).toBe(503);
-        expect(body).toMatchObject({ status: 503, code: "quote_store_unavailable", message: "quote_store_unavailable" });
+        expect(body).toMatchObject({ status: 503, code: "QUOTE_STORE_UNAVAILABLE", message: "QUOTE_STORE_UNAVAILABLE" });
         expect(JSON.stringify(body)).not.toMatch(/force closed/i);
     });
 
@@ -19,15 +19,15 @@ describe("grant error responses", () => {
         const mapped = mapGrantError(new Error("secret stack detail from the driver"));
         const body = errorHandler(mapped, null);
 
-        expect(body).toMatchObject({ status: 500, code: "service_unavailable", message: "service_unavailable" });
+        expect(body).toMatchObject({ status: 500, code: "SERVICE_UNAVAILABLE", message: "SERVICE_UNAVAILABLE" });
         expect(JSON.stringify(body)).not.toMatch(/secret stack/);
         expect(spy).toHaveBeenCalled();
         spy.mockRestore();
     });
 
     test("a client 409 is left unchanged", () => {
-        const error = new Error("409:upgrade_credit_changed");
-        error.clientCode = "upgrade_credit_changed";
+        const error = new Error("409:UPGRADE_CREDIT_CHANGED");
+        error.clientCode = "UPGRADE_CREDIT_CHANGED";
         expect(mapGrantError(error)).toBe(error);
     });
 });
