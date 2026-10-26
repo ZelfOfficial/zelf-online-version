@@ -17,6 +17,7 @@ const ZelfIdsOfflineModule = require("../modules/zelf-ids-offline.module");
 const ZelfIdsSyncAddressesModule = require("../modules/zelf-ids-sync-addresses.module");
 const ZelfIdsStripeModule = require("../modules/zelf-ids-stripe.module");
 const ZelfIdsRevenueCatModule = require("../modules/zelf-ids-revenue-cat.module");
+const { runMonthlyAccess } = require("../modules/zelf-id-monthly-access.module");
 
 /**
  * Keep full pin name (e.g. user.zelfpay) for IPFS lookup; middleware only supplies registry TLD + local name.
@@ -271,11 +272,11 @@ const decryptTag = async (ctx) => {
             domain: extractedDomain,
         };
 
-        const data = await Module.decryptTag(requestData, ctx.state.user);
-
-        ZaiIdentity.attachIdentityToken(data, requestData.domain);
-
-        ctx.body = { data };
+        await runMonthlyAccess(ctx, "decrypt", async () => {
+            const data = await Module.decryptTag(requestData, ctx.state.user);
+            ZaiIdentity.attachIdentityToken(data, requestData.domain);
+            return data;
+        });
     } catch (error) {
         const _exception = errorHandler(error, ctx);
 

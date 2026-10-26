@@ -924,6 +924,24 @@ const configuration = {
             retentionDays: Math.max(1, Number(process.env.FACE_REPLAY_RETENTION_DAYS) || 7),
         },
     },
+    /**
+     * Free-plan monthly ZNS access fee.
+     * Off unless MONTHLY_ZNS_ACCESS_ENABLED=true, so a deploy does not charge until turned on.
+     * The floor defaults to the monthly active-user amount (API_USAGE_ACTIVE_USER_USD, $0.10).
+     */
+    monthlyZnsAccess: {
+        get enabled() {
+            return process.env.MONTHLY_ZNS_ACCESS_ENABLED === "true";
+        },
+        get floorUsd() {
+            const override = process.env.MONTHLY_ZNS_ACCESS_FLOOR_USD;
+            if (override != null && String(override).trim() !== "") {
+                const n = Number(override);
+                if (Number.isFinite(n) && n >= 0) return n;
+            }
+            return configuration.subscriptionPricing.activeUserMonthlyUsd;
+        },
+    },
 };
 
 /**

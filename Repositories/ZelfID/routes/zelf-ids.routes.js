@@ -2,9 +2,11 @@ const config = require("../../../Core/config");
 
 const Controller = require("../controllers/zelf-id.controller");
 const MyPlanController = require("../controllers/zelf-ids-my-plan.controller");
+const MonthlyAccessController = require("../controllers/zelf-id-monthly-access.controller");
 
 const Middleware = require("../middlewares/zelf-id.middleware");
 const MyPlanMiddleware = require("../middlewares/zelf-ids-my-plan.middleware");
+const MonthlyAccessMiddleware = require("../middlewares/zelf-id-monthly-access.middleware");
 const FaceMiddleware = require("../../Face/middlewares/face.middleware");
 const RbacMiddleware = require("../../Tags/middlewares/rbac.middleware");
 
@@ -28,6 +30,12 @@ module.exports = (server) => {
     server.get(`${PATH}/wallet-balances`, Middleware.walletBalancesValidation, Controller.getWalletBalances);
 
     server.get(`${PATH}/my-plan`, MyPlanMiddleware.myPlanValidation, MyPlanController.myPlan);
+
+    server.get(`${PATH}/monthly-access`, MonthlyAccessMiddleware.statusValidation, MonthlyAccessController.status);
+
+    server.get(`${PATH}/monthly-access/quote`, MonthlyAccessMiddleware.quoteValidation, MonthlyAccessController.quote);
+
+    server.post(`${PATH}/monthly-access/confirm`, MonthlyAccessMiddleware.confirmValidation, MonthlyAccessController.confirm);
 
     server.get(`${PATH}/payment-options`, Middleware.paymentOptionsValidation, Middleware.paymentOptionsReducedFeeGate, Controller.paymentOptions);
 

@@ -6,6 +6,7 @@
 const Module = require("../modules/zelf-key.module.js");
 const ZelfKeyDomainModule = require("../modules/zelf-key-domain.module");
 const { errorHandler } = require("../../../Core/http-handler");
+const { runMonthlyAccess } = require("../../ZelfID/modules/zelf-id-monthly-access.module");
 
 const sendModuleError = (ctx, error) => {
 	const _exception = errorHandler(error, ctx);
@@ -126,9 +127,7 @@ const storeCreditCard = async (ctx) => {
  */
 const retrieveData = async (ctx) => {
 	try {
-		const data = await Module.retrieveData(ctx.request.body, ctx.state.user);
-
-		ctx.body = { data };
+		await runMonthlyAccess(ctx, "retrieve", () => Module.retrieveData(ctx.request.body, ctx.state.user));
 	} catch (error) {
 		const _exception = errorHandler(error, ctx);
 

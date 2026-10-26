@@ -109,6 +109,7 @@ const ALLOWED_BY_ACTION = {
     "daily-reward": withCommon("tagName", "domain"),
     "payment-confirmation": withCommon("tagName", "domain", "network", "token"),
     "wallet-decrypt": withCommon(),
+    "wallet-export": withCommon("zelfProof", "identifier", "addServerPassword", "zelfName", "domain", "skipQRCode"),
     "wallet-create": withCommon(),
     "wallet-import": withCommon("mnemonic"),
     "wallet-preview": withCommon("zelfProof", "tagName", "domain"),

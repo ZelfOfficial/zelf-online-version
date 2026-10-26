@@ -38,16 +38,24 @@ const getOrCreateState = async (scope, key) => {
 
     let row = await FaceAttemptState.findOne({ scope, key }).lean();
     if (!row) {
-        row = await FaceAttemptState.create({
-            scope,
-            key,
-            failureCount: 0,
-            windowStartedAt: now,
-            lockedUntil: null,
-            lockoutLevel: 0,
-            expiresAt: computeStateExpiresAt({ windowStartedAt: now, lockedUntil: null }, now),
-        });
-        return row.toObject();
+        try {
+            row = await FaceAttemptState.create({
+                scope,
+                key,
+                failureCount: 0,
+                windowStartedAt: now,
+                lockedUntil: null,
+                lockoutLevel: 0,
+                expiresAt: computeStateExpiresAt({ windowStartedAt: now, lockedUntil: null }, now),
+            });
+            return row.toObject();
+        } catch (error) {
+            const duplicate = error?.code === 11000 || error?.cause?.code === 11000 || /duplicate key/i.test(`${error?.message || ""} ${error?.cause?.message || ""}`);
+            if (!duplicate) throw error;
+            row = await FaceAttemptState.findOne({ scope, key }).lean();
+            if (row) return row;
+            throw error;
+        }
     }
 
     if (row.windowStartedAt && now - new Date(row.windowStartedAt) > windowMs) {

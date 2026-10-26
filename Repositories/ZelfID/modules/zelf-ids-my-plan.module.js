@@ -8,6 +8,7 @@ const config = require("../../../Core/config");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
 const { effectivePlan, isExpiresAtPassed, licensePaidPlansForName } = require("./zelf-id-plan.module");
+const { getMonthlyAccessStatus, isEnabled: monthlyAccessEnabled } = require("./zelf-id-monthly-access.module");
 const { parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 const { mergePlanTermIntoPublicData } = require("./zelf-id-plan-term.module");
 
@@ -119,7 +120,7 @@ const upgradeFor = async ({ paymentMethod, plan, duration, nextPlans, zelfName, 
  * @param {Object} params.domainConfig
  * @param {Function} [params.createBillingPortal]
  */
-const buildMyPlan = async (tagObject, { zelfName, domainConfig, createBillingPortal } = {}) => {
+const buildMyPlan = async (tagObject, { zelfName, domainConfig, createBillingPortal, authUser } = {}) => {
     const publicData = tagObject?.publicData || {};
     await mergePlanTermIntoPublicData(publicData);
     const plan = effectivePlan(publicData, domainConfig) || "free";
@@ -140,7 +141,7 @@ const buildMyPlan = async (tagObject, { zelfName, domainConfig, createBillingPor
     const planExpiresAt = publicData.planExpiresAt ? toIso(publicData.planExpiresAt) : null;
     const leaseExpiresAt = publicData.expiresAt ? toIso(publicData.expiresAt) : null;
 
-    return {
+    const result = {
         zelfName,
         plan,
         planExpiresAt,
@@ -152,6 +153,29 @@ const buildMyPlan = async (tagObject, { zelfName, domainConfig, createBillingPor
         nextPlans,
         upgrade,
     };
+
+    if (monthlyAccessEnabled()) {
+        try {
+            result.monthlyAccess = await getMonthlyAccessStatus({
+                zelfName,
+                publicData,
+                domainConfig,
+                plan,
+                authUser,
+                includeHistory: true,
+            });
+        } catch (_error) {
+            result.monthlyAccess = {
+                enabled: true,
+                zelfName,
+                plan,
+                status: "unavailable",
+                openAllowed: true,
+            };
+        }
+    }
+
+    return result;
 };
 
 const getMyPlan = async ({ zelfName, authUser } = {}, deps = {}) => {
@@ -171,6 +195,7 @@ const getMyPlan = async ({ zelfName, authUser } = {}, deps = {}) => {
         zelfName: normalized.zelfName,
         domainConfig,
         createBillingPortal: deps.createBillingPortal,
+        authUser: deps.authUser || authUser || {},
     });
 };
 
