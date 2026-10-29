@@ -1,4 +1,4 @@
-const { decryptWithPasswordFallback, isPasswordRequiredError } = require("../../Repositories/ZelfID/modules/zelf-id-password.module");
+const { decryptWithPasswordFallback, isPasswordRequiredError, healDecryptedTagPassword } = require("../../Repositories/ZelfID/modules/zelf-id-password.module");
 
 const requiredError = () => Object.assign(new Error("A PASSWORD IS REQUIRED TO DECRYPT THIS ZELFPROOF."), { code: "ERR_PASSWORD_REQUIRED", status: 409 });
 
@@ -48,6 +48,17 @@ describe("decryptWithPasswordFallback", () => {
 	test("isPasswordRequiredError", () => {
 		expect(isPasswordRequiredError(requiredError())).toBe(true);
 		expect(isPasswordRequiredError({ message: "x" })).toBe(false);
+	});
+
+	test("healDecryptedTagPassword heals stale hasPassword=false when decrypted with a real password", () => {
+		const tagObject = { publicData: { tagName: "qa.zelf", hasPassword: "false" } };
+		expect(healDecryptedTagPassword(tagObject, "123456")).toBe(true);
+		expect(tagObject.publicData.hasPassword).toBe("true");
+		expect(tagObject.publicData.st).toBe("pin");
+
+		const faceOnlyTag = { publicData: { tagName: "face.zelf", hasPassword: "false" } };
+		expect(healDecryptedTagPassword(faceOnlyTag, null)).toBe(false);
+		expect(faceOnlyTag.publicData.hasPassword).toBe("false");
 	});
 });
 

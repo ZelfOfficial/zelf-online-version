@@ -6,7 +6,13 @@ const { assertTagAvailable } = require("../../Tags/modules/tag-availability");
 const moment = require("moment");
 const { codedError } = require("../../../Core/http-handler");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
-const { NO_PASSWORD_PLACEHOLDER, effectivePassword, resolveSecurityType, decryptWithPasswordFallback } = require("./zelf-id-password.module");
+const {
+    NO_PASSWORD_PLACEHOLDER,
+    effectivePassword,
+    resolveSecurityType,
+    decryptWithPasswordFallback,
+    healDecryptedTagPassword,
+} = require("./zelf-id-password.module");
 const TagsSearchModule = require("../../Tags/modules/tags-search.module");
 const { generateMnemonic } = require("../../Wallet/modules/helpers");
 const { createEthWallet } = require("../../Wallet/modules/eth");
@@ -326,6 +332,8 @@ const decryptTag = async (params, authUser) => {
         throwMappedZelfProofError(decryptedZelfProof.error);
     }
 
+    const healedHasPassword = healDecryptedTagPassword(tagObject, password);
+
     const { mnemonic, zkProof, solanaSecretKey } = decryptedZelfProof.metadata;
 
     const tagKey = domainConfig.getTagKey() || "tagName";
@@ -339,6 +347,13 @@ const decryptTag = async (params, authUser) => {
         arweavePrivateKey: arweave.privateKey,
         password: password || rawPassword,
     });
+
+    if (healedHasPassword) {
+        tagsToAdd.push({ name: "hasPassword", value: "true", new: false });
+        if (tagObject.publicData?.st) {
+            tagsToAdd.push({ name: "st", value: tagObject.publicData.st, new: false });
+        }
+    }
 
     let upgradedLegacy = false;
 

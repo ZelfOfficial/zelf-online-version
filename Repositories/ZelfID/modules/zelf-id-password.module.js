@@ -67,4 +67,33 @@ const decryptWithPasswordFallback = async (decryptFn, args, { password, hasPassw
     return { result, password: first };
 };
 
-module.exports = { NO_PASSWORD_PLACEHOLDER, isNoPassword, effectivePassword, resolveSecurityType, isPasswordRequiredError, decryptWithPasswordFallback };
+/**
+ * When decrypt succeeds with a real password on a record whose stored publicData.hasPassword
+ * was stale ("false" or missing, e.g. qa.zelf), heal publicData.hasPassword to "true" (and st
+ * if missing) and return true so the caller can also include hasPassword in tagsToAdd for re-pin.
+ * @param {Object} tagObject
+ * @param {string|null|undefined} password effective password returned by decryptWithPasswordFallback
+ * @returns {boolean} true when publicData.hasPassword was healed to "true"
+ */
+const healDecryptedTagPassword = (tagObject, password) => {
+    if (!tagObject?.publicData || isNoPassword(password)) return false;
+
+    const wasStale = String(tagObject.publicData.hasPassword) !== "true";
+    tagObject.publicData.hasPassword = "true";
+
+    if (!tagObject.publicData.st) {
+        tagObject.publicData.st = resolveSecurityType(password);
+    }
+
+    return wasStale;
+};
+
+module.exports = {
+    NO_PASSWORD_PLACEHOLDER,
+    isNoPassword,
+    effectivePassword,
+    resolveSecurityType,
+    isPasswordRequiredError,
+    decryptWithPasswordFallback,
+    healDecryptedTagPassword,
+};

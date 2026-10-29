@@ -12,7 +12,13 @@ const { createPolkadotWallet, createKusamaWallet } = require("../../Wallet/modul
 const { createTonWallet } = require("../../Wallet/modules/ton");
 const { createAptosWallet } = require("../../Wallet/modules/aptos");
 const { decrypt, preview, previewWithLegacyFallback, applyPreviewHasPassword, _formattingError, ZELFPROOF_CLIENT_ERROR_STATUS } = require("../../ZelfProof/modules/zelf-proof.module");
-const { NO_PASSWORD_PLACEHOLDER, effectivePassword, resolveSecurityType, decryptWithPasswordFallback } = require("../../ZelfID/modules/zelf-id-password.module");
+const {
+    NO_PASSWORD_PLACEHOLDER,
+    effectivePassword,
+    resolveSecurityType,
+    decryptWithPasswordFallback,
+    healDecryptedTagPassword,
+} = require("../../ZelfID/modules/zelf-id-password.module");
 const OfflineProofModule = require("../../../Core/offline-proof");
 const config = require("../../../Core/config");
 const { confirmPayUniqueAddress } = require("../../purchase-zelf/modules/balance-checker.module");
@@ -261,6 +267,8 @@ const decryptTag = async (params, authUser) => {
         throwMappedZelfProofError(decryptedZelfProof.error);
     }
 
+    const healedHasPassword = healDecryptedTagPassword(tagObject, password);
+
     const SessionModule = require("../../Session/modules/session.module");
     await SessionModule.markSessionIdentityVerified(
         authUser,
@@ -284,6 +292,13 @@ const decryptTag = async (params, authUser) => {
         arweavePrivateKey: arweave.privateKey,
         password: password || rawPassword,
     });
+
+    if (healedHasPassword) {
+        tagsToAdd.push({ name: "hasPassword", value: "true", new: false });
+        if (tagObject.publicData?.st) {
+            tagsToAdd.push({ name: "st", value: tagObject.publicData.st, new: false });
+        }
+    }
 
     const needsLegacyUpgrade = resolveEncryptVersion(tagObject.publicData) !== 4;
 
