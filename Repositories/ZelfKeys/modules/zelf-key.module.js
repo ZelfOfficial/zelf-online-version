@@ -1187,13 +1187,13 @@ const listDataForDashboard = async (identifier, category, authToken) => {
     const domainPart = parts.pop();
     const identifierPart = parts.join(".");
 
-    const accountType = authToken.accountType || authToken.publicData?.accountType || "";
+    const accountType = authToken?.accountType || authToken?.publicData?.accountType || "";
     const isPrivileged = ["staff", "staff_account", "lawyer", "lawyer_account"].includes(accountType);
-    const userIdentifier = authToken.tagName || authToken.identifier;
+    const userIdentifier = authToken?.tagName || authToken?.identifier;
     const requestedOwner = normalizeZelfName(identifier, domainPart);
-    if (!isPrivileged && userIdentifier) {
-        const userTagName = normalizeZelfName(userIdentifier, authToken.domain || domainPart).zelfName;
-        if (requestedOwner.zelfName !== userTagName) {
+    if (!isPrivileged) {
+        const userTagName = userIdentifier ? normalizeZelfName(userIdentifier, authToken?.domain || domainPart).zelfName : "";
+        if (!userTagName || requestedOwner.zelfName !== userTagName) {
             throw new Error("403:Not authorized to query ZelfKeys for this identifier");
         }
     }
