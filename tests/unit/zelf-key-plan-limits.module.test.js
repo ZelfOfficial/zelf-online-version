@@ -792,6 +792,65 @@ describe("GET /api/zelf-keys/list verified owner", () => {
     });
 });
 
+describe("GET /api/zelf-keys/dashboard/list verified owner", () => {
+    const runDashboard = async (middleware, user, query) => {
+        const ctx = { request: { query }, state: { user }, status: undefined, body: undefined };
+        let continued = false;
+        await middleware(ctx, async () => {
+            continued = true;
+        });
+        return { ctx, continued };
+    };
+
+    const createSession = (tagName) =>
+        Session.create({
+            identifier: `dashboard-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            clientIP: "127.0.0.1",
+            domain: "zelf",
+            isWebExtension: true,
+            status: "active",
+            type: "general",
+            tagName,
+        });
+
+    test.each([
+        ["list", Middleware.listDashboardValidation, { identifier: "victim.zelf", category: "password" }],
+        ["list-all", Middleware.listAllDashboardValidation, { identifier: "victim.zelf" }],
+    ])("a session that only claims another name cannot read %s through the dashboard", async (_name, middleware, query) => {
+        const session = await createSession("victim");
+        const { ctx, continued } = await runDashboard(middleware, { session: session._id, tagName: "victim", domain: "zelf" }, query);
+        expect(continued).toBe(false);
+        expect(ctx.status).toBe(403);
+        expect(ctx.body.code).toBe("ERR_SESSION_NOT_VERIFIED");
+    });
+
+    test("unlock then the dashboard list works, and wallet A cannot read wallet B", async () => {
+        const session = await createSession("jimbot");
+        await SessionModule.markSessionIdentityVerified({ session: session._id, domain: "zelf" }, "jimbot", "zelf");
+
+        const allowed = await runDashboard(
+            Middleware.listDashboardValidation,
+            { session: session._id, tagName: "jimbot", domain: "zelf" },
+            { identifier: "jimbot.zelf" }
+        );
+        expect(allowed.continued).toBe(true);
+
+        const other = await runDashboard(
+            Middleware.listDashboardValidation,
+            { session: session._id, tagName: "alice", domain: "zelf" },
+            { identifier: "alice.zelf" }
+        );
+        expect(other.continued).toBe(false);
+        expect(other.ctx.status).toBe(403);
+        expect(other.ctx.body.code).toBe("ERR_SESSION_OWNER_MISMATCH");
+    });
+
+    test.each(["staff", "staff_account", "lawyer", "lawyer_account"])("a %s login keeps dashboard access without a wallet session", async (accountType) => {
+        const { continued } = await runDashboard(Middleware.listAllDashboardValidation, { accountType }, { identifier: "alice.zelf" });
+        expect(continued).toBe(true);
+    });
+});
+
 describe("POST /slots validation codes", () => {
     const run = async (body) => {
         const ctx = {
