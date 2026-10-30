@@ -460,8 +460,16 @@ const listAllValidation = async (ctx, next) => {
 	await next();
 };
 
+// Staff and lawyer tokens are signed by the server at login with their account type.
+const DASHBOARD_PRIVILEGED_ACCOUNTS = new Set(["staff", "staff_account", "lawyer", "lawyer_account"]);
+
+const isDashboardPrivileged = (authUser = {}) =>
+	DASHBOARD_PRIVILEGED_ACCOUNTS.has(authUser.accountType || authUser.publicData?.accountType || "");
+
 /**
- * Dashboard list validation - requires identifier (user.domain format)
+ * Dashboard list validation - requires identifier (user.domain format).
+ * Anyone who is not staff needs the same face-verified session as /list: the session tagName is
+ * client-supplied, so without this a session claiming another name could read that wallet's metadata.
  */
 const listDashboardValidation = async (ctx, next) => {
 	const valid = validate(schemas.listDashboard, ctx.request.query);
@@ -471,6 +479,8 @@ const listDashboardValidation = async (ctx, next) => {
 		ctx.body = { validationError: valid.error.message };
 		return;
 	}
+
+	if (!isDashboardPrivileged(ctx.state.user) && !(await requireVerifiedWallet(ctx))) return;
 
 	await next();
 };
@@ -486,6 +496,8 @@ const listAllDashboardValidation = async (ctx, next) => {
 		ctx.body = { validationError: valid.error.message };
 		return;
 	}
+
+	if (!isDashboardPrivileged(ctx.state.user) && !(await requireVerifiedWallet(ctx))) return;
 
 	await next();
 };
