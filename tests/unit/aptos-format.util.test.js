@@ -4,6 +4,7 @@ const {
     decimalToAtomicString,
     expandScientificNotation,
 } = require("../../Repositories/Aptos/modules/aptos-format.util");
+const { mapCoinBalance } = require("../../Repositories/Aptos/modules/aptos-scrapping.module");
 
 describe("Aptos amount formatting", () => {
     it("converts octas to exact APT strings", () => {
@@ -33,5 +34,25 @@ describe("Aptos amount formatting", () => {
     it("expands scientific notation returned by numeric APIs", () => {
         expect(expandScientificNotation("1e+8")).toBe("100000000");
         expect(expandScientificNotation("1.5e+3")).toBe("1500");
+    });
+
+    it("maps both v1 AptosCoin and v2 fungible asset (0xa) to native APT with 8 decimals (#136)", () => {
+        const faCoin = mapCoinBalance(
+            {
+                amount: 600000000,
+                asset_type: "0x000000000000000000000000000000000000000000000000000000000000000a",
+                metadata: null,
+                token_standard: "v2",
+            },
+            "0.95"
+        );
+        expect(faCoin).toMatchObject({
+            address_token: "APT",
+            amount: "6",
+            decimals: 8,
+            fiatBalance: 5.7,
+            symbol: "APT",
+            tokenType: "APT",
+        });
     });
 });

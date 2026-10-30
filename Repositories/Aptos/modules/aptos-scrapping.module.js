@@ -57,8 +57,15 @@ const getTimestampMs = (value) => {
     return Number.isFinite(parsed) ? parsed : Date.now();
 };
 
-const isNativeApt = (symbol, assetType) =>
-    String(symbol || "").toUpperCase() === "APT" || String(assetType || "").toLowerCase() === "0x1::aptos_coin::aptoscoin";
+const isNativeApt = (symbol, assetType) => {
+    const normalizedAssetType = String(assetType || "").trim().toLowerCase();
+    return (
+        String(symbol || "").toUpperCase() === "APT" ||
+        normalizedAssetType === "0x1::aptos_coin::aptoscoin" ||
+        normalizedAssetType === APTOS_FA_METADATA_ADDRESS ||
+        normalizedAssetType === "0xa"
+    );
+};
 
 const buildNativeToken = (amount = "0", aptPrice = "0") => {
     const fiatBalance = calculateFiatBalance(amount, aptPrice);
@@ -79,11 +86,12 @@ const buildNativeToken = (amount = "0", aptPrice = "0") => {
 
 const mapCoinBalance = (coin, aptPrice) => {
     const metadata = coin?.metadata || {};
-    const decimals = Number.isInteger(metadata.decimals) ? metadata.decimals : 0;
     const symbol = metadata.symbol || "TOKEN";
     const nativeApt = isNativeApt(symbol, coin?.asset_type);
+    const effectiveSymbol = nativeApt ? "APT" : symbol;
+    const decimals = Number.isInteger(metadata.decimals) ? metadata.decimals : nativeApt ? APTOS_DECIMALS : 0;
     const amount = atomicToDecimalString(coin?.amount ?? 0, decimals);
-    const price = getAssetUsdPrice(symbol, aptPrice);
+    const price = getAssetUsdPrice(effectiveSymbol, aptPrice);
     const fiatBalance = calculateFiatBalance(amount, price);
 
     return {
@@ -93,9 +101,9 @@ const mapCoinBalance = (coin, aptPrice) => {
         decimals,
         fiatBalance,
         image: metadata.icon_uri || (nativeApt ? APT_LOGO : ""),
-        name: metadata.name || symbol,
+        name: metadata.name || (nativeApt ? "Aptos Coin" : symbol),
         price,
-        symbol: nativeApt ? "APT" : symbol,
+        symbol: effectiveSymbol,
         tokenStandard: coin?.token_standard || metadata.token_standard || "",
         tokenType: nativeApt ? "APT" : symbol,
     };
@@ -136,11 +144,22 @@ const getAssets = async (address, aptPrice) => {
         tokens = [buildNativeToken(nativeBalance, aptPrice)];
     }
 
-    const nativeIndex = tokens.findIndex((token) => token.symbol === "APT");
-    if (nativeIndex === -1) tokens.unshift(buildNativeToken("0", aptPrice));
-    else if (nativeIndex > 0) tokens.unshift(tokens.splice(nativeIndex, 1)[0]);
+    const nativeTokens = tokens.filter((token) => token.symbol === "APT");
+    const nonNativeTokens = tokens.filter((token) => token.symbol !== "APT");
+    let primaryNative = nativeTokens.find((token) => Number(token.amount || 0) > 0) || nativeTokens[0] || null;
 
-    return tokens;
+    if (!primaryNative || Number(primaryNative.amount || 0) === 0) {
+        try {
+            const onChainBalance = await getNativeBalance(address);
+            if (Number(onChainBalance || 0) > 0) {
+                primaryNative = buildNativeToken(onChainBalance, aptPrice);
+            }
+        } catch (_error) {
+            /* Keep indexer result when fullnode view is unavailable */
+        }
+    }
+
+    return [primaryNative || buildNativeToken("0", aptPrice), ...nonNativeTokens];
 };
 
 const readAddressArgument = (value) => {

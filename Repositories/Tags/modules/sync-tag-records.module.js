@@ -37,7 +37,7 @@ const isV4PublicData = (publicData = {}) => Number(publicData.v) === 4;
 const isV4LeaseComplete = (publicData = {}) =>
     isV4PublicData(publicData) && V4_LEASE_ADDRESS_FIELDS.every((field) => Boolean(publicData[field]));
 
-const shouldSkipOverflowBackfill = (publicData = {}) => isV4PublicData(publicData);
+const shouldSkipOverflowBackfill = (publicData = {}) => isV4PublicData(publicData) && !publicData._needsPinSplit;
 
 const keepStoredValue = (value) => (value === undefined || value === null || value === "" ? undefined : value);
 
@@ -109,10 +109,12 @@ const initTagUpdates = async (tagObject, secretKeys) => {
         tagsToAdd.push({ name: "tonAddress", value: ton.address, new: true });
     }
 
-    if (!skipAddressBackfill && !skipOverflow && !tagObject.publicData.aptosAddress) {
+    if (!skipAddressBackfill && !tagObject.publicData.aptosAddress) {
         const aptos = await createAptosWallet(mnemonic);
         tagObject.publicData.aptosAddress = aptos.address;
-        tagsToAdd.push({ name: "aptosAddress", value: aptos.address, new: true });
+        if (!skipOverflow) {
+            tagsToAdd.push({ name: "aptosAddress", value: aptos.address, new: true });
+        }
     }
 
     if (!skipAddressBackfill && !(tagObject.publicData.btcAddress || "").startsWith("bc1")) {
@@ -132,14 +134,18 @@ const initTagUpdates = async (tagObject, secretKeys) => {
     const polkadot = await createPolkadotWallet(mnemonic);
     const kusama = await createKusamaWallet(mnemonic);
 
-    if (!skipAddressBackfill && !skipOverflow && !tagObject.publicData.dotAddress) {
+    if (!skipAddressBackfill && !tagObject.publicData.dotAddress) {
         tagObject.publicData.dotAddress = polkadot.address;
-        tagsToAdd.push({ name: "dotAddress", value: polkadot.address, new: true });
+        if (!skipOverflow) {
+            tagsToAdd.push({ name: "dotAddress", value: polkadot.address, new: true });
+        }
     }
 
-    if (!skipAddressBackfill && !skipOverflow && !tagObject.publicData.ksmAddress) {
+    if (!skipAddressBackfill && !tagObject.publicData.ksmAddress) {
         tagObject.publicData.ksmAddress = kusama.address;
-        tagsToAdd.push({ name: "ksmAddress", value: kusama.address, new: true });
+        if (!skipOverflow) {
+            tagsToAdd.push({ name: "ksmAddress", value: kusama.address, new: true });
+        }
     }
 
     const domainConfig = getDomainConfig(tagObject.publicData.domain || "zelf");

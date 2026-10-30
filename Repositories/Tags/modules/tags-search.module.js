@@ -145,6 +145,16 @@ const searchTag = async (params, authUser) => {
                 { ...(combinedResults.tagObject.publicData || {}) },
                 [...ipfsResults, ...arweaveResults]
             );
+            if (
+                (!combinedResults.tagObject.publicData.aptosAddress ||
+                    !combinedResults.tagObject.publicData.dotAddress ||
+                    !combinedResults.tagObject.publicData.ksmAddress) &&
+                typeof TagsIPFSModule.hydrateContinuationAddresses === "function"
+            ) {
+                combinedResults.tagObject.publicData =
+                    (await TagsIPFSModule.hydrateContinuationAddresses(combinedResults.tagObject.publicData)) ||
+                    combinedResults.tagObject.publicData;
+            }
         }
 
         if (combinedResults.available && domainConfig) {

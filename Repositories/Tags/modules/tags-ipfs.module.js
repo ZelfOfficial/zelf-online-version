@@ -355,16 +355,21 @@ const insertSearchablePins = async (data, authUser) => {
 		authUser
 	);
 
-	for (const page of pages.continuations) {
-		await insert(
+	for (let pageIndex = 0; pageIndex < pages.continuations.length; pageIndex += 1) {
+		const page = pages.continuations[pageIndex];
+		const placeholder = _continuationPlaceholderBase64(name, pageIndex);
+		const inserted = await insert(
 			{
-				base64,
+				base64: placeholder,
 				name: page.name,
 				metadata: page.keyvalues,
 				pinIt,
 			},
 			authUser
 		);
+		if (inserted?.id && inserted.id !== primary?.id && typeof IPFS.updateFileKeyvalues === "function") {
+			await IPFS.updateFileKeyvalues(inserted.id, page.keyvalues);
+		}
 	}
 
 	const formatted = _formatRecord(primary);
