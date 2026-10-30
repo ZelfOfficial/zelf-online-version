@@ -310,4 +310,27 @@ describe("referral claim (#515)", () => {
 		await expect(claim("qa95")).resolves.toMatchObject({ success: true });
 		expect(recordFor("qa95.zelf.hold")).toMatchObject({ status: "completed" });
 	});
+
+	test("refuses claiming an 11th referral beyond the 10-friend reward cap (#137)", async () => {
+		const elevenReferrals = Array.from({ length: 11 }, (_, i) => ({
+			id: `ipfs-f${i}`,
+			publicData: {
+				tagName: `f${i}.zelf.hold`,
+				zelfName: `f${i}.zelf.hold`,
+				domain: "zelf",
+				referralTagName: "qa99.zelf",
+				type: "hold",
+				registeredAt: `2026-01-${String(i + 1).padStart(2, "0")} 00:00:00`,
+			},
+		}));
+		TagsSearchModule.searchIPFS.mockResolvedValue(elevenReferrals);
+		TagsSearchModule.searchArweave.mockResolvedValue([]);
+
+		const list = await Module.getMyReferrals("qa99", "zelf", {});
+		expect(byName(list.referrals, "f10.zelf")).toMatchObject({ countsForReward: false, claimed: false });
+		expect(byName(list.referrals, "f0.zelf")).toMatchObject({ countsForReward: true, claimed: false });
+
+		await expect(claim("f10")).rejects.toMatchObject({ status: 409, code: "referral_limit_reached" });
+		expect(RewardTransfer.sendRewardTransfer).not.toHaveBeenCalled();
+	});
 });

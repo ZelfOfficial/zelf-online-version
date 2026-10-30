@@ -63,10 +63,12 @@ const _recordTime = (record) => {
  */
 const countedReferralFriends = (friends, rewarded, limit) => {
     const counted = new Set();
-    for (const name of friends.keys()) if (rewarded.has(name) && counted.size < limit) counted.add(name);
+    const externalRewardedCount = [...rewarded].filter((name) => !friends.has(name)).length;
+    const effectiveLimit = Math.max(0, limit - externalRewardedCount);
+    for (const name of friends.keys()) if (rewarded.has(name) && counted.size < effectiveLimit) counted.add(name);
     const rest = [...friends.entries()].filter(([name]) => !counted.has(name)).sort((a, b) => _recordTime(a[1]) - _recordTime(b[1]));
     for (const [name] of rest) {
-        if (counted.size >= limit) break;
+        if (counted.size >= effectiveLimit) break;
         counted.add(name);
     }
     return counted;

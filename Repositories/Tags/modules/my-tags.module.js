@@ -926,7 +926,7 @@ const _findReferralRecordInStorage = async (referralTagName, friendFullTagName, 
 
     if (!friendRecord) throw new Error("referral_not_found");
 
-    return friendRecord;
+    return { friendRecord, records };
 };
 
 /**
@@ -1047,7 +1047,13 @@ const claimReferralReward = async (tagName, domain, friendTagName, friendDomain,
     if (rewardType && !["registration", "purchase"].includes(rewardType)) throw new Error("400:invalid_reward_type");
 
     // 1. Verify referral exists in IPFS/Arweave
-    const friendRecord = await _findReferralRecordInStorage(referralTagName, friendFullTagName, friendDomain, rewardType, authUser);
+    const { friendRecord, records: domainReferralRecords } = await _findReferralRecordInStorage(
+        referralTagName,
+        friendFullTagName,
+        friendDomain,
+        rewardType,
+        authUser
+    );
 
     const normalizedDomain = (domain || "").replace(/^\./, "").trim().toLowerCase();
 
@@ -1068,9 +1074,13 @@ const claimReferralReward = async (tagName, domain, friendTagName, friendDomain,
     const rewardRecord = await _checkIfRewardAlreadyClaimed(friendFullTagName, referralTagName, rewardType);
 
     // Only the first N friends earn rewards; extra referrals stay as history (#45).
+    const limit = referralRewardLimit();
     const rewardedFriends = await _rewardedReferralFriends(referralTagName);
+    const counted = countedReferralFriends(groupReferralRecords(domainReferralRecords), rewardedFriends, limit);
     const friendKey = referralName(friendFullTagName);
-    if (!rewardedFriends.has(friendKey) && rewardedFriends.size >= referralRewardLimit()) throw _claimError(409, "referral_limit_reached");
+    if (!rewardedFriends.has(friendKey) && (rewardedFriends.size >= limit || !counted.has(friendKey))) {
+        throw _claimError(409, "referral_limit_reached");
+    }
 
     const rewardAmount = _calculateReferralRewardAmount(friendRecord, domainConfig, rewardType);
     if (!Number.isFinite(rewardAmount) || rewardAmount <= 0) throw new Error("400:reward_not_eligible");
@@ -1182,7 +1192,7 @@ const getMyReferrals = async (tagName, domain, authUser) => {
             const purAmountActual = ipfsPurReward?.publicData?.rewardAmount || mongoPurRecord?.payload?.rewardAmount || purAmountPotential;
 
             if (purClaimed) totalEarnedInZNS += Number(purAmountActual);
-            if (!purClaimed && purAmountPotential <= 0) continue;
+            if ((!purClaimed && purAmountPotential <= 0) || Number(purAmountActual) <= 0) continue;
 
             referrals.push({
                 ...record,
@@ -1208,8 +1218,8 @@ const getMyReferrals = async (tagName, domain, authUser) => {
         // Reward cap (#45): extra referrals are history only and cannot be claimed.
         limit,
         friendsCount,
-        countedFriends: Math.min(friendsCount, limit),
-        extraFriends: Math.max(0, friendsCount - limit),
+        countedFriends: counted.size,
+        extraFriends: Math.max(0, friendsCount - counted.size),
     };
 };
 
