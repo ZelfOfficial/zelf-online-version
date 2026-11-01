@@ -25,6 +25,7 @@ const { errorHandler } = require("../../../Core/http-handler");
 const { validate } = require("../../../Core/JoiUtils");
 const {
     BULK_PASSWORDS_MAX,
+    BULK_ZOTP_RETRIEVE_MAX,
     PROTECTION_FACE,
     PROTECTION_FACE_PASSWORD,
     passwordCredentialSchema,
@@ -872,6 +873,70 @@ const retrieveData = async (data, authToken) => {
     };
 };
 
+/** zOTP records opened in parallel by retrieveZOTPsBulk; each one decrypts against the ZelfProof service. */
+const BULK_ZOTP_RETRIEVE_CONCURRENCY = 3;
+
+/**
+ * Open several zOTP records with one face capture ("Show codes" in the apps, zelf-extension#133).
+ * The face replay guard accepts a capture once per action, so the apps can't reuse it across
+ * per-record /retrieve calls. Each record goes through retrieveData (its stored protection decides
+ * if the password is used); records that aren't zOTP are refused, so passwords, notes and cards
+ * keep their transport encryption.
+ * When none opens, the first record's error is thrown so the face lockout counts the attempt.
+ * @param {Object} data
+ * @param {string} data.faceBase64
+ * @param {string} [data.password] - Zelf ID credential, only for face_password records
+ * @param {Array<{zelfProof: string, v?: string}>} data.items
+ * @param {Object} authToken
+ * @returns {Promise<Object>}
+ */
+const retrieveZOTPsBulk = async (data, authToken) => {
+    const { faceBase64, password, masterPassword, removePGP, items } = data;
+
+    const results = new Array(items.length);
+    let next = 0;
+
+    const openItem = async (index) => {
+        const item = items[index];
+        try {
+            const zelfKey = await retrieveData(
+                { zelfProof: item.zelfProof, v: item.v, faceBase64, password, masterPassword, removePGP },
+                authToken
+            );
+            if (zelfKey?.publicData?.type !== "zotp") throw new Error("409:not_a_zotp");
+            results[index] = { ok: true, value: { index, ...zelfKey } };
+        } catch (error) {
+            results[index] = { ok: false, error };
+        }
+    };
+
+    const worker = async () => {
+        while (next < items.length) {
+            await openItem(next++);
+        }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(BULK_ZOTP_RETRIEVE_CONCURRENCY, items.length) }, worker));
+
+    const success = [];
+    const failed = [];
+    results.forEach((result, index) => {
+        if (result.ok) success.push(result.value);
+        else failed.push({ index, ...formatStoreError(result.error) });
+    });
+
+    if (!success.length) throw results[0].error;
+
+    return {
+        success,
+        failed,
+        total: items.length,
+        successCount: success.length,
+        failedCount: failed.length,
+        maxBatchSize: BULK_ZOTP_RETRIEVE_MAX,
+    };
+};
+
 /**
  * Preview stored data without full decryption
  * @param {Object} data
@@ -1606,6 +1671,7 @@ module.exports = {
     storeData,
     storePasswordsBulk,
     retrieveData,
+    retrieveZOTPsBulk,
     previewData,
     createNFTReadyData,
     listData,

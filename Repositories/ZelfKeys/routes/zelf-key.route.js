@@ -32,6 +32,8 @@ module.exports = (server) => {
     server.get(`${PATH}/list-all`, Middleware.listAllValidation, Controller.listAllData);
     server.get(`${PATH}/summary`, Middleware.summaryValidation, Controller.summarizeData);
     server.post(`${PATH}/retrieve`, Middleware.retrieveValidation, FaceMiddleware.gate("retrieve"), Controller.retrieveData);
+    // Same face action as /retrieve: one capture opens one request, and failures share the lockout.
+    server.post(`${PATH}/retrieve/zotps`, Middleware.retrieveZOTPsValidation, FaceMiddleware.gate("retrieve"), Controller.retrieveZOTPs);
     server.post(`${PATH}/preview`, Middleware.previewValidation, FaceMiddleware.gate("preview"), Controller.previewData);
     server.post(`${PATH}/change-master-password`, Middleware.changeMasterPasswordValidation, FaceMiddleware.gate("change-master-password"), Controller.changeMasterPassword);
 
