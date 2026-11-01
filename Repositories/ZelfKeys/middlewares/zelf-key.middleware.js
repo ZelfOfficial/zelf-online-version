@@ -23,6 +23,9 @@ const PROTECTION_FACE_PASSWORD = "face_password";
 /** Maximum credentials per bulk password import request. */
 const BULK_PASSWORDS_MAX = 100;
 
+/** Maximum zOTP records opened with one face capture ("Show codes" in the apps). */
+const BULK_ZOTP_RETRIEVE_MAX = 50;
+
 const protectionField = stringEnum(PROTECTION_MODES).optional();
 
 const respondMissingMasterPassword = (ctx) => {
@@ -179,6 +182,22 @@ const schemas = {
 		removePGP: boolean().optional(),
 		publicData: object().optional(),
 		protection: protectionField,
+	},
+	retrieveZOTPs: {
+		faceBase64: string().required(),
+		password: optionalKeyPassword(),
+		masterPassword: optionalKeyPassword(),
+		removePGP: boolean().optional(),
+		items: array()
+			.items(
+				object({
+					zelfProof: string().required(),
+					v: string().optional().allow(""),
+				})
+			)
+			.min(1)
+			.max(BULK_ZOTP_RETRIEVE_MAX)
+			.required(),
 	},
 	preview: {
 		zelfProof: string().required(),
@@ -416,6 +435,24 @@ const retrieveValidation = async (ctx, next) => {
 		respondMissingMasterPassword(ctx);
 		return;
 	}
+
+	await next();
+};
+
+/**
+ * Bulk zOTP retrieve validation: one face for several records. Protection is read from each
+ * stored proof in the module, so a missing password comes back per record.
+ */
+const retrieveZOTPsValidation = async (ctx, next) => {
+	const valid = validate(schemas.retrieveZOTPs, ctx.request.body);
+
+	if (valid.error) {
+		ctx.status = 409;
+		ctx.body = { validationError: valid.error.message };
+		return;
+	}
+
+	applyRetrieveKeyPasswordNormalization(ctx.request.body, valid.value);
 
 	await next();
 };
@@ -658,6 +695,7 @@ module.exports = {
 	PROTECTION_FACE,
 	PROTECTION_FACE_PASSWORD,
 	BULK_PASSWORDS_MAX,
+	BULK_ZOTP_RETRIEVE_MAX,
 	ensureStoreMasterPasswordForProtection,
 	ensureRetrieveKeyPasswordForProtection,
 	blankKeyPasswordToEmpty,
@@ -670,6 +708,7 @@ module.exports = {
 	storeCreditCardValidation,
 	CARD_HOLDER_NAME_PATTERN,
 	retrieveValidation,
+	retrieveZOTPsValidation,
 	previewValidation,
 	proofValidation,
 	listValidation,

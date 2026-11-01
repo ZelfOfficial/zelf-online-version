@@ -138,6 +138,22 @@ const retrieveData = async (ctx) => {
 };
 
 /**
+ * Open several zOTP records with one face capture ("Show codes")
+ * @param {Object} ctx - Koa context
+ */
+const retrieveZOTPs = async (ctx) => {
+	try {
+		await runMonthlyAccess(ctx, "retrieve", () => Module.retrieveZOTPsBulk(ctx.request.body, ctx.state.user));
+	} catch (error) {
+		const _exception = errorHandler(error, ctx);
+
+		ctx.status = _exception.status;
+
+		ctx.body = { message: _exception.message, code: _exception.code };
+	}
+};
+
+/**
  * Preview stored data without full decryption
  * @param {Object} ctx - Koa context
  */
@@ -355,6 +371,7 @@ module.exports = {
 	storeNotes,
 	storeCreditCard,
 	retrieveData,
+	retrieveZOTPs,
 	previewData,
 	getProof,
 	listData,

@@ -76,7 +76,8 @@ const ALLOWED_BY_ACTION = {
         "type",
         "v",
         "publicData",
-        "protection"
+        "protection",
+        "items"
     ),
     preview: withCommon("zelfProof", "id", "category"),
     "store-password": withCommon(
