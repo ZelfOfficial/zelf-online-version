@@ -32,8 +32,7 @@ module.exports = (server) => {
 
     //Q
     //R
-    /** JSON-RPC proxy: no JWT; IP limits via Repositories/RPCCaller. */
-    require("../Repositories/RPC/routes/rpc.routes")(server);
+    // RPC proxy routes are registered with the protected routers (session JWT required).
     //S
     require("../Repositories/SuperAdmin/routes/super-admin.route")(server);
     require("../Repositories/Session/routes/session.route")(server);

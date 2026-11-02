@@ -10,7 +10,7 @@ require("dotenv").config();
 // Avalanche C-Chain configuration
 const AVALANCHE_CONFIG = {
     mainnet: {
-        rpcUrl: "https://fragrant-wild-smoke.avalanche-mainnet.quiknode.pro/9f6de2bac71c11f7c08e97e7be74a9d770c62a86/ext/bc/C/rpc/",
+        rpcUrl: process.env.AVALANCHE_RPC_URL || "https://api.avax.network/ext/bc/C/rpc",
         chainId: 43114,
         explorer: "https://snowtrace.io",
         gasPrice: "25000000000", // 25 gwei
