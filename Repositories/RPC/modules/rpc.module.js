@@ -3,20 +3,29 @@ const { getCleanInstance } = require("../../../Core/axios");
 const RpcLog = require("../models/rpc-log.model");
 const RpcCallerModule = require("../../RPCCaller/modules/rpc-caller.module");
 const { translateSuiJsonRpc } = require("../../sui/modules/sui-jsonrpc.module");
+const {
+    bodyContainsUpstreamSecret,
+    extensionChains,
+    legacyChains,
+    maxBodyBytes,
+    methodsForKind,
+    redactSecrets,
+} = require("../../../Core/rpc-upstreams");
 
 const instance = getCleanInstance(config.rpc?.timeoutMs || 15000);
 
+const CHAIN_ALIASES = {
+    sepolia: "ethereum-sepolia",
+};
+
 const truncateMessage = (message, maxLen = 500) => {
-    if (message == null || message === "") {
-        return null;
-    }
-    const s = String(message);
-    return s.length > maxLen ? s.slice(0, maxLen) : s;
+    if (message == null || message === "") return null;
+    return redactSecrets(message).slice(0, maxLen);
 };
 
 const persistRpcAudit = (payload) => {
     void RpcLog.create(payload).catch((err) => {
-        console.error("[RPC proxy] audit log failed", err?.message || err);
+        console.error("[RPC proxy] audit log failed", redactSecrets(err?.message || err));
     });
 };
 
@@ -29,6 +38,8 @@ const buildChainMaps = (chainsObj) => {
                 key,
                 chainId: Number(value.chainId),
                 rpcUrl: value.rpcUrl,
+                kind: value.kind,
+                requireUpstream: Boolean(value.requireUpstream),
             },
         ])
     );
@@ -36,29 +47,19 @@ const buildChainMaps = (chainsObj) => {
     return { chainsByKey, chainsById };
 };
 
-const defaultMaps = buildChainMaps(config.rpc?.chains || {});
-let extensionMapsCache = null;
-
-const getExtensionMaps = () => {
-    if (!extensionMapsCache) {
-        extensionMapsCache = buildChainMaps(config.extension?.rpc?.chains || {});
-    }
-    return extensionMapsCache;
-};
-
-const allowedMethods = new Set((config.rpc?.allowedMethods || []).map((method) => String(method).toLowerCase()));
-const blockedMethods = new Set((config.rpc?.blockedMethods || []).map((method) => String(method).toLowerCase()));
-const blockedPrefixes = (config.rpc?.blockedMethodPrefixes || []).map((prefix) => String(prefix).toLowerCase());
+const blockedMethodSet = () => new Set((config.rpc?.blockedMethods || []).map((method) => String(method).toLowerCase()));
+const blockedPrefixList = () => (config.rpc?.blockedMethodPrefixes || []).map((prefix) => String(prefix).toLowerCase());
+const allowedMethodSet = () => new Set((config.rpc?.allowedMethods || []).map((method) => String(method).toLowerCase()));
 
 const getChains = () =>
-    Array.from(defaultMaps.chainsByKey.values()).map((chain) => ({
+    Array.from(buildChainMaps(legacyChains()).chainsByKey.values()).map((chain) => ({
         chain: chain.key,
         chainId: chain.chainId,
         rpcConfigured: Boolean(chain.rpcUrl),
     }));
 
 const getExtensionChains = () =>
-    Array.from(getExtensionMaps().chainsByKey.values()).map((chain) => ({
+    Array.from(buildChainMaps(extensionChains()).chainsByKey.values()).map((chain) => ({
         chain: chain.key,
         chainId: chain.chainId,
         rpcConfigured: Boolean(chain.rpcUrl),
@@ -66,7 +67,9 @@ const getExtensionChains = () =>
 
 const resolveChain = ({ chain, chainId }, maps) => {
     if (chain) {
-        return maps.chainsByKey.get(String(chain).trim().toLowerCase()) || null;
+        const raw = String(chain).trim().toLowerCase();
+        const key = CHAIN_ALIASES[raw] || raw;
+        return maps.chainsByKey.get(key) || null;
     }
 
     if (chainId !== undefined && chainId !== null && chainId !== "") {
@@ -76,66 +79,74 @@ const resolveChain = ({ chain, chainId }, maps) => {
     return null;
 };
 
-const ensureMethodAllowed = (method) => {
+const fail = (status, message, clientCode) => {
+    const error = new Error(message);
+    error.status = status;
+    if (clientCode) error.clientCode = clientCode;
+    return error;
+};
+
+const ensureMethodAllowed = (method, kind) => {
     const normalized = String(method || "").trim().toLowerCase();
 
-    if (!normalized) {
-        const error = new Error("Missing RPC method");
-        error.status = 400;
-        throw error;
+    if (!normalized || normalized.length > 64) {
+        throw fail(400, "Missing RPC method", "rpc_method_invalid");
     }
 
-    const isBlocked = blockedMethods.has(normalized) || blockedPrefixes.some((prefix) => normalized.startsWith(prefix));
+    const prefixes = blockedPrefixList();
+    const isBlocked =
+        blockedMethodSet().has(normalized) ||
+        prefixes.some((prefix) => normalized.startsWith(prefix)) ||
+        normalized.includes("subscribe");
     if (isBlocked) {
-        const error = new Error(`RPC method ${normalized} is blocked`);
-        error.status = 403;
-        throw error;
+        throw fail(403, "RPC method is not allowed", "rpc_method_not_allowed");
     }
 
-    if (allowedMethods.size && !allowedMethods.has(normalized)) {
-        const error = new Error(`RPC method ${normalized} is not allowlisted`);
-        error.status = 403;
-        throw error;
+    const globalAllowed = allowedMethodSet();
+    if (globalAllowed.size && !globalAllowed.has(normalized)) {
+        throw fail(403, "RPC method is not allowed", "rpc_method_not_allowed");
+    }
+
+    const chainMethods = methodsForKind(kind);
+    if (!chainMethods.some((name) => String(name).toLowerCase() === normalized)) {
+        throw fail(403, "RPC method is not allowed", "rpc_method_not_allowed");
     }
 
     return normalized;
 };
 
-/**
- * JSON-RPC method names are case-sensitive on many nodes (e.g. eth_chainId vs eth_chainid).
- * We keep lowercase for policy checks; for upstream calls we use the canonical string from
- * config allowlist when present, otherwise the client-provided casing.
- */
-const resolveUpstreamMethodName = (normalized, originalMethod) => {
-    const list = config.rpc?.allowedMethods || [];
-    if (list.length) {
-        const fromConfig = list.find((m) => String(m).toLowerCase() === normalized);
-        if (fromConfig) {
-            return String(fromConfig);
-        }
-    }
+const resolveUpstreamMethodName = (normalized, originalMethod, kind) => {
+    const fromChain = methodsForKind(kind).find((name) => String(name).toLowerCase() === normalized);
+    if (fromChain) return String(fromChain);
+    const fromConfig = (config.rpc?.allowedMethods || []).find((name) => String(name).toLowerCase() === normalized);
+    if (fromConfig) return String(fromConfig);
     const raw = String(originalMethod ?? "").trim();
-    if (raw && raw.toLowerCase() === normalized) {
-        return raw;
-    }
+    if (raw && raw.toLowerCase() === normalized) return raw;
     return normalized;
+};
+
+const userKeyFrom = (authUser) => {
+    if (!authUser) return null;
+    const key = authUser.identifier || authUser.session || authUser._id || authUser.id;
+    return key ? String(key) : null;
 };
 
 const forwardRequest = async ({ chain, chainId, method, params = [], origin, purpose, rpcId }, meta = {}, options = {}) => {
-    const maps = options.useExtensionRpc ? getExtensionMaps() : defaultMaps;
+    const maps = buildChainMaps(options.useExtensionRpc ? extensionChains() : legacyChains());
     const resolvedChain = resolveChain({ chain, chainId }, maps);
 
-    if (!resolvedChain?.rpcUrl) {
-        const error = new Error("Unsupported RPC chain");
-        error.status = 400;
-        throw error;
+    if (!resolvedChain) {
+        throw fail(400, "Unsupported RPC chain", "rpc_chain_unsupported");
     }
 
-    const normalizedMethod = ensureMethodAllowed(method);
-    const upstreamMethod = resolveUpstreamMethodName(normalizedMethod, method);
+    if (!resolvedChain.rpcUrl) {
+        throw fail(503, "RPC upstream is not configured", "rpc_upstream_not_configured");
+    }
 
-    const normalizedParams =
-        params == null ? [] : Array.isArray(params) || (typeof params === "object" && params !== null) ? params : [];
+    const normalizedMethod = ensureMethodAllowed(method, resolvedChain.kind);
+    const upstreamMethod = resolveUpstreamMethodName(normalizedMethod, method, resolvedChain.kind);
+
+    const normalizedParams = params == null ? [] : Array.isArray(params) || (typeof params === "object" && params !== null) ? params : [];
 
     const paramSlotCount = Array.isArray(normalizedParams)
         ? normalizedParams.length
@@ -144,9 +155,12 @@ const forwardRequest = async ({ chain, chainId, method, params = [], origin, pur
           : 0;
 
     if (paramSlotCount > (config.rpc?.maxParamsLength || 25)) {
-        const error = new Error("Too many RPC params");
-        error.status = 400;
-        throw error;
+        throw fail(400, "Too many RPC params", "rpc_params_too_large");
+    }
+
+    const encodedParams = JSON.stringify(normalizedParams);
+    if (Buffer.byteLength(encodedParams) > maxBodyBytes()) {
+        throw fail(413, "Request too large", "rpc_body_too_large");
     }
 
     const logContext = {
@@ -154,13 +168,13 @@ const forwardRequest = async ({ chain, chainId, method, params = [], origin, pur
         chainId: resolvedChain.chainId,
         method: normalizedMethod,
         origin: origin || "wallet",
-        purpose: purpose || (options.useExtensionRpc ? "extension-json-rpc" : "unspecified"),
-        session: meta?.authUser?.session || null,
+        purpose: purpose || (options.useExtensionRpc ? "extension-json-rpc" : "json-rpc"),
+        session: meta?.authUser?.session ? String(meta.authUser.session) : null,
         ip: meta?.ip || null,
     };
 
     await RpcCallerModule.assertNotBanned(meta?.ip);
-    await RpcCallerModule.assertWithinRateLimit(meta?.ip);
+    await RpcCallerModule.assertWithinRateLimit(meta?.ip, { userKey: userKeyFrom(meta?.authUser) });
     RpcCallerModule.recordRequest(meta?.ip);
 
     if (process.env.NODE_ENV !== "production") {
@@ -194,13 +208,22 @@ const forwardRequest = async ({ chain, chainId, method, params = [], origin, pur
             },
             {
                 headers: { "Content-Type": "application/json" },
+                maxRedirects: 0,
+                maxBodyLength: maxBodyBytes(),
+                maxContentLength: 2 * 1024 * 1024,
             }
         );
 
+        if (bodyContainsUpstreamSecret(data, resolvedChain.rpcUrl)) {
+            throw fail(502, "RPC upstream request failed", "rpc_upstream_failed");
+        }
+
         if (data?.error) {
-            const error = new Error(data.error.message || "RPC upstream error");
-            error.status = 502;
-            error.details = data.error;
+            const error = fail(502, redactSecrets(data.error.message || "RPC upstream error"), "rpc_upstream_error");
+            const details = data.error.data;
+            if (details != null && !bodyContainsUpstreamSecret(details, resolvedChain.rpcUrl)) {
+                error.details = typeof details === "string" ? redactSecrets(details) : details;
+            }
             throw error;
         }
 
@@ -227,12 +250,11 @@ const forwardRequest = async ({ chain, chainId, method, params = [], origin, pur
         });
 
         if (error.status) {
+            error.message = redactSecrets(error.message);
             throw error;
         }
 
-        const upstreamError = new Error(error?.message || "RPC upstream request failed");
-        upstreamError.status = 502;
-        throw upstreamError;
+        throw fail(502, "RPC upstream request failed", "rpc_upstream_failed");
     }
 };
 

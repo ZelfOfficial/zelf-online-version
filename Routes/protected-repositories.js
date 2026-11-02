@@ -53,6 +53,7 @@ module.exports = (server) => {
     //Q
     //R
     require("../Repositories/RPCCaller/routes/rpc-caller.routes")(server);
+    require("../Repositories/RPC/routes/rpc.routes")(server);
     require("../Repositories/RPC/routes/protected-rpc.routes")(server);
     require("../Repositories/Rewards/routes/rewards.route")(server);
     //S

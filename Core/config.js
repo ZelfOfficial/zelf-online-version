@@ -14,6 +14,7 @@ const csvOrDefault = (value, fallback) => {
     const items = splitCsv(value);
     return items.length ? items : fallback;
 };
+const rpcUpstreams = require("./rpc-upstreams");
 
 const parseWhatsAppExtraApiKeys = () => {
     if (!process.env.WHATSAPP_EXTRA_API_KEYS) return {};
@@ -325,14 +326,10 @@ const configuration = {
         allowSandbox: process.env.REVENUECAT_ALLOW_SANDBOX === "true",
     },
     solana: {
-        rpcUrl:
-            process.env.SOLANA_RPC_URL ||
-            process.env.SOLANA_RPC_ENDPOINT ||
-            (process.env.SOLANA_NODE_SECRET
-                ? `https://flashy-ultra-choice.solana-mainnet.quiknode.pro/${process.env.SOLANA_NODE_SECRET}/`
-                : "https://api.mainnet-beta.solana.com"),
+        rpcUrl: process.env.SOLANA_RPC_URL || process.env.SOLANA_RPC_ENDPOINT || "https://api.mainnet-beta.solana.com",
         senderPublicKey: process.env.SOLANA_SENDER_PUBLIC_KEY,
         sender: process.env.SENDER_KEY,
+        /** Retained for older deploy configs. Not interpolated into an RPC URL. */
         nodeSecret: process.env.SOLANA_NODE_SECRET,
         tokenMintAddress: process.env.SOLANA_TOKEN_MINT_ADDRESS,
         devModeTokens: process.env.SOLANA_DEV_MODE_TOKENS,
@@ -415,7 +412,7 @@ const configuration = {
         integrator: process.env.LIFI_INTEGRATOR,
     },
     fantom: {
-        rpcUrl: process.env.FANTOM_RPC_URL || "https://fragrant-wild-smoke.fantom.quiknode.pro/9f6de2bac71c11f7c08e97e7be74a9d770c62a86",
+        rpcUrl: process.env.FANTOM_RPC_URL || "https://rpc.soniclabs.com",
     },
     stripe: {
         frontendUrl: process.env.FRONTEND_URL || "http://localhost:4200",
@@ -559,7 +556,6 @@ const configuration = {
             "net_version",
             "web3_clientVersion",
             "eth_sendRawTransaction",
-            "eth_sendTransaction",
             // Solana JSON-RPC (wallet / extension; include if you set RPC_PROXY_ALLOWED_METHODS)
             "getAccountInfo",
             "getBalance",
@@ -576,7 +572,6 @@ const configuration = {
             "getLatestBlockhash",
             "getMinimumBalanceForRentExemption",
             "getMultipleAccounts",
-            "getProgramAccounts",
             "getRecentPrioritizationFees",
             "getSignaturesForAddress",
             "getSignatureStatuses",
@@ -586,7 +581,6 @@ const configuration = {
             "getTransaction",
             "getVersion",
             "isBlockhashValid",
-            "requestAirdrop",
             "sendTransaction",
             "simulateTransaction",
             // Sui JSON-RPC (global allowlist; if you set RPC_PROXY_ALLOWED_METHODS, include these too)
@@ -633,22 +627,19 @@ const configuration = {
             "dryRunTransactionBlock",
             "executeTransactionBlock",
             "devInspectTransactionBlock",
-            "unsafe_transferObject",
-            "unsafe_pay",
-            "unsafe_paySui",
-            "unsafe_payAllSui",
-            "unsafe_mergeCoins",
-            "unsafe_splitCoins",
-            "unsafe_moveCall",
-            "unsafe_batchTransaction",
         ]),
         blockedMethodPrefixes: csvOrDefault(process.env.RPC_PROXY_BLOCKED_PREFIXES, [
             "admin_",
+            "alchemy_",
             "debug_",
             "engine_",
+            "erigon_",
+            "les_",
             "miner_",
             "ots_",
+            "parity_",
             "personal_",
+            "qn_",
             "trace_",
             "txpool_",
         ]),
@@ -659,138 +650,26 @@ const configuration = {
             "eth_newBlockFilter",
             "eth_newFilter",
             "eth_newPendingTransactionFilter",
+            "eth_sendTransaction",
             "eth_subscribe",
             "eth_unsubscribe",
         ]),
-        chains: {
-            ethereum: {
-                chainId: Number(process.env.ETHEREUM_CHAIN_ID) || 1,
-                rpcUrl: process.env.RPC_PROXY_ETHEREUM_URL || process.env.ETHEREUM_RPC_URL || "https://eth.llamarpc.com",
-            },
-            avalanche: {
-                chainId: Number(process.env.AVALANCHE_CHAIN_ID) || 43114,
-                rpcUrl: process.env.RPC_PROXY_AVALANCHE_URL || process.env.AVALANCHE_RPC_URL || "https://api.avax.network/ext/bc/C/rpc",
-            },
-            polygon: {
-                chainId: Number(process.env.POLYGON_CHAIN_ID) || 137,
-                rpcUrl: process.env.RPC_PROXY_POLYGON_URL || process.env.POLYGON_RPC_URL || "https://polygon-rpc.com",
-            },
-            bsc: {
-                chainId: Number(process.env.BSC_CHAIN_ID) || 56,
-                rpcUrl: process.env.RPC_PROXY_BSC_URL || process.env.BSC_RPC_URL || "https://bsc-dataseed.binance.org",
-            },
-            arbitrum: {
-                chainId: Number(process.env.ARBITRUM_CHAIN_ID) || 42161,
-                rpcUrl: process.env.RPC_PROXY_ARBITRUM_URL || process.env.ARBITRUM_RPC_URL || "https://arb1.arbitrum.io/rpc",
-            },
-            optimism: {
-                chainId: Number(process.env.OPTIMISM_CHAIN_ID) || 10,
-                rpcUrl: process.env.RPC_PROXY_OPTIMISM_URL || process.env.OPTIMISM_RPC_URL || "https://mainnet.optimism.io",
-            },
-            base: {
-                chainId: Number(process.env.BASE_CHAIN_ID) || 8453,
-                rpcUrl: process.env.RPC_PROXY_BASE_URL || process.env.BASE_RPC_URL || "https://mainnet.base.org",
-            },
-            blockdag: {
-                chainId: Number(process.env.BLOCKDAG_CHAIN_ID) || 1404,
-                rpcUrl:
-                    process.env.RPC_PROXY_BLOCKDAG_URL ||
-                    process.env.BLOCKDAG_MAIN_RPC_URL ||
-                    process.env.BLOCKDAG_RPC_URL ||
-                    "https://rpc.bdagscan.com",
-            },
-            /**
-             * Sui: chainId is a logical Zelf id for /api/rpc/chains (not an EVM chain id).
-             * Mainnet JSON-RPC is gone. POST /api/rpc/sui translates a fixed set of read
-             * methods through GraphQL at `${SUI_RPC_URL}/graphql` and does not POST this URL.
-             */
-            sui: {
-                chainId: Number(process.env.SUI_CHAIN_ID) || 101,
-                rpcUrl: process.env.RPC_PROXY_SUI_URL || process.env.SUI_RPC_URL || "https://fullnode.mainnet.sui.io:443",
-            },
-        },
+        /**
+         * Snapshot at boot for server-side readers (tx watcher, balance fallbacks).
+         * The HTTP proxy resolves URLs per request via Core/rpc-upstreams.js.
+         * Sui chainId is a logical id. POST /api/rpc/sui translates reads to GraphQL
+         * and does not POST this URL.
+         */
+        chains: rpcUpstreams.legacyChains(),
     },
-    /** JWT-only RPC proxy for the wallet extension (POST /api/protected/rpc/:chainKey). Uses EXTENSION_* URLs with fallback to public chain URLs. */
+    /**
+     * JWT-only RPC proxy for the wallet extension.
+     * Paid chains fail closed until EXTENSION_* (or the documented alias) is set.
+     * Public-chain defaults remain for Arbitrum, Optimism, Base, and BlockDAG.
+     */
     extension: {
         rpc: {
-            chains: {
-                ethereum: {
-                    chainId: Number(process.env.ETHEREUM_CHAIN_ID) || 1,
-                    rpcUrl:
-                        process.env.EXTENSION_ETHEREUM_RPC_URL ||
-                        process.env.RPC_PROXY_ETHEREUM_URL ||
-                        process.env.ETHEREUM_RPC_URL ||
-                        "https://eth.llamarpc.com",
-                },
-                avalanche: {
-                    chainId: Number(process.env.AVALANCHE_CHAIN_ID) || 43114,
-                    rpcUrl:
-                        process.env.EXTENSION_AVALANCHE_RPC_URL ||
-                        process.env.RPC_PROXY_AVALANCHE_URL ||
-                        process.env.AVALANCHE_RPC_URL ||
-                        "https://api.avax.network/ext/bc/C/rpc",
-                },
-                polygon: {
-                    chainId: Number(process.env.POLYGON_CHAIN_ID) || 137,
-                    rpcUrl:
-                        process.env.EXTENSION_POLYGON_RPC_URL ||
-                        process.env.RPC_PROXY_POLYGON_URL ||
-                        process.env.POLYGON_RPC_URL ||
-                        "https://polygon-rpc.com",
-                },
-                bsc: {
-                    chainId: Number(process.env.BSC_CHAIN_ID) || 56,
-                    rpcUrl:
-                        process.env.EXTENSION_BSC_RPC_URL ||
-                        process.env.RPC_PROXY_BSC_URL ||
-                        process.env.BSC_RPC_URL ||
-                        "https://bsc-dataseed.binance.org",
-                },
-                arbitrum: {
-                    chainId: Number(process.env.ARBITRUM_CHAIN_ID) || 42161,
-                    rpcUrl:
-                        process.env.EXTENSION_ARBITRUM_RPC_URL ||
-                        process.env.RPC_PROXY_ARBITRUM_URL ||
-                        process.env.ARBITRUM_RPC_URL ||
-                        "https://arb1.arbitrum.io/rpc",
-                },
-                optimism: {
-                    chainId: Number(process.env.OPTIMISM_CHAIN_ID) || 10,
-                    rpcUrl:
-                        process.env.EXTENSION_OPTIMISM_RPC_URL ||
-                        process.env.RPC_PROXY_OPTIMISM_URL ||
-                        process.env.OPTIMISM_RPC_URL ||
-                        "https://mainnet.optimism.io",
-                },
-                base: {
-                    chainId: Number(process.env.BASE_CHAIN_ID) || 8453,
-                    rpcUrl:
-                        process.env.EXTENSION_BASE_RPC_URL ||
-                        process.env.RPC_PROXY_BASE_URL ||
-                        process.env.BASE_RPC_URL ||
-                        "https://mainnet.base.org",
-                },
-                blockdag: {
-                    chainId: Number(process.env.BLOCKDAG_CHAIN_ID) || 1404,
-                    rpcUrl:
-                        process.env.EXTENSION_BLOCKDAG_RPC_URL ||
-                        process.env.RPC_PROXY_BLOCKDAG_URL ||
-                        process.env.BLOCKDAG_MAIN_RPC_URL ||
-                        process.env.BLOCKDAG_RPC_URL ||
-                        "https://rpc.bdagscan.com",
-                },
-                /** Solana: logical chainId for /api/protected/rpc/chains only (distinct from Sui 101 in public rpc). */
-                solana: {
-                    chainId: Number(process.env.SOLANA_PROXY_CHAIN_ID) || 102,
-                    rpcUrl:
-                        process.env.EXTENSION_SOLANA_RPC_URL ||
-                        process.env.SOLANA_RPC_URL ||
-                        process.env.SOLANA_RPC_ENDPOINT ||
-                        (process.env.SOLANA_NODE_SECRET
-                            ? `https://flashy-ultra-choice.solana-mainnet.quiknode.pro/${process.env.SOLANA_NODE_SECRET}/`
-                            : "https://api.mainnet-beta.solana.com"),
-                },
-            },
+            chains: rpcUpstreams.extensionChains(),
             /**
              * Full `Origin` values allowed for /api/protected/rpc/* (JWT still required).
              * Built from PROTECTED_RPC_ALLOWED_ORIGINS (CSV of full origins) plus

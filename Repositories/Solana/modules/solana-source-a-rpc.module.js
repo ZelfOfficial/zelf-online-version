@@ -1,4 +1,5 @@
 const { getCleanInstance } = require("../../../Core/axios");
+const { extensionChains } = require("../../../Core/rpc-upstreams");
 const { generateRandomUserAgent } = require("../../../Core/helpers");
 const {
 	getNaasNodeUrl,
@@ -36,7 +37,7 @@ const solanaBookBase = async () => getNaasNodeUrl(NAAS_CHAIN.SOLANA);
  * `config.solana` queda de segundo porque puede no estar configurado.
  */
 const solanaFallbackBase = () =>
-	config.extension?.rpc?.chains?.solana?.rpcUrl || config.solana?.rpcUrl || "https://api.mainnet-beta.solana.com";
+	extensionChains().solana?.rpcUrl || config.solana?.rpcUrl || "https://api.mainnet-beta.solana.com";
 
 let rpcSeq = 0;
 const rpcCall = async (method, params, { retried401 = false, useFallbackNode = false } = {}) => {

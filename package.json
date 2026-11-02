@@ -34,6 +34,7 @@
         "test:canton": "jest tests/unit/canton-format.util.test.js tests/unit/canton-sdk.client.test.js tests/unit/canton-transfer.module.test.js tests/unit/canton.middleware.test.js --verbose --no-coverage && jest --config jest.integration.http.config.js tests/integration/canton-api.test.js --verbose --no-coverage && jest --config jest.integration.config.js tests/integration/canton-live.test.js --verbose --no-coverage",
         "test:ethereum-gas": "jest tests/unit/etherscan-gas-tracker.util.test.js --verbose --no-coverage && jest --config jest.integration.config.js tests/integration/ethereum-gas-tracker-live.test.js --verbose --no-coverage",
         "test:avalanche-rpc": "jest --config jest.integration.config.js tests/integration/avalanche-rpc-live.test.js --verbose --no-coverage",
+        "test:rpc-proxy": "jest tests/unit/rpc.module.test.js tests/unit/rpc-proxy.policy.test.js tests/unit/rpc-proxy.auth.test.js tests/unit/rpc-rest.proxy.test.js tests/unit/rpc-rate-limit.test.js tests/unit/rpc-no-hardcoded-urls.test.js tests/unit/sui-rpc-proxy.test.js --verbose --no-coverage",
         "test:sui-rpc": "jest --config jest.integration.config.js tests/integration/sui-rpc-live.test.js --verbose --no-coverage",
         "test:solana-transfer": "jest tests/integration/solana-token-transfer.test.js --verbose --no-coverage",
         "test:blogs": "jest --config jest.integration.http.config.js tests/integration/blogs-api.test.js --verbose --no-coverage",

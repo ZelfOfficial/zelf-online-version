@@ -19,7 +19,7 @@ export default {
 		// Avalanche Mainnet
 		avalanche: {
 			type: "http",
-			url: "https://fragrant-wild-smoke.avalanche-mainnet.quiknode.pro/9f6de2bac71c11f7c08e97e7be74a9d770c62a86/ext/bc/C/rpc/",
+			url: process.env.AVALANCHE_RPC_URL || "https://api.avax.network/ext/bc/C/rpc",
 			chainId: 43114,
 			accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
 			gasPrice: 25000000000, // 25 gwei

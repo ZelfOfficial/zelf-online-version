@@ -4,9 +4,7 @@ const config = require("../../../Core/config");
 const CONSTANTS = {
     contractAddress: config.avalanche?.contractAddress || "0x6C995090C530756d59E6eEa5a3bA209863e0E167",
     network: "mainnet",
-    rpcUrl:
-        config.avalanche?.rpcUrl ||
-        "https://fragrant-wild-smoke.avalanche-mainnet.quiknode.pro/9f6de2bac71c11f7c08e97e7be74a9d770c62a86/ext/bc/C/rpc/",
+    rpcUrl: config.avalanche?.rpcUrl || process.env.AVALANCHE_RPC_URL || "",
     chainId: config.avalanche?.chainId || 43114,
     gasPrice: "25000000000", // 25 gwei
     NFT_ABI: [
@@ -20,7 +18,10 @@ const CONSTANTS = {
 };
 
 const getMasterWallet = async () => {
-    const provider = new ethers.JsonRpcProvider(CONSTANTS.rpcUrl);
+    const rpcUrl = process.env.AVALANCHE_RPC_URL || CONSTANTS.rpcUrl;
+    if (!rpcUrl) throw new Error("AVALANCHE_RPC_URL is not configured");
+
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
 
     const mnemonic = process.env.MNEMONICS;
 

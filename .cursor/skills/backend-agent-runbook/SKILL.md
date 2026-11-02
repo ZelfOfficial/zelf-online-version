@@ -51,6 +51,7 @@ For a test file that expects another port, export that same `PORT` before starti
 
 - `server.js` controls startup order, JWT handling, and protected vs unprotected route mounting.
 - Route registration lives in `Routes/unprotected-repositories.js` and `Routes/protected-repositories.js`.
+- Wallet RPC proxy (`Repositories/RPC/`) is mounted with the protected routes. `POST /api/protected/rpc/:chainKey` and `POST /api/rpc/:chainKey` both require a session JWT. Bitcoin Blockbook and Stellar Horizon prefixes are under `/api/protected/rpc/btc/` and `/api/protected/rpc/stellar/`. Paid upstreams are env URLs (`EXTENSION_*`, see `.env.example`). Focused check: `npm run test:rpc-proxy`.
 - ZNS token USD price is `TOKEN_PRICE_USD` (default `0.05`). `REWARD_PRICE` is honored only when `TOKEN_PRICE_USD` is unset. `GET /api/presale/info` returns the current price.
 
 ### Tags, search, and lease flows
