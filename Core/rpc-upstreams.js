@@ -286,22 +286,86 @@ const redactSecrets = (value) => {
         .slice(0, 300);
 };
 
+const upstreamSecretParts = (upstreamUrl) => {
+    if (!upstreamUrl) return null;
+    try {
+        const url = new URL(upstreamUrl);
+        const pathname = url.pathname.replace(/\/+$/, "");
+        return {
+            origin: url.origin,
+            host: url.host,
+            base: `${url.origin}${pathname}`,
+            token:
+                pathname
+                    .split("/")
+                    .filter(Boolean)
+                    .find((part) => part.length >= 16 && /^[A-Za-z0-9]+$/.test(part)) || "",
+        };
+    } catch {
+        return null;
+    }
+};
+
 const bodyContainsUpstreamSecret = (body, upstreamUrl) => {
     const text = typeof body === "string" ? body : JSON.stringify(body ?? "");
     if (/quiknode|quicknode/i.test(text)) return true;
-    if (!upstreamUrl) return false;
-    try {
-        const url = new URL(upstreamUrl);
-        if (url.host && text.includes(url.host)) return true;
-        const token = url.pathname
-            .split("/")
-            .filter(Boolean)
-            .find((part) => part.length >= 16 && /^[A-Za-z0-9]+$/.test(part));
-        if (token && text.includes(token)) return true;
-    } catch {
-        return false;
-    }
+    const parts = upstreamSecretParts(upstreamUrl);
+    if (!parts) return false;
+    if (parts.host && text.includes(parts.host)) return true;
+    if (parts.token && text.includes(parts.token)) return true;
     return false;
+};
+
+/**
+ * Horizon HAL `_links` use absolute hrefs on the upstream host. Rewrite those
+ * to relative paths so the payload can be returned. Any host or token that
+ * remains outside those links is still treated as a leak.
+ */
+const rewriteHref = (href, parts) => {
+    if (typeof href !== "string" || !parts?.base) return href;
+    if (!href.includes(parts.base) && !(parts.origin && href.startsWith(parts.origin))) return href;
+    let rewritten = href.split(parts.base).join("");
+    if (parts.origin && rewritten.startsWith(parts.origin)) {
+        rewritten = rewritten.slice(parts.origin.length);
+    }
+    if (parts.token) {
+        rewritten = rewritten.replace(new RegExp(`/${parts.token}(?=/|\\?|$)`), "");
+    }
+    if (rewritten === "" || rewritten.startsWith("?")) return `/${rewritten}`;
+    return rewritten;
+};
+
+const rewriteLinkObject = (link, parts) => {
+    if (!link || typeof link !== "object" || Array.isArray(link)) return link;
+    if (typeof link.href !== "string") return link;
+    return { ...link, href: rewriteHref(link.href, parts) };
+};
+
+const rewriteHorizonLinks = (node, parts) => {
+    if (Array.isArray(node)) return node.map((item) => rewriteHorizonLinks(item, parts));
+    if (!node || typeof node !== "object") return node;
+    const out = {};
+    for (const [key, value] of Object.entries(node)) {
+        if (key === "_links" && value && typeof value === "object" && !Array.isArray(value)) {
+            const links = {};
+            for (const [rel, link] of Object.entries(value)) {
+                links[rel] = rewriteLinkObject(link, parts);
+            }
+            out[key] = links;
+        } else {
+            out[key] = rewriteHorizonLinks(value, parts);
+        }
+    }
+    return out;
+};
+
+const sanitizeUpstreamBody = (body, upstreamUrl) => {
+    const parts = upstreamSecretParts(upstreamUrl);
+    const rewritten = parts && body && typeof body === "object" ? rewriteHorizonLinks(body, parts) : body;
+    if (bodyContainsUpstreamSecret(rewritten, upstreamUrl)) {
+        return { leaked: true, body: null };
+    }
+    return { leaked: false, body: rewritten };
 };
 
 module.exports = {
@@ -312,6 +376,7 @@ module.exports = {
     SUI_METHODS,
     bitcoinUpstream,
     bodyContainsUpstreamSecret,
+    sanitizeUpstreamBody,
     extensionChains,
     legacyChains,
     maxBatch,

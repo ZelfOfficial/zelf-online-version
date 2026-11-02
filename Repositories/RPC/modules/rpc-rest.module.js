@@ -4,9 +4,9 @@ const RpcLog = require("../models/rpc-log.model");
 const RpcCallerModule = require("../../RPCCaller/modules/rpc-caller.module");
 const {
     bitcoinUpstream,
-    bodyContainsUpstreamSecret,
     maxBodyBytes,
     redactSecrets,
+    sanitizeUpstreamBody,
     stellarUpstream,
 } = require("../../../Core/rpc-upstreams");
 
@@ -47,14 +47,7 @@ const enforceCallerLimits = async (meta) => {
 
 const joinUrl = (base, path) => `${String(base).replace(/\/+$/, "")}/${String(path).replace(/^\/+/, "")}`;
 
-const safeBody = (body, upstreamUrl, status) => {
-    if (bodyContainsUpstreamSecret(body, upstreamUrl)) {
-        return { status: status >= 400 ? status : 502, body: { error: "upstream_error" }, contentType: "application/json" };
-    }
-    return null;
-};
-
-const forward = async (method, url, { data, headers, params } = {}) => {
+const forward = async (method, url, { data, headers, params, secretUrl } = {}) => {
     try {
         const client = http();
         const response = await client.request({
@@ -64,6 +57,7 @@ const forward = async (method, url, { data, headers, params } = {}) => {
             params,
             headers,
             maxRedirects: 0,
+            // Blockbook UTXO lists for a few addresses (notably the genesis address) exceed this.
             maxContentLength: 2 * 1024 * 1024,
             maxBodyLength: maxBodyBytes(),
             validateStatus: (status) => status >= 200 && status < 600,
@@ -73,11 +67,17 @@ const forward = async (method, url, { data, headers, params } = {}) => {
         if (response.status >= 300 && response.status < 400) {
             throw fail(502, "RPC upstream request failed", "rpc_upstream_failed");
         }
-        const leaked = safeBody(response.data, url, response.status);
-        if (leaked) return leaked;
+        const sanitized = sanitizeUpstreamBody(response.data, secretUrl || url);
+        if (sanitized.leaked) {
+            return {
+                status: response.status >= 400 ? response.status : 502,
+                body: { error: "upstream_error" },
+                contentType: "application/json",
+            };
+        }
         const contentType = String(response.headers?.["content-type"] || "");
         const kind = /text\/plain/i.test(contentType) ? "text/plain; charset=utf-8" : "application/json";
-        return { status: response.status, body: response.data, contentType: kind };
+        return { status: response.status, body: sanitized.body, contentType: kind };
     } catch (error) {
         if (error.status) throw error;
         throw fail(502, "RPC upstream request failed", "rpc_upstream_failed");
@@ -118,6 +118,7 @@ const proxyBitcoin = async ({ network, operation, address, txid, blockId, query 
         session: authUser?.session ? String(authUser.session) : null,
         ip: ip || null,
     };
+    const callUpstream = (method, url, options = {}) => forward(method, url, { ...options, secretUrl: upstream });
 
     try {
         let result;
@@ -130,10 +131,10 @@ const proxyBitcoin = async ({ network, operation, address, txid, blockId, query 
                 }
                 params.confirmed = query.confirmed;
             }
-            result = await forward("get", joinUrl(upstream, `api/v2/utxo/${address}`), { params });
+            result = await callUpstream("get", joinUrl(upstream, `api/v2/utxo/${address}`), { params });
         } else if (operation === "tx-hex") {
             if (!TXID.test(String(txid || ""))) throw fail(400, "invalid_txid", "invalid_txid");
-            const upstreamResult = await forward("get", joinUrl(upstream, `api/v2/tx/${txid}`));
+            const upstreamResult = await callUpstream("get", joinUrl(upstream, `api/v2/tx/${txid}`));
             const hex = upstreamResult.body && typeof upstreamResult.body === "object" ? upstreamResult.body.hex : null;
             if (upstreamResult.status !== 200 || typeof hex !== "string" || !hex) {
                 result = upstreamResult;
@@ -143,7 +144,7 @@ const proxyBitcoin = async ({ network, operation, address, txid, blockId, query 
         } else if (operation === "broadcast" || operation === "blockbook-send") {
             const hex = readHex(body, rawBody);
             if (!HEX_TX.test(hex) || hex.length % 2 !== 0) throw fail(400, "invalid_raw_transaction", "invalid_raw_transaction");
-            const upstreamResult = await forward("post", joinUrl(upstream, "api/v2/sendtx"), {
+            const upstreamResult = await callUpstream("post", joinUrl(upstream, "api/v2/sendtx"), {
                 data: hex,
                 headers: { "Content-Type": "text/plain" },
             });
@@ -172,17 +173,17 @@ const proxyBitcoin = async ({ network, operation, address, txid, blockId, query 
             const pageSize = clampInt(query.pageSize, undefined, 1, 50);
             if (query.pageSize != null && query.pageSize !== "" && pageSize == null) throw fail(400, "invalid_query", "invalid_query");
             if (pageSize != null) params.pageSize = pageSize;
-            result = await forward("get", joinUrl(upstream, `api/v2/address/${address}`), { params });
+            result = await callUpstream("get", joinUrl(upstream, `api/v2/address/${address}`), { params });
         } else if (operation === "blockbook-tx" || operation === "blockbook-tx-specific") {
             if (!TXID.test(String(txid || ""))) throw fail(400, "invalid_txid", "invalid_txid");
             const suffix = operation === "blockbook-tx-specific" ? "tx-specific" : "tx";
-            result = await forward("get", joinUrl(upstream, `api/v2/${suffix}/${txid}`));
+            result = await callUpstream("get", joinUrl(upstream, `api/v2/${suffix}/${txid}`));
         } else if (operation === "blockbook-block") {
             if (!BLOCK_ID.test(String(blockId || ""))) throw fail(400, "invalid_block", "invalid_block");
-            result = await forward("get", joinUrl(upstream, `api/v2/block/${blockId}`));
+            result = await callUpstream("get", joinUrl(upstream, `api/v2/block/${blockId}`));
         } else if (operation === "blockbook-block-index") {
             if (!/^\d{1,10}$/.test(String(blockId || ""))) throw fail(400, "invalid_block", "invalid_block");
-            result = await forward("get", joinUrl(upstream, `api/v2/block-index/${blockId}`));
+            result = await callUpstream("get", joinUrl(upstream, `api/v2/block-index/${blockId}`));
         } else {
             throw fail(404, "not_found", "not_found");
         }
@@ -223,13 +224,14 @@ const proxyStellar = async ({ operation, accountId, query = {}, body, origin, au
         session: authUser?.session ? String(authUser.session) : null,
         ip: ip || null,
     };
+    const callUpstream = (method, url, options = {}) => forward(method, url, { ...options, secretUrl: upstream });
 
     try {
         let result;
         if (operation === "root") {
-            result = await forward("get", String(upstream).replace(/\/+$/, ""));
+            result = await callUpstream("get", String(upstream).replace(/\/+$/, ""));
         } else if (operation === "fee_stats") {
-            result = await forward("get", joinUrl(upstream, "fee_stats"));
+            result = await callUpstream("get", joinUrl(upstream, "fee_stats"));
         } else if (operation === "ledgers") {
             const params = {};
             if (query.order != null && query.order !== "") {
@@ -245,15 +247,15 @@ const proxyStellar = async ({ operation, accountId, query = {}, body, origin, au
                 if (!/^[A-Za-z0-9_-]{1,128}$/.test(String(query.cursor))) throw fail(400, "invalid_query", "invalid_query");
                 params.cursor = String(query.cursor);
             }
-            result = await forward("get", joinUrl(upstream, "ledgers"), { params });
+            result = await callUpstream("get", joinUrl(upstream, "ledgers"), { params });
         } else if (operation === "account") {
             if (!STELLAR_ACCOUNT.test(String(accountId || ""))) throw fail(400, "invalid_account", "invalid_account");
-            result = await forward("get", joinUrl(upstream, `accounts/${accountId}`));
+            result = await callUpstream("get", joinUrl(upstream, `accounts/${accountId}`));
         } else if (operation === "submit") {
             const tx = body && typeof body === "object" ? body.tx : typeof body === "string" ? body : "";
             if (!STELLAR_XDR.test(String(tx || ""))) throw fail(400, "invalid_transaction", "invalid_transaction");
             const encoded = new URLSearchParams({ tx: String(tx) }).toString();
-            result = await forward("post", joinUrl(upstream, "transactions"), {
+            result = await callUpstream("post", joinUrl(upstream, "transactions"), {
                 data: encoded,
                 headers: { "Content-Type": "application/x-www-form-urlencoded" },
             });
