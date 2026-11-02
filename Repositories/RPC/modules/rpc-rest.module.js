@@ -3,7 +3,9 @@ const { getCleanInstance } = require("../../../Core/axios");
 const RpcLog = require("../models/rpc-log.model");
 const RpcCallerModule = require("../../RPCCaller/modules/rpc-caller.module");
 const {
+    UPSTREAM_RESPONSE_MAX_BYTES,
     bitcoinUpstream,
+    isUpstreamResponseTooLarge,
     maxBodyBytes,
     redactSecrets,
     sanitizeUpstreamBody,
@@ -57,8 +59,7 @@ const forward = async (method, url, { data, headers, params, secretUrl } = {}) =
             params,
             headers,
             maxRedirects: 0,
-            // Blockbook UTXO lists for a few addresses (notably the genesis address) exceed this.
-            maxContentLength: 2 * 1024 * 1024,
+            maxContentLength: UPSTREAM_RESPONSE_MAX_BYTES,
             maxBodyLength: maxBodyBytes(),
             validateStatus: (status) => status >= 200 && status < 600,
             responseType: "json",
@@ -80,8 +81,37 @@ const forward = async (method, url, { data, headers, params, secretUrl } = {}) =
         return { status: response.status, body: sanitized.body, contentType: kind };
     } catch (error) {
         if (error.status) throw error;
+        if (isUpstreamResponseTooLarge(error)) {
+            throw fail(413, "Upstream response is too large", "RESPONSE_TOO_LARGE");
+        }
         throw fail(502, "RPC upstream request failed", "rpc_upstream_failed");
     }
+};
+
+const BTC_ROUTE = {
+    utxo: "GET /btc/:network/address/:address/utxo",
+    "blockbook-utxo": "GET /btc/:network/api/v2/utxo/:address",
+    "tx-hex": "GET /btc/:network/tx/:txid/hex",
+    broadcast: "POST /btc/:network/tx",
+    "blockbook-send": "POST /btc/:network/api/v2/sendtx",
+    "blockbook-address": "GET /btc/:network/api/v2/address/:address",
+    "blockbook-tx": "GET /btc/:network/api/v2/tx/:txid",
+    "blockbook-tx-specific": "GET /btc/:network/api/v2/tx-specific/:txid",
+    "blockbook-block": "GET /btc/:network/api/v2/block/:blockId",
+    "blockbook-block-index": "GET /btc/:network/api/v2/block-index/:blockId",
+};
+
+const STELLAR_ROUTE = {
+    root: "GET /stellar",
+    fee_stats: "GET /stellar/fee_stats",
+    ledgers: "GET /stellar/ledgers",
+    account: "GET /stellar/accounts/:accountId",
+    submit: "POST /stellar/transactions",
+};
+
+const warnIfResponseTooLarge = (error, chain, route) => {
+    if (error?.clientCode !== "RESPONSE_TOO_LARGE") return;
+    console.warn("[RPC proxy] upstream response too large", { chain, route });
 };
 
 const readHex = (body, rawBody) => {
@@ -196,6 +226,7 @@ const proxyBitcoin = async ({ network, operation, address, txid, blockId, query 
         });
         return result;
     } catch (error) {
+        warnIfResponseTooLarge(error, logBase.chain, BTC_ROUTE[operation] || operation);
         audit({
             ...logBase,
             method: operation,
@@ -271,6 +302,7 @@ const proxyStellar = async ({ operation, accountId, query = {}, body, origin, au
         });
         return result;
     } catch (error) {
+        warnIfResponseTooLarge(error, logBase.chain, STELLAR_ROUTE[operation] || operation);
         audit({
             ...logBase,
             method: operation,

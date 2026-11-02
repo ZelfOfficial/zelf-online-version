@@ -267,6 +267,11 @@ const stellarUpstream = () => envUrl("EXTENSION_STELLAR_HORIZON_URL");
 
 const methodsForKind = (kind) => METHODS_BY_KIND[kind] || [];
 
+/** Largest upstream body the proxy will buffer. */
+const UPSTREAM_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
+
+const isUpstreamResponseTooLarge = (error) => String(error?.message || "").startsWith("maxContentLength size of ");
+
 const maxBodyBytes = () => {
     const n = Number(process.env.RPC_PROXY_MAX_BODY_BYTES);
     return Number.isFinite(n) && n >= 1024 ? Math.min(n, 1024 * 1024) : 262144;
@@ -379,6 +384,8 @@ module.exports = {
     sanitizeUpstreamBody,
     extensionChains,
     legacyChains,
+    UPSTREAM_RESPONSE_MAX_BYTES,
+    isUpstreamResponseTooLarge,
     maxBatch,
     maxBodyBytes,
     methodsForKind,

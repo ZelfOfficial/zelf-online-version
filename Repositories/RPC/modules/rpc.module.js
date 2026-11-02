@@ -4,8 +4,10 @@ const RpcLog = require("../models/rpc-log.model");
 const RpcCallerModule = require("../../RPCCaller/modules/rpc-caller.module");
 const { translateSuiJsonRpc } = require("../../sui/modules/sui-jsonrpc.module");
 const {
+    UPSTREAM_RESPONSE_MAX_BYTES,
     bodyContainsUpstreamSecret,
     extensionChains,
+    isUpstreamResponseTooLarge,
     legacyChains,
     maxBodyBytes,
     methodsForKind,
@@ -210,7 +212,7 @@ const forwardRequest = async ({ chain, chainId, method, params = [], origin, pur
                 headers: { "Content-Type": "application/json" },
                 maxRedirects: 0,
                 maxBodyLength: maxBodyBytes(),
-                maxContentLength: 2 * 1024 * 1024,
+                maxContentLength: UPSTREAM_RESPONSE_MAX_BYTES,
             }
         );
 
@@ -241,6 +243,13 @@ const forwardRequest = async ({ chain, chainId, method, params = [], origin, pur
             upstreamId: data?.id ?? rpcId ?? 1,
         };
     } catch (error) {
+        if (!error.status && isUpstreamResponseTooLarge(error)) {
+            console.warn("[RPC proxy] upstream response too large", {
+                chain: resolvedChain.key,
+                route: upstreamMethod,
+            });
+            error = fail(413, "Upstream response is too large", "RESPONSE_TOO_LARGE");
+        }
         const status = error.status || 502;
         persistRpcAudit({
             ...logContext,

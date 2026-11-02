@@ -130,6 +130,29 @@ describe("RPC proxy policy", () => {
         expect(post).not.toHaveBeenCalled();
     });
 
+    it("returns RESPONSE_TOO_LARGE when the JSON-RPC body exceeds the cap", async () => {
+        const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+        post.mockRejectedValue(Object.assign(new Error("maxContentLength size of 2097152 exceeded"), {
+            config: { url: "https://rpc.test/ethereum/secret-token-value" },
+        }));
+
+        await expect(
+            forwardRequest({ chain: "ethereum", method: "eth_chainId", params: [] }, {}, { useExtensionRpc: true })
+        ).rejects.toMatchObject({
+            status: 413,
+            clientCode: "RESPONSE_TOO_LARGE",
+            message: "Upstream response is too large",
+        });
+
+        expect(warn).toHaveBeenCalledWith("[RPC proxy] upstream response too large", {
+            chain: "ethereum",
+            route: "eth_chainId",
+        });
+        expect(JSON.stringify(warn.mock.calls)).not.toContain("secret-token-value");
+        expect(post.mock.calls[0][2].maxContentLength).toBe(2 * 1024 * 1024);
+        warn.mockRestore();
+    });
+
     it("drops upstream errors that echo the provider URL", async () => {
         post.mockResolvedValue({
             data: { error: { code: -32000, message: "down https://rpc.test/ethereum/secret-token-value" } },
