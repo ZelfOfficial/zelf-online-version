@@ -153,4 +153,150 @@ describe("bitcoin and stellar RPC proxy", () => {
         expect(leaked.body).toEqual({ error: "upstream_error" });
         expect(JSON.stringify(leaked.body)).not.toContain("secret-token-value");
     });
+
+    describe("Horizon _links that point at the upstream", () => {
+        const UPSTREAM = "https://example.stellar-mainnet.quiknode.pro/abcdefghijklmnopqrstuvwxyz012345";
+        const abs = (path) => `${UPSTREAM}${path}`;
+        const TX_HASH = "ab".repeat(32);
+
+        const assertNoUpstream = (body) => {
+            const text = JSON.stringify(body);
+            expect(text).not.toContain("quiknode");
+            expect(text).not.toContain("abcdefghijklmnopqrstuvwxyz012345");
+            expect(text).not.toContain("example.stellar-mainnet");
+        };
+
+        beforeEach(() => {
+            process.env.EXTENSION_STELLAR_HORIZON_URL = UPSTREAM;
+        });
+
+        it("returns a ledgers page with base reserve and relative links", async () => {
+            request.mockResolvedValue({
+                status: 200,
+                headers: { "content-type": "application/json" },
+                data: {
+                    _links: {
+                        self: { href: abs("/ledgers?order=desc&limit=1") },
+                        next: { href: abs("/ledgers?order=desc&limit=1&cursor=123") },
+                        prev: { href: abs("/ledgers?order=asc&limit=1&cursor=123") },
+                    },
+                    _embedded: {
+                        records: [
+                            {
+                                _links: { self: { href: abs("/ledgers/123") } },
+                                sequence: 123,
+                                base_reserve_in_stroops: 5000000,
+                            },
+                        ],
+                    },
+                },
+            });
+
+            const result = await proxyStellar({ operation: "ledgers", query: { order: "desc", limit: "1" } });
+
+            expect(result.status).toBe(200);
+            expect(result.body._embedded.records[0].base_reserve_in_stroops).toBe(5000000);
+            expect(result.body._links.self.href).toBe("/ledgers?order=desc&limit=1");
+            expect(result.body._embedded.records[0]._links.self.href).toBe("/ledgers/123");
+            assertNoUpstream(result.body);
+        });
+
+        it("returns an account loadAccount needs, with relative links", async () => {
+            request.mockResolvedValue({
+                status: 200,
+                headers: { "content-type": "application/json" },
+                data: {
+                    _links: {
+                        self: { href: abs(`/accounts/${ACCOUNT}`) },
+                        transactions: {
+                            href: abs(`/accounts/${ACCOUNT}/transactions{?cursor,limit,order}`),
+                            templated: true,
+                        },
+                    },
+                    id: ACCOUNT,
+                    account_id: ACCOUNT,
+                    sequence: "998877665544",
+                    balances: [{ balance: "10.0000000", asset_type: "native" }],
+                },
+            });
+
+            const result = await proxyStellar({ operation: "account", accountId: ACCOUNT });
+
+            expect(result.status).toBe(200);
+            expect(result.body.sequence).toBe("998877665544");
+            expect(result.body.balances[0].balance).toBe("10.0000000");
+            expect(result.body.account_id).toBe(ACCOUNT);
+            expect(result.body._links.self.href).toBe(`/accounts/${ACCOUNT}`);
+            expect(result.body._links.transactions.templated).toBe(true);
+            assertNoUpstream(result.body);
+        });
+
+        it("returns the Horizon root document with relative links", async () => {
+            request.mockResolvedValue({
+                status: 200,
+                headers: { "content-type": "application/json" },
+                data: {
+                    _links: {
+                        self: { href: `${UPSTREAM}/` },
+                        account: { href: abs("/accounts/{account_id}"), templated: true },
+                        ledgers: { href: abs("/ledgers{?cursor,limit,order}"), templated: true },
+                        docs: { href: "https://stellar.org/horizon" },
+                    },
+                    horizon_version: "2.31.0",
+                    network_passphrase: "Public Global Stellar Network ; September 2015",
+                },
+            });
+
+            const result = await proxyStellar({ operation: "root" });
+
+            expect(result.status).toBe(200);
+            expect(result.body.horizon_version).toBe("2.31.0");
+            expect(result.body.network_passphrase).toContain("Public Global Stellar Network");
+            expect(result.body._links.self.href).toBe("/");
+            expect(result.body._links.account.href).toBe("/accounts/{account_id}");
+            expect(result.body._links.docs.href).toBe("https://stellar.org/horizon");
+            assertNoUpstream(result.body);
+        });
+
+        it("returns a transaction submit result with a relative link", async () => {
+            request.mockResolvedValue({
+                status: 200,
+                headers: { "content-type": "application/hal+json" },
+                data: {
+                    _links: { transaction: { href: abs(`/transactions/${TX_HASH}`) } },
+                    hash: TX_HASH,
+                    ledger: 456,
+                    envelope_xdr: "AAAA",
+                    result_xdr: "AAAA",
+                },
+            });
+
+            const result = await proxyStellar({ operation: "submit", body: { tx: "A".repeat(80) } });
+
+            expect(result.status).toBe(200);
+            expect(result.body.hash).toBe(TX_HASH);
+            expect(result.body.ledger).toBe(456);
+            expect(result.body.envelope_xdr).toBe("AAAA");
+            expect(result.body._links.transaction.href).toBe(`/transactions/${TX_HASH}`);
+            assertNoUpstream(result.body);
+        });
+
+        it("still replaces a body that leaks the upstream outside _links", async () => {
+            request.mockResolvedValue({
+                status: 500,
+                headers: { "content-type": "application/json" },
+                data: {
+                    _links: { self: { href: abs("/fee_stats") } },
+                    detail: `failed at ${UPSTREAM}/internal`,
+                },
+            });
+
+            const result = await proxyStellar({ operation: "fee_stats" });
+
+            expect(result.status).toBe(500);
+            expect(result.body).toEqual({ error: "upstream_error" });
+            expect(JSON.stringify(result.body)).not.toContain("abcdefghijklmnopqrstuvwxyz012345");
+            expect(JSON.stringify(result.body)).not.toContain("quiknode");
+        });
+    });
 });
