@@ -14,6 +14,7 @@ jest.mock("../../Repositories/RPCCaller/modules/rpc-caller.module", () => ({
 }));
 
 const { getCleanInstance } = require("../../Core/axios");
+const { UPSTREAM_RESPONSE_MAX_BYTES } = require("../../Core/rpc-upstreams");
 const RpcCaller = require("../../Repositories/RPCCaller/modules/rpc-caller.module");
 const { proxyBitcoin, proxyStellar } = require("../../Repositories/RPC/modules/rpc-rest.module");
 
@@ -103,6 +104,49 @@ describe("bitcoin and stellar RPC proxy", () => {
         expect(result).toMatchObject({ status: 200, body: TXID });
         expect(request.mock.calls[0][0].data).toBe(raw);
         expect(request.mock.calls[0][0].headers["Content-Type"]).toBe("text/plain");
+    });
+
+    it("returns RESPONSE_TOO_LARGE when a Blockbook body exceeds the cap", async () => {
+        const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+        const tooLarge = Object.assign(new Error(`maxContentLength size of ${UPSTREAM_RESPONSE_MAX_BYTES} exceeded`), {
+            code: "ERR_BAD_RESPONSE",
+            config: { url: "https://blockbook.test/mainnet/secret-token-value/api/v2/utxo/1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa" },
+        });
+        request.mockRejectedValue(tooLarge);
+
+        await expect(
+            proxyBitcoin({
+                network: "mainnet",
+                operation: "utxo",
+                address: ADDRESS,
+                query: {},
+            })
+        ).rejects.toMatchObject({
+            status: 413,
+            clientCode: "RESPONSE_TOO_LARGE",
+            message: "Upstream response is too large",
+        });
+
+        expect(request.mock.calls[0][0].maxContentLength).toBe(2 * 1024 * 1024);
+        expect(warn).toHaveBeenCalledWith("[RPC proxy] upstream response too large", {
+            chain: "btc",
+            route: "GET /btc/:network/address/:address/utxo",
+        });
+        expect(JSON.stringify(warn.mock.calls)).not.toContain("secret-token-value");
+        expect(JSON.stringify(warn.mock.calls)).not.toContain("http");
+        warn.mockRestore();
+    });
+
+    it("keeps other upstream failures as rpc_upstream_failed", async () => {
+        const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+        request.mockRejectedValue(new Error("socket hang up"));
+
+        await expect(proxyBitcoin({ network: "mainnet", operation: "utxo", address: ADDRESS, query: {} })).rejects.toMatchObject({
+            status: 502,
+            clientCode: "rpc_upstream_failed",
+        });
+        expect(warn).not.toHaveBeenCalled();
+        warn.mockRestore();
     });
 
     it("rejects bitcoin paths and methods outside the allowlist", async () => {
