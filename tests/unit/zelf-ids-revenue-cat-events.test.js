@@ -35,7 +35,7 @@ jest.mock("../../Repositories/ZelfID/models/revenue-cat-processed-event.model", 
 
 jest.mock("../../Repositories/Tags/config/supported-domains", () => {
     const { Domain } = jest.requireActual("../../Repositories/Tags/modules/domain.class");
-    const cells = { 1: 29, 2: 43.49, 3: 56.99, lifetime: 144.99 };
+    const cells = { 1: 29, 2: 43.49, 3: 56.99, 4: 69.49, 5: 80.99, lifetime: 144.99 };
     const license = { name: "zelf", tags: { payment: { planPricing: { premium: { "6-27": cells }, unlimited: { "1-27": cells } } } } };
     return { getDomainConfig: jest.fn(() => Object.assign(new Domain(license), { getTagKey: () => "tagName" })) };
 });

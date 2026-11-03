@@ -15,7 +15,6 @@ jest.mock("../../Repositories/Tags/modules/tags-ipfs.module", () => ({
 const moment = require("moment");
 const TagsSearchModule = require("../../Repositories/Tags/modules/tags-search.module");
 const { searchTag, previewTag } = require("../../Repositories/ZelfID/modules/zelf-id.module");
-const { getZelfIdCheckoutPrice } = require("../../Repositories/ZelfID/modules/zelf-id-plan.module");
 const { Domain } = require("../../Repositories/Tags/modules/domain.class");
 
 const buildDomainConfig = () => {
@@ -81,15 +80,12 @@ describe("zelf-id search available pricing", () => {
 		});
 	};
 
-	const paymentOptionsUsd = (bare) =>
-		getZelfIdCheckoutPrice({ tagName: `${bare}.zelf`, duration: "1", domainConfig }).price;
-
 	test.each([
-		["abc", 3, 30],
-		["abcd", 4, 30],
-		["abcde", 5, 30],
-		["ninechars", 9, 24],
-	])("GET search available %i-char name uses Zelf ID upgrade USD (not Tags default table)", async (bare, length, tagsTableUsd) => {
+		["abc", 3, 30, 1, true],
+		["abcd", 4, 30, 1, true],
+		["abcde", 5, 30, 1, true],
+		["ninechars", 9, 24, 100, false],
+	])("GET search available %i-char name is free (price 0), not the Tags table", async (bare, length, tagsTableUsd, termYears, shortName) => {
 		expect(length).toBe(bare.length);
 		mockAvailableTagsSearch(bare, tagsTableUsd);
 
@@ -100,8 +96,18 @@ describe("zelf-id search available pricing", () => {
 		expect(result.allowedPlans).toEqual(length <= 5 ? ["free", "unlimited"] : ["free", "premium", "unlimited"]);
 		expect(result.price.plan).toBe("free");
 		expect(result.price.allowedPlans).toEqual(result.allowedPlans);
-		expect(result.price.price).toBe(paymentOptionsUsd(bare));
+		expect(result.price.price).toBe(0);
+		expect(result.price.reward).toBe(0);
+		expect(result.price.currency).toBe("USD");
 		expect(result.price.price).not.toBe(tagsTableUsd);
+		expect(result.price.quotedPlan).toBeUndefined();
+		expect(result.plans.free).toEqual({ price: 0, termYears, currency: "USD" });
+		expect(result.eligibility).toEqual({
+			premium: length > 5,
+			unlimited: true,
+			shortName,
+			freeTermYears: termYears,
+		});
 	});
 
 	test("preview passes through available search pricing", async () => {
@@ -110,8 +116,10 @@ describe("zelf-id search available pricing", () => {
 		const preview = await previewTag({ tagName: "abc", domain: "zelf", domainConfig }, {});
 
 		expect(preview.available).toBe(true);
-		expect(preview.price.price).toBe(paymentOptionsUsd("abc"));
+		expect(preview.price.price).toBe(0);
 		expect(preview.plan).toBe("free");
+		expect(preview.plans.free.termYears).toBe(1);
+		expect(preview.eligibility.shortName).toBe(true);
 	});
 });
 
@@ -219,17 +227,27 @@ describe("zelf-id search plan-aware pricing (license planPricing only)", () => {
 		TagsSearchModule.searchTag.mockResolvedValue({ available: true, tagName: "x" });
 	});
 
-	test("no plan: plans lists every offered plan for a long name; top-level price stays the default plan", async () => {
+	test("no plan: plans lists every offered plan for a long name; price is the free record", async () => {
 		const result = await searchTag({ tagName: "miguelito", domain: "zelf", domainConfig: licensed }, {});
-		expect(result.plans).toEqual({ premium: { 1: 11, 2: 22, lifetime: 33 }, unlimited: { 1: 44, 3: 55, lifetime: 66 } });
-		expect(result.price.price).toBe(11);
+		expect(result.plans.premium).toEqual({ 1: 11, 2: 22, lifetime: 33 });
+		expect(result.plans.unlimited).toEqual({ 1: 44, 3: 55, lifetime: 66 });
+		expect(result.plans.free).toEqual({ price: 0, termYears: 100, currency: "USD" });
+		expect(result.price.price).toBe(0);
+		expect(result.price.reward).toBe(0);
+		expect(result.price.quotedPlan).toBeUndefined();
 		expect(result.plan).toBe("free");
+		expect(result.eligibility).toEqual({ premium: true, unlimited: true, shortName: false, freeTermYears: 100 });
 	});
 
 	test("no plan: short name only lists the plans the license prices for it", async () => {
 		const result = await searchTag({ tagName: "abc", domain: "zelf", domainConfig: licensed }, {});
-		expect(result.plans).toEqual({ unlimited: { 1: 70, lifetime: 700 } });
-		expect(result.price.price).toBe(70);
+		expect(result.plans.premium).toBeUndefined();
+		expect(result.plans.unlimited).toEqual({ 1: 70, lifetime: 700 });
+		expect(result.plans.free).toEqual({ price: 0, termYears: 1, currency: "USD" });
+		expect(result.price.price).toBe(0);
+		expect(result.eligibility.shortName).toBe(true);
+		expect(result.eligibility.premium).toBe(false);
+		expect(result.eligibility.freeTermYears).toBe(1);
 	});
 
 	test("plan=unlimited quotes unlimited on a long name", async () => {
@@ -249,5 +267,128 @@ describe("zelf-id search plan-aware pricing (license planPricing only)", () => {
 		await expect(
 			searchTag({ tagName: "miguelito", domain: "zelf", domainConfig: licensed, plan: "premium", duration: "3" }, {})
 		).rejects.toThrow("409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE");
+	});
+
+	test("duration 4 is quoted only when the license has that cell", async () => {
+		await expect(
+			searchTag({ tagName: "miguelito", domain: "zelf", domainConfig: licensed, plan: "premium", duration: "4" }, {})
+		).rejects.toThrow("409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE");
+
+		const withFour = new Domain({
+			name: "zelf",
+			tags: {
+				payment: {
+					pricingTable: {},
+					planPricing: { premium: { "6-15": { 1: 11, 4: 70 } }, unlimited: { "6-15": { 1: 44, 4: 80 } } },
+					whitelist: {},
+				},
+			},
+		});
+		withFour.getTagKey = () => "tagName";
+		const quoted = await searchTag(
+			{ tagName: "miguelito", domain: "zelf", domainConfig: withFour, plan: "premium", duration: "4" },
+			{}
+		);
+		expect(quoted.price.price).toBe(70);
+		expect(quoted.price.quotedPlan).toBe("premium");
+		expect(quoted.plans.premium["4"]).toBe(70);
+		expect(quoted.plan).toBe("free");
+	});
+});
+
+describe("zelf-id search free term and domains without plan prices", () => {
+	const P = { 1: 29, 2: 43.49, 3: 56.99, 4: 69.49, 5: 80.99, lifetime: 144.99 };
+	const U = { 1: 99, 2: 148.99, 3: 192.99, 4: 236.99, 5: 276.99, lifetime: 494.99 };
+
+	const productionLike = (extra = {}) => {
+		const domain = new Domain({
+			name: "zelf",
+			tags: {
+				payment: {
+					rewardPrice: 10,
+					pricingTable: { "6-15": { 1: 24 } },
+					planPricing: {
+						premium: { "6-15": P, "16-27": P },
+						unlimited: { 1: U, 2: U, 3: U, 4: U, 5: U, "6-15": U, "16-27": U },
+					},
+					whitelist: {},
+				},
+			},
+			zelfkeys: extra.zelfkeys,
+		});
+		domain.getTagKey = () => "tagName";
+		return domain;
+	};
+
+	beforeEach(() => {
+		jest.clearAllMocks();
+		TagsSearchModule.searchTag.mockResolvedValue({ available: true, tagName: "x" });
+	});
+
+	test("12-character name is free, with premium and unlimited including 4y and 5y", async () => {
+		const domainConfig = productionLike({
+			zelfkeys: { planLimits: { free: { passwords: 5, zotp: 3 } } },
+		});
+		const result = await searchTag({ tagName: "abcdefghijkl", domain: "zelf", domainConfig }, {});
+		expect(result.price.price).toBe(0);
+		expect(result.price.reward).toBe(0);
+		expect(result.price.length).toBe(12);
+		expect(result.plans.free).toEqual({
+			price: 0,
+			termYears: 100,
+			currency: "USD",
+			limits: { passwords: 5, zotp: 3 },
+		});
+		expect(result.plans.premium).toEqual(P);
+		expect(result.plans.unlimited["4"]).toBe(236.99);
+		expect(result.plans.unlimited["5"]).toBe(276.99);
+		expect(result.eligibility).toEqual({ premium: true, unlimited: true, shortName: false, freeTermYears: 100 });
+	});
+
+	test("4-character name has no premium and a 1-year free term", async () => {
+		const domainConfig = productionLike({
+			zelfkeys: { planLimits: { free: { passwords: 5, zotp: 3 } } },
+		});
+		const result = await searchTag({ tagName: "xq7k", domain: "zelf", domainConfig }, {});
+		expect(result.price.price).toBe(0);
+		expect(result.plans.premium).toBeUndefined();
+		expect(result.plans.free.limits).toBeUndefined();
+		expect(result.plans.free.termYears).toBe(1);
+		expect(result.eligibility.premium).toBe(false);
+		expect(result.eligibility.shortName).toBe(true);
+		expect(result.eligibility.freeTermYears).toBe(1);
+		expect(result.allowedPlans).toEqual(["free", "unlimited"]);
+	});
+
+	test("plan=unlimited&duration=lifetime quotes that cell and keeps the record free", async () => {
+		const result = await searchTag(
+			{ tagName: "abcdefghijkl", domain: "zelf", domainConfig: productionLike(), plan: "unlimited", duration: "lifetime" },
+			{}
+		);
+		expect(result.price.price).toBe(494.99);
+		expect(result.price.quotedPlan).toBe("unlimited");
+		expect(result.price.plan).toBe("free");
+		expect(result.plan).toBe("free");
+	});
+
+	test("a domain with no planPricing is rejected for a new name and still returned when owned", async () => {
+		const avax = new Domain({
+			name: "avax",
+			status: "active",
+			tags: { payment: { pricingTable: { "6-15": { 1: 0.05 } }, planPricing: {} } },
+		});
+		avax.getTagKey = () => "tagName";
+
+		await expect(searchTag({ tagName: "newname", domain: "avax", domainConfig: avax }, {})).rejects.toThrow("409:DOMAIN_NOT_OFFERED");
+
+		TagsSearchModule.searchTag.mockResolvedValue({
+			available: false,
+			tagName: "owned",
+			tagObject: { publicData: { type: "mainnet", tagName: "owned.avax", plan: "free" } },
+		});
+		const owned = await searchTag({ tagName: "owned", domain: "avax", domainConfig: avax }, {});
+		expect(owned.available).toBe(false);
+		expect(owned.tagObject.publicData.tagName).toBe("owned.avax");
+		expect(owned.plans).toBeUndefined();
 	});
 });

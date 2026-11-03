@@ -7,7 +7,7 @@ const { extractZelfProofFromQR, generateQRFromZelfProof } = require("../../Tags/
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const ZelfIdModule = require("./zelf-id.module");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
-const { getBareName } = require("./zelf-id-plan.module");
+const { getBareName, assertDomainOfferedForNewNames } = require("./zelf-id-plan.module");
 const { expandStoredExtraParams } = require("../../Tags/modules/tags-addresses.module");
 const {
     normalizeTagName,
@@ -80,6 +80,8 @@ const leaseOffline = async (params, authUser) => {
 
     const domainConfig = getDomainConfig(domain);
     if (!domainConfig) throw new Error(`409:unsupported_domain`);
+    // Address sync updates an existing record. New offline leases still require plan prices.
+    if (!sync) assertDomainOfferedForNewNames(domainConfig);
 
     const tagKey = domainConfig.getTagKey() || "tagName";
 

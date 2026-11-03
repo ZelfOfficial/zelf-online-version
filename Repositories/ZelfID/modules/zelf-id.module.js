@@ -4,7 +4,6 @@ const { assertTagAvailable } = require("../../Tags/modules/tag-availability");
  * Field names stay `tagName` / `tagObject` for client compatibility with `/api/tags`.
  */
 const moment = require("moment");
-const { codedError } = require("../../../Core/http-handler");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
 const {
     NO_PASSWORD_PLACEHOLDER,
@@ -45,8 +44,8 @@ const {
     isUnpaidExpiredReservation,
     effectivePlan,
     getZelfIdPrice,
-    getZelfIdCheckoutPrice,
-    getBareNameLength,
+    applyAvailableNameOffer,
+    assertDomainOfferedForNewNames,
 } = require("./zelf-id-plan.module");
 
 /**
@@ -116,6 +115,7 @@ const leaseTag = async (params, authUser) => {
     const domainConfig = getDomainConfig(domain);
 
     if (!domainConfig) throw new Error(`Unsupported domain: ${domain}`);
+    assertDomainOfferedForNewNames(domainConfig);
 
     const tagKey = domainConfig.getTagKey() || "tagName";
 
@@ -588,71 +588,13 @@ const applyExpiredPlanDowngrade = (result, domainConfig) => {
 };
 
 /**
- * Available-name search/preview pricing via the Zelf ID license (not Tags `getPrice`).
- * `price` matches payment-options upgrade USD (`getZelfIdCheckoutPrice`); lease plan stays `free`.
+ * Available-name search/preview pricing. The record plan is free (`price.price` 0)
+ * unless the client asked for a paid plan. Dollars come only from `planPricing`.
  * @param {Object} result
  * @param {Object} context
- * @param {string} context.tagName
- * @param {string} [context.duration]
- * @param {Object} context.domainConfig
  * @returns {Object}
  */
-/**
- * Every paid plan the license prices for this name length, with each offered duration's USD price.
- * Plans, durations and length groups all come from the license `tags.payment.planPricing`.
- * @param {Object} domainConfig
- * @param {string} tagName
- * @returns {Record<string, Record<string, number>>} e.g. { premium: { "1": 29, lifetime: 144.99 }, unlimited: {...} }
- */
-const licensePlansForName = (domainConfig, tagName) => {
-    const planPricing = domainConfig?.tags?.payment?.planPricing;
-    if (!planPricing || typeof planPricing !== "object" || typeof domainConfig.licensePlanDurations !== "function") return {};
-
-    const length = getBareNameLength(tagName);
-    const plans = {};
-    for (const planName of Object.keys(planPricing)) {
-        const durations = domainConfig.licensePlanDurations(planName, length);
-        if (!durations.length) continue;
-        plans[planName] = Object.fromEntries(durations.map((d) => [d, domainConfig.licensePlanPrice(planName, length, d)]));
-    }
-    return plans;
-};
-
-const attachAvailableZelfIdPricing = (result, { tagName, duration, domainConfig, plan }) => {
-    if (!result?.available || !domainConfig) return result;
-
-    const plans = licensePlansForName(domainConfig, tagName);
-    const requestedPlan = typeof plan === "string" && plan.trim() && plan.trim().toLowerCase() !== "free" ? plan.trim().toLowerCase() : undefined;
-
-    // An explicit plan must be one the license prices for this length (same rule as payment-options).
-    if (requestedPlan && domainConfig?.tags?.payment?.planPricing && !plans[requestedPlan]) {
-        throw codedError("409:PLAN_NOT_OFFERED_FOR_NAME");
-    }
-
-    const upgradeQuote = getZelfIdCheckoutPrice({
-        tagName,
-        duration: duration || "1",
-        domainConfig,
-        requestedPlan,
-    });
-
-    // Record plan stays as today: an available name starts free. Only the quote follows `plan`.
-    const recordPlan = "free";
-    const price = {
-        ...upgradeQuote,
-        plan: recordPlan,
-        allowedPlans: upgradeQuote.allowedPlans,
-        ...(requestedPlan ? { quotedPlan: requestedPlan } : {}),
-    };
-
-    return {
-        ...result,
-        price,
-        plan: recordPlan,
-        allowedPlans: upgradeQuote.allowedPlans,
-        plans,
-    };
-};
+const attachAvailableZelfIdPricing = (result, context) => applyAvailableNameOffer(result, context);
 
 /**
  * Unpin an unpaid reservation whose window has passed and mark the name available.

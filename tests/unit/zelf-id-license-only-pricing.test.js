@@ -1,8 +1,8 @@
-const { Domain } = require("../../Repositories/Tags/modules/domain.class");
+const { Domain, filterOfferedDomains } = require("../../Repositories/Tags/modules/domain.class");
 const { getZelfIdCheckoutPrice, getZelfIdPrice, assertLicenseOffersPlan } = require("../../Repositories/ZelfID/modules/zelf-id-plan.module");
 
-const P = { 1: 29, 2: 43.49, 3: 56.99, lifetime: 144.99 };
-const U = { 1: 99, 2: 148.99, 3: 192.99, lifetime: 494.99 };
+const P = { 1: 29, 2: 43.49, 3: 56.99, 4: 69.49, 5: 80.99, lifetime: 144.99 };
+const U = { 1: 99, 2: 148.99, 3: 192.99, 4: 236.99, 5: 276.99, lifetime: 494.99 };
 const license = (planPricing) =>
     new Domain({
         name: "zelf",
@@ -31,10 +31,18 @@ describe("Zelf ID plan prices come only from license planPricing", () => {
 
     test("no fallback to the Tags pricingTable or the hardcoded 24", () => {
         const d = live();
-        expect(() => price(d, "abcdefgh.zelf", "4", "premium")).toThrow("409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE");
+        expect(price(d, "abcdefgh.zelf", "4", "premium")).toBe(69.49);
+        expect(price(d, "abcdefgh.zelf", "5", "unlimited")).toBe(276.99);
+        expect(price(d, "abcdefgh.zelf", "4", undefined)).toBe(77);
         expect(() => price(d, "abcd.zelf", "1", "premium")).toThrow("409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE");
         const empty = license(undefined);
         expect(() => price(empty, "abcdefgh.zelf", "1", "premium")).toThrow("409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE");
+        const withoutFour = license({
+            premium: { "6-15": { 1: 29, 2: 43.49, 3: 56.99, lifetime: 144.99 } },
+            unlimited: { "6-15": { 1: 99, 2: 148.99, 3: 192.99, lifetime: 494.99 } },
+        });
+        expect(() => price(withoutFour, "abcdefgh.zelf", "4", "premium")).toThrow("409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE");
+        expect(() => price(withoutFour, "abcdefgh.zelf", "5", "unlimited")).toThrow("409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE");
     });
 
     test("Tags (no plan) still use pricingTable", () => {
@@ -43,17 +51,20 @@ describe("Zelf ID plan prices come only from license planPricing", () => {
 
     test("durations are derived from the license cells", () => {
         const d = live();
-        expect(d.licensePlanDurations("premium", 8).sort()).toEqual(["1", "2", "3", "lifetime"]);
+        expect(d.licensePlanDurations("premium", 8).sort()).toEqual(["1", "2", "3", "4", "5", "lifetime"]);
         expect(d.licensePlanDurations("premium", 5)).toEqual([]);
-        expect(d.licensePlanDurations("unlimited", 3).sort()).toEqual(["1", "2", "3", "lifetime"]);
+        expect(d.licensePlanDurations("unlimited", 3).sort()).toEqual(["1", "2", "3", "4", "5", "lifetime"]);
         const withFour = license({ premium: { "6-15": { ...P, 4: 70 } } });
         expect(withFour.licensePlanDurations("premium", 8)).toContain("4");
         expect(price(withFour, "abcdefgh.zelf", "4", "premium")).toBe(70);
     });
 
-    test("assertLicenseOffersPlan rejects 4/5y and premium on 1–5", () => {
+    test("assertLicenseOffersPlan accepts 4/5y when the license has the cell and rejects premium on 1–5", () => {
         const d = live();
-        expect(() => assertLicenseOffersPlan({ domainConfig: d, tagName: "abcdefgh.zelf", plan: "premium", duration: "4" })).toThrow(
+        expect(() => assertLicenseOffersPlan({ domainConfig: d, tagName: "abcdefgh.zelf", plan: "premium", duration: "4" })).not.toThrow();
+        expect(() => assertLicenseOffersPlan({ domainConfig: d, tagName: "abcdefgh.zelf", plan: "unlimited", duration: "5" })).not.toThrow();
+        const withoutFour = license({ premium: { "6-15": { 1: 29 } }, unlimited: { "6-15": { 1: 99 } } });
+        expect(() => assertLicenseOffersPlan({ domainConfig: withoutFour, tagName: "abcdefgh.zelf", plan: "premium", duration: "4" })).toThrow(
             "409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE"
         );
         expect(() => assertLicenseOffersPlan({ domainConfig: d, tagName: "abcde.zelf", plan: "premium", duration: "1" })).toThrow(
@@ -65,8 +76,11 @@ describe("Zelf ID plan prices come only from license planPricing", () => {
     test("search/checkout quotes", () => {
         const d = live();
         expect(getZelfIdCheckoutPrice({ tagName: "abcdefgh.zelf", duration: "1", domainConfig: d }).price).toBe(29);
+        expect(getZelfIdCheckoutPrice({ tagName: "abcdefgh.zelf", duration: "4", domainConfig: d }).price).toBe(69.49);
+        expect(getZelfIdCheckoutPrice({ tagName: "abc.zelf", duration: "5", domainConfig: d }).price).toBe(276.99);
         expect(getZelfIdCheckoutPrice({ tagName: "abc.zelf", duration: "lifetime", domainConfig: d }).price).toBe(494.99);
-        expect(() => getZelfIdCheckoutPrice({ tagName: "abcdefgh.zelf", duration: "4", domainConfig: d })).toThrow("409:");
+        const withoutFour = license({ premium: { "6-15": { 1: 29 } }, unlimited: { 1: { 1: 99 }, "6-15": { 1: 99 } } });
+        expect(() => getZelfIdCheckoutPrice({ tagName: "abcdefgh.zelf", duration: "4", domainConfig: withoutFour })).toThrow("409:");
         expect(() => getZelfIdPrice({ tagName: "abc.zelf", duration: "1", domainConfig: d, requestedPlan: "premium" })).toThrow("409:");
     });
 
@@ -124,6 +138,17 @@ describe("Zelf ID plan prices come only from license planPricing", () => {
         expect(q.priceWithoutDiscount).toBe(99);
         expect(q.price).toBe(0);
         expect(q.reward).toBe(9.9);
+    });
+});
+
+describe("domains without plan prices are not offered", () => {
+    test("the public list keeps only licenses that have a planPricing cell", () => {
+        const offered = filterOfferedDomains({
+            zelf: live(),
+            bdag: live(),
+            avax: new Domain({ name: "avax", status: "active", tags: { payment: { planPricing: {}, pricingTable: { "6-15": { 1: 0.05 } } } } }),
+        });
+        expect(Object.keys(offered).sort()).toEqual(["bdag", "zelf"]);
     });
 });
 

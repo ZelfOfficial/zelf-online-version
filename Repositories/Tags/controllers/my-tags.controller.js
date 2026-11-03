@@ -75,12 +75,13 @@ const smartContractPaymentConfirmation = async (ctx) => {
  */
 const paymentOptions = async (ctx) => {
     try {
-        const { tagName, domain, duration } = ctx.request.query;
+        const { tagName, domain, duration, plan } = ctx.request.query;
 
         const reducedFeeRequested = Boolean(ctx.state.reducedFeeRequested);
 
         const data = await TagsPaymentModule.getPaymentOptions(tagName, domain, duration, ctx.state.user, {
             reducedFeeRequested,
+            plan,
         });
 
         ctx.body = { data };

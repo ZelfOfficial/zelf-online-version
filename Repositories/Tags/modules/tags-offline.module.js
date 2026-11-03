@@ -1,4 +1,5 @@
 const { getDomainConfig } = require("../config/supported-domains");
+const { assertDomainOfferedForNewNames } = require("../../ZelfID/modules/zelf-id-plan.module");
 const { assertTagAvailable } = require("./tag-availability");
 const { _findDuplicatedTag, _validateReferral, previewZelfProof, searchTag } = require("./tags.module");
 const TagsPartsModule = require("./tags-parts.module");
@@ -220,6 +221,8 @@ const leaseOfflineTag = async (params, authUser) => {
     let zelfProof = params.zelfProof;
 
     const domainConfig = getDomainConfig(domain);
+    // Address sync updates an existing record. A new offline lease still requires plan prices.
+    if (domainConfig && !sync) assertDomainOfferedForNewNames(domainConfig);
 
     const tagKey = domainConfig.getTagKey();
 

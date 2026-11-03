@@ -1,8 +1,8 @@
-// License-shaped planPricing: premium only for 6+, no 4/5-year cells. Plans/durations come from here.
+// License-shaped planPricing, including the approved 4-year and 5-year cells. Plans/durations come from here.
 jest.mock("../../Repositories/Tags/config/supported-domains", () => {
     const { Domain } = jest.requireActual("../../Repositories/Tags/modules/domain.class");
-    const premium = { 1: 29, 2: 43.49, 3: 56.99, lifetime: 144.99 };
-    const unlimited = { 1: 99, 2: 148.99, 3: 192.99, lifetime: 494.99 };
+    const premium = { 1: 29, 2: 43.49, 3: 56.99, 4: 69.49, 5: 80.99, lifetime: 144.99 };
+    const unlimited = { 1: 99, 2: 148.99, 3: 192.99, 4: 236.99, 5: 276.99, lifetime: 494.99 };
     const license = {
         name: "zelf",
         tags: {
@@ -90,6 +90,8 @@ describe("parseSubscriptionProductId", () => {
     test("maps v4 subscription and one-time product ids", () => {
         expect(parseSubscriptionProductId("zelf_premium_1y")).toEqual({ plan: "premium", duration: "1", subscription: true });
         expect(parseSubscriptionProductId("zelf_unlimited_3y")).toEqual({ plan: "unlimited", duration: "3", subscription: false });
+        expect(parseSubscriptionProductId("zelf_premium_4y")).toEqual({ plan: "premium", duration: "4", subscription: false });
+        expect(parseSubscriptionProductId("zelf_unlimited_5y")).toEqual({ plan: "unlimited", duration: "5", subscription: false });
         expect(parseSubscriptionProductId("zelf_premium_lifetime")).toEqual({ plan: "premium", duration: "lifetime", subscription: false });
         expect(parseSubscriptionProductId("zelf_premium_1y:zelf-premium-1y")).toEqual({ plan: "premium", duration: "1", subscription: true });
     });
@@ -375,11 +377,12 @@ describe("webhookHandler", () => {
         });
     });
 
-    test("plan validity comes from the license: premium 16-27 range ok, 4-year not sold", async () => {
+    test("plan validity comes from the license: 4-year and 5-year when the cell exists", async () => {
         const { licenseAllowsPlan } = require("../../Repositories/ZelfID/modules/zelf-ids-revenue-cat.module");
         expect(licenseAllowsPlan("zelf", "abcdefghijklmnopqrst", "premium", "1")).toBe(true);
         expect(licenseAllowsPlan("zelf", "abcde", "premium")).toBe(false);
         expect(licenseAllowsPlan("zelf", "abcde", "unlimited", "lifetime")).toBe(true);
-        expect(licenseAllowsPlan("zelf", "abcdefgh", "premium", "4")).toBe(false);
+        expect(licenseAllowsPlan("zelf", "abcdefgh", "premium", "4")).toBe(true);
+        expect(licenseAllowsPlan("zelf", "abcdefgh", "unlimited", "5")).toBe(true);
     });
 });

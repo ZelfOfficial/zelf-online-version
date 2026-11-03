@@ -33,7 +33,7 @@ describe("Lease Tags API Integration Tests - Real Server", () => {
 		it("should lease a tag with valid data", async () => {
 			const leaseData = {
 				tagName: `test${Date.now()}`,
-				domain: "avax",
+				domain: "zelf",
 				faceBase64: sampleFaceFromJSON.faceBase64,
 				type: "create",
 				os: "DESKTOP",
@@ -65,6 +65,26 @@ describe("Lease Tags API Integration Tests - Real Server", () => {
 			if (publicData && Object.keys(publicData).length) {
 				expect(Number(publicData.v)).toBe(3);
 			}
+		});
+
+		it("should reject a new .avax name", async () => {
+			const leaseData = {
+				tagName: `test${Date.now()}`,
+				domain: "avax",
+				faceBase64: sampleFaceFromJSON.faceBase64,
+				type: "create",
+				os: "DESKTOP",
+				removePGP: true,
+			};
+
+			const response = await request(API_BASE_URL)
+				.post("/api/tags/lease")
+				.set("Origin", "https://test.example.com")
+				.set("Authorization", `Bearer ${authToken}`)
+				.send(leaseData);
+
+			expect(response.status).toBe(409);
+			expect(response.body.code).toBe("DOMAIN_NOT_OFFERED");
 		});
 
 		it("should return validation error when tagName is missing", async () => {

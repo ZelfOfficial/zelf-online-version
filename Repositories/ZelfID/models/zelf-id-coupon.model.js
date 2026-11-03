@@ -28,7 +28,7 @@ const zelfIdCouponSchema = new mongoose.Schema({
         required: true,
     },
     durations: {
-        type: [{ type: String, enum: ["1y", "2y", "3y", "lifetime"] }],
+        type: [{ type: String, enum: ["1y", "2y", "3y", "4y", "5y", "lifetime"] }],
         default: [],
     },
     maxRedemptions: { type: Number, required: true, min: 1 },

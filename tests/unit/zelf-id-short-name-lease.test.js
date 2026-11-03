@@ -10,6 +10,11 @@ const licenseDomain = () => ({
 	getTagKey: () => "tagName",
 	name: "zelf",
 	isArweaveEnabled: () => false,
+	tags: {
+		payment: {
+			planPricing: { premium: { "6-15": { 1: 29 } }, unlimited: { "1-5": { 1: 99 }, "6-15": { 1: 99 } } },
+		},
+	},
 	getPrice: (tagName, duration, referralTagName, options = {}) => ({
 		duration: `${duration}`,
 		price: options.plan === "unlimited" ? 150 : 40,

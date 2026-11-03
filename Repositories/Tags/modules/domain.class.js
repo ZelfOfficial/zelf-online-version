@@ -211,6 +211,15 @@ class Domain {
     }
 
     /**
+     * True when this license sells at least one plan cell (`tags.payment.planPricing`).
+     * Domains with an empty table (live `.avax`) are not offered for new names.
+     * @returns {boolean}
+     */
+    offersPlanPricing() {
+        return domainOffersPlanPricing(this);
+    }
+
+    /**
      * Get domain price for specific tag length and duration
      * @param {string} tagName - Tag name
      * @param {string} duration - Duration ('1', '2', '3', '4', '5', 'lifetime')
@@ -639,8 +648,47 @@ class DomainFactory {
 // Create singleton instance (domains will be loaded when needed)
 const domainFactory = new DomainFactory();
 
+/**
+ * True when `tags.payment.planPricing` contains at least one numeric cell.
+ * An empty object is not an offer. No USD amount is invented here.
+ * @param {Object} [domainConfig]
+ * @returns {boolean}
+ */
+const domainOffersPlanPricing = (domainConfig) => {
+    const planPricing = domainConfig?.tags?.payment?.planPricing;
+    if (!planPricing || typeof planPricing !== "object" || Array.isArray(planPricing)) return false;
+
+    for (const table of Object.values(planPricing)) {
+        if (!table || typeof table !== "object" || Array.isArray(table)) continue;
+        for (const cells of Object.values(table)) {
+            if (!cells || typeof cells !== "object" || Array.isArray(cells)) continue;
+            for (const price of Object.values(cells)) {
+                if (typeof price === "number" && Number.isFinite(price)) return true;
+            }
+        }
+    }
+
+    return false;
+};
+
+/**
+ * Drop domains whose license has no plan prices (the public domains list).
+ * @param {Object} [domains]
+ * @returns {Object}
+ */
+const filterOfferedDomains = (domains) => {
+    if (!domains || typeof domains !== "object") return domains;
+    const offered = {};
+    for (const [name, config] of Object.entries(domains)) {
+        if (domainOffersPlanPricing(config)) offered[name] = config;
+    }
+    return offered;
+};
+
 module.exports = {
     Domain,
     DomainFactory,
     domainFactory,
+    domainOffersPlanPricing,
+    filterOfferedDomains,
 };

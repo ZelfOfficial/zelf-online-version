@@ -6,6 +6,7 @@ const { updateOldTagObject, sendEmailReceipt, extendLicenseForOwner } = require(
 const ZelfIdRecoveryModule = require("../modules/zelf-id-recovery.module");
 const TagsSearchModule = require("../../Tags/modules/tags-search.module");
 const { getAllSupportedDomains } = require("../../Tags/modules/domain-registry.module");
+const { filterOfferedDomains } = require("../../Tags/modules/domain.class");
 const { errorHandler } = require("../../../Core/http-handler");
 const configuration = require("../../../Core/config");
 const ZelfProofModule = require("../../ZelfProof/modules/zelf-proof.module");
@@ -355,15 +356,17 @@ const getDomains = async (ctx, next) => {
 
         const { includeNonPaid } = ctx.request.query;
 
-        const domains = getAllSupportedDomains(
-            licenses,
-            includeNonPaid !== undefined ? !Boolean(includeNonPaid === "true") : configuration.env === "development" ? false : true,
+        const domains = filterOfferedDomains(
+            getAllSupportedDomains(
+                licenses,
+                includeNonPaid !== undefined ? !Boolean(includeNonPaid === "true") : configuration.env === "development" ? false : true,
+            ),
         );
 
         ctx.body = { data: domains };
     } catch (error) {
         console.error("Error loading domains:", error);
-        const domains = getAllSupportedDomains();
+        const domains = filterOfferedDomains(getAllSupportedDomains());
         ctx.body = { data: domains };
     }
 

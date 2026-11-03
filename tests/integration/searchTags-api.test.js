@@ -151,8 +151,8 @@ describe("Search Tags API Integration Tests - Real Server", () => {
 
 			console.log("should search for tag in different domains (avax)", { response: response.body });
 
-			expect(response.status).toBe(200);
-			expect(response.body).toHaveProperty("data");
+			expect(response.status).toBe(409);
+			expect(response.body.code).toBe("DOMAIN_NOT_OFFERED");
 		});
 
 		it("should return validation error for BDAG domain name length", async () => {

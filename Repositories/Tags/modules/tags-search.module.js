@@ -29,7 +29,7 @@ const ARWEAVE_FAST_GRACE_MS = Number(process.env.TAGS_SEARCH_ARWEAVE_FAST_GRACE_
  */
 const searchTag = async (params, authUser) => {
     params = { ...params, environment: params.environment || "all", type: params.type || "both" };
-    const { tagName, domain, key, value, environment, type, duration } = params;
+    const { tagName, domain, key, value, environment, type, duration, plan } = params;
 
     let domainConfig = params.domainConfig || getDomainConfiguration(domain);
 
@@ -157,8 +157,17 @@ const searchTag = async (params, authUser) => {
             }
         }
 
-        if (combinedResults.available && domainConfig) {
-            combinedResults.price = domainConfig.getPrice(tagName, duration);
+        if (combinedResults.available && domainConfig && tagName) {
+            const { applyAvailableNameOffer } = require("../../ZelfID/modules/zelf-id-plan.module");
+            Object.assign(
+                combinedResults,
+                applyAvailableNameOffer(combinedResults, {
+                    tagName,
+                    duration: duration || "1",
+                    domainConfig,
+                    plan,
+                })
+            );
         }
 
         if (combinedResults.tagObject && combinedResults.tagObject.publicData?.zelfProof) {
@@ -194,6 +203,7 @@ const searchTag = async (params, authUser) => {
         const { readLeaseSearchResult } = require("../../ZelfID/modules/zelf-id-plan-term.module");
         return readLeaseSearchResult(combinedResults);
     } catch (error) {
+        if (error?.clientCode) throw error;
         console.error({ searchTag_error: error });
 
         return {

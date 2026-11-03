@@ -141,9 +141,13 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
     const domainConfig = getDomainConfig(domain);
 
     // Get current tag data
-    const tagData = await searchTag({ tagName, domain, domainConfig }, authUser);
+    const tagData = await searchTag(
+        { tagName, domain, domainConfig, duration, plan: requestOptions.plan },
+        authUser
+    );
 
-    if (tagData.available) throw new Error("404:tag_not_found");
+    // An unregistered name quotes the same free record as Zelf ID search (price 0, plans, eligibility).
+    if (tagData.available) return tagData;
 
     const tagObject = tagData.tagObject;
 
