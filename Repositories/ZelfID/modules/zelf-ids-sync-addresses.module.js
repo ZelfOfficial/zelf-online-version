@@ -66,6 +66,7 @@ const syncAddresses = async (params, authUser) => {
         syncPublicData,
         zelfProofQRCode: params.zelfProofQRCode,
         domain,
+        authUser,
     });
 };
 

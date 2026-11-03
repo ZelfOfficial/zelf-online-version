@@ -15,6 +15,7 @@ const {
 const { validateNetworkAddress } = require("../../TxNotifications/modules/address-validation.util");
 const HumanAuthnModule = require("../../HumanAuthn/modules/human-authn.module");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
+const { assertCanIntroduceNonEvmChains } = require("./zelf-id-chain-activation.module");
 
 const SYNC_FIELD_TO_NETWORK = {
     bitcoinAddress: "bitcoin",
@@ -306,14 +307,23 @@ const validateSyncPassword = async (zelfProof, params, authUser) => {
  * @param {Object} params.syncPublicData
  * @returns {Promise<{ updated: string[], rejected: Record<string, string> }>}
  */
-const applyAddressSyncToRecord = async ({ tagRecord, tagKey, syncPublicData, zelfProofQRCode, domain }) => {
+const applyAddressSyncToRecord = async ({ tagRecord, tagKey, syncPublicData, zelfProofQRCode, domain, authUser }) => {
     if (!listSyncAddressKeys(syncPublicData).length) {
         throwNoAddressesToSync();
     }
 
     const { rejected, accepted } = partitionSyncAddresses(syncPublicData);
     const beforePublicData = { ...tagRecord.tagObject.publicData };
+    const beforeView = expandPersistedAddressView(beforePublicData);
     const addressSource = buildAddressSourceFromSync(beforePublicData, accepted);
+    const domainConfig = getDomainConfig(domain || beforeView.domain || "zelf");
+
+    await assertCanIntroduceNonEvmChains({
+        before: beforeView,
+        after: addressSource,
+        domainConfig,
+        authUser,
+    });
 
     const tagObject = await repinOfflineAddressSync(tagRecord, tagKey, addressSource, {
         zelfProofQRCode,

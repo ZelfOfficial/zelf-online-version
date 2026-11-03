@@ -425,6 +425,16 @@ describe("Zelf Keys extra-slot purchase", () => {
         expect(usage.kinds.password.activeExtraSlots[0].expiresAt).toBe("2027-01-15T00:00:00.000Z");
         expect(usage.kinds.zotp).toMatchObject({ used: 1, limit: 3, extraSlots: 0, tokenCost: 20, canAdd: true });
         expect(usage.balanceAvailable).toBe(true);
+        expect(usage.passwords).toEqual({ count: 5, limit: 6 });
+        expect(usage.zotp).toEqual({ count: 1, limit: 3 });
+        expect(usage.swaps).toEqual({ count: 0, limit: null, periodKey: "2026-06" });
+        expect(usage.nonEvmChains).toBe(false);
+        expect(usage.upgrade).toEqual({
+            passwords: ["premium", "unlimited"],
+            zotp: ["premium", "unlimited"],
+            swaps: [],
+            nonEvmChains: ["premium", "unlimited"],
+        });
     });
 
     test("three parallel purchases with balance for one slot produce one success and no empty accounts", async () => {

@@ -58,6 +58,50 @@ const parseNonNegativeInt = (value, fallback) => {
 };
 
 /**
+ * Non-negative integer, or `null` when the cap is unlimited.
+ * Blank stays on `fallback`. The words `null` and `unlimited` store an unlimited cap.
+ * @param {string|number|null|undefined} value
+ * @param {number|null} fallback
+ * @returns {number|null}
+ */
+const parseNullableLimit = (value, fallback) => {
+    if (value === undefined || value === null || String(value).trim() === "") return fallback;
+    const raw = String(value).trim().toLowerCase();
+    if (raw === "null" || raw === "unlimited") return null;
+    const n = Math.floor(Number(raw));
+    return Number.isFinite(n) && n >= 0 ? n : fallback;
+};
+
+/**
+ * Boolean from env. Blank stays on `fallback`.
+ * @param {string|boolean|number|null|undefined} value
+ * @param {boolean} fallback
+ * @returns {boolean}
+ */
+const parseBool = (value, fallback) => {
+    if (value === undefined || value === null || String(value).trim() === "") return fallback;
+    if (typeof value === "boolean") return value;
+    const raw = String(value).trim().toLowerCase();
+    if (raw === "1" || raw === "true" || raw === "yes") return true;
+    if (raw === "0" || raw === "false" || raw === "no") return false;
+    return fallback;
+};
+
+/**
+ * LI.FI key. Deployments set `LIFI_API_KEY` or, in production, `LIFI_KEY`.
+ * A blank `LIFI_API_KEY` falls through to `LIFI_KEY`.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string|undefined}
+ */
+const resolveLifiApiKey = (env = process.env) => {
+    const primary = env.LIFI_API_KEY;
+    if (primary !== undefined && String(primary).trim() !== "") return String(primary).trim();
+    const alias = env.LIFI_KEY;
+    if (alias !== undefined && String(alias).trim() !== "") return String(alias).trim();
+    return undefined;
+};
+
+/**
  * USD price of one ZNS token. Presale, rewards, and subscription grants all use this rate.
  * Default matches the historical hard-coded presale and reward price.
  */
@@ -194,9 +238,14 @@ const configuration = {
         })(),
     },
     /**
-     * Zelf Keys vault caps (passwords and 2FA / zOTP) for the consumer Free, Premium,
-     * and Unlimited plans. `null` means unlimited. Slot USD targets convert to ZNS with
-     * `token.priceUsd` (ceil). A domain license may override a plan via `zelfkeys.planLimits`.
+     * Zelf ID plan caps for the consumer Free, Premium, and Unlimited plans.
+     * `null` means unlimited. Slot USD targets convert to ZNS with `token.priceUsd` (ceil).
+     * A domain license may override a plan via `zelfkeys.planLimits.<plan>`:
+     * `{ passwords, zotp, swapsPerMonth, nonEvmChains }`.
+     * `swapsPerMonth` counts successful LI.FI executions in the UTC month.
+     * `nonEvmChains` is whether the plan may activate a non-EVM chain that is not already on the name.
+     * Public docs do not state a monthly swap cap, so the fallback is unlimited (`null`) on every plan.
+     * Free may not activate a new non-EVM chain. Premium and Unlimited may.
      * This does not change what Stripe or RevenueCat charges for the plans themselves.
      */
     zelfKeysVault: {
@@ -209,14 +258,20 @@ const configuration = {
             free: {
                 passwords: parseNonNegativeInt(process.env.ZELF_KEYS_FREE_PASSWORD_LIMIT, 5),
                 zotp: parseNonNegativeInt(process.env.ZELF_KEYS_FREE_ZOTP_LIMIT, 3),
+                swapsPerMonth: parseNullableLimit(process.env.ZELF_ID_FREE_SWAPS_PER_MONTH, null),
+                nonEvmChains: parseBool(process.env.ZELF_ID_FREE_NON_EVM_CHAINS, false),
             },
             premium: {
                 passwords: parseNonNegativeInt(process.env.ZELF_KEYS_PREMIUM_PASSWORD_LIMIT, 100),
                 zotp: parseNonNegativeInt(process.env.ZELF_KEYS_PREMIUM_ZOTP_LIMIT, 20),
+                swapsPerMonth: parseNullableLimit(process.env.ZELF_ID_PREMIUM_SWAPS_PER_MONTH, null),
+                nonEvmChains: parseBool(process.env.ZELF_ID_PREMIUM_NON_EVM_CHAINS, true),
             },
             unlimited: {
                 passwords: null,
                 zotp: null,
+                swapsPerMonth: parseNullableLimit(process.env.ZELF_ID_UNLIMITED_SWAPS_PER_MONTH, null),
+                nonEvmChains: parseBool(process.env.ZELF_ID_UNLIMITED_NON_EVM_CHAINS, true),
             },
         },
     },
@@ -408,7 +463,7 @@ const configuration = {
     },
     lifi: {
         url: process.env.LIFI_API_URL || "https://li.quest/v1",
-        apiKey: process.env.LIFI_API_KEY,
+        apiKey: resolveLifiApiKey(),
         integrator: process.env.LIFI_INTEGRATOR,
     },
     fantom: {
@@ -858,3 +913,4 @@ module.exports.buildSubscriptionPricingMeta = buildSubscriptionPricingMeta;
 module.exports.DEFAULT_TOKEN_PRICE_USD = DEFAULT_TOKEN_PRICE_USD;
 module.exports.getTokenPriceUsd = getTokenPriceUsd;
 module.exports.resolveTokenPriceUsd = resolveTokenPriceUsd;
+module.exports.resolveLifiApiKey = resolveLifiApiKey;

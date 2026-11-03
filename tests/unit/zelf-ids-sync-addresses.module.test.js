@@ -122,7 +122,7 @@ describe("zelf-ids-sync-addresses.module", () => {
     });
 
     test("syncAddresses applies valid fields and reports partial rejection", async () => {
-        mockTagSearch();
+        mockTagSearch({ plan: "premium" });
         const syncPublicData = await buildSignedSync("qa99.zelf", {
             tonAddress: VALID_TON_B,
             btcAddress: "bad-btc",
@@ -149,7 +149,7 @@ describe("zelf-ids-sync-addresses.module", () => {
     });
 
     test("syncAddresses succeeds for a valid signature and multiple addresses", async () => {
-        mockTagSearch({ ethAddress: owner.address, tonAddress: undefined, btcAddress: undefined });
+        mockTagSearch({ plan: "premium", ethAddress: owner.address, tonAddress: undefined, btcAddress: undefined });
         const syncPublicData = await buildSignedSync("qa99.zelf", {
             tonAddress: VALID_TON_B,
             btcAddress: VALID_BTC,
@@ -159,5 +159,16 @@ describe("zelf-ids-sync-addresses.module", () => {
 
         expect(result.updated.sort()).toEqual(["bitcoin", "ton"].sort());
         expect(result.rejected).toEqual({});
+    });
+
+    test("syncAddresses rejects a new non-EVM chain on Free before it is stored", async () => {
+        mockTagSearch();
+        const syncPublicData = await buildSignedSync("qa99.zelf", { tonAddress: VALID_TON_B });
+
+        await expect(syncAddresses({ tagName: "qa99", domain: "zelf", syncPublicData }, {})).rejects.toMatchObject({
+            clientCode: "ERR_PLAN_LIMIT_REACHED",
+            details: { kind: "nonEvmChain", chain: "ton", plan: "free" },
+        });
+        expect(TagsIPFSModule.upsertSearchablePins).not.toHaveBeenCalled();
     });
 });
