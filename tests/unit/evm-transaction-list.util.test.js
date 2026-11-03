@@ -98,6 +98,7 @@ describe("evm-transaction-list.util", () => {
 
 		expect(row.fiatAmount).toBe("2500.00");
 		expect(row.timestamp).toBe(Math.floor(Date.parse("2024-01-01T00:00:00.000Z") / 1000));
+		expect(row.date).toBe("2024-01-01 00:00:00");
 	});
 
 	it("maps Blockscout rows with nested from/to and ISO timestamp", () => {
