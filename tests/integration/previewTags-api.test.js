@@ -165,7 +165,7 @@ describe("Preview Tags API Integration Tests - Real Server", () => {
 		});
 
 		it("should handle different domain types", async () => {
-			const domains = ["zelf", "avax", "bdag"];
+			const domains = ["zelf", "bdag"];
 
 			for (const domain of domains) {
 				const previewData = {

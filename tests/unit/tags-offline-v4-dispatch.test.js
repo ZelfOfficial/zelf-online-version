@@ -19,7 +19,12 @@ jest.mock("../../Repositories/Tags/modules/tags-parts.module", () => ({
 }));
 
 jest.mock("../../Repositories/Tags/config/supported-domains", () => ({
-    getDomainConfig: () => ({ getTagKey: () => "tagName", name: "zelf", getPrice: () => ({ price: 0 }) }),
+    getDomainConfig: () => ({
+        getTagKey: () => "tagName",
+        name: "zelf",
+        getPrice: () => ({ price: 0 }),
+        tags: { payment: { planPricing: { premium: { "6-15": { 1: 29 } } } } },
+    }),
 }));
 
 jest.mock("../../Repositories/Tags/modules/qr-zelfproof-extractor.module", () => ({

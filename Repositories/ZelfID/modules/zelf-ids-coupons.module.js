@@ -177,9 +177,9 @@ const createCoupon = async (input = {}, createdBy) => {
         throw httpError(409, "plans must be premium and/or unlimited", "VALIDATION_ERROR");
     }
     const durations = [...new Set((input.durations || []).map((duration) => String(duration).toLowerCase()))];
-    const allowedDurations = new Set(["1y", "2y", "3y", "lifetime"]);
+    const allowedDurations = new Set(["1y", "2y", "3y", "4y", "5y", "lifetime"]);
     if (durations.some((duration) => !allowedDurations.has(duration))) {
-        throw httpError(409, "durations must be 1y, 2y, 3y, or lifetime", "VALIDATION_ERROR");
+        throw httpError(409, "durations must be 1y, 2y, 3y, 4y, 5y, or lifetime", "VALIDATION_ERROR");
     }
     const maxRedemptions = Number(input.maxRedemptions);
     if (!Number.isInteger(maxRedemptions) || maxRedemptions < 1) {

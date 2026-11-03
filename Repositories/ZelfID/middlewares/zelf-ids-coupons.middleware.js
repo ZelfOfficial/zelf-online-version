@@ -14,7 +14,7 @@ const createSchema = Joi.object({
             "number.max": '"percentOff" must be between 1 and 100',
         }),
     plans: Joi.array().items(Joi.string().valid("premium", "unlimited")).min(1).unique().required(),
-    durations: Joi.array().items(Joi.string().valid("1y", "2y", "3y", "lifetime")).unique(),
+    durations: Joi.array().items(Joi.string().valid("1y", "2y", "3y", "4y", "5y", "lifetime")).unique(),
     maxRedemptions: Joi.number().integer().min(1).required(),
     perZelfIdLimit: Joi.number().integer().min(1),
     expiresAt: Joi.date().iso(),

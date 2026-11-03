@@ -6,6 +6,7 @@ const TagsRecoveryModule = require("../modules/tags-recovery.module");
 const TagsOfflineModule = require("../modules/tags-offline.module");
 const TagsSearchModule = require("../modules/tags-search.module");
 const { getAllSupportedDomains } = require("../modules/domain-registry.module");
+const { filterOfferedDomains } = require("../modules/domain.class");
 const { errorHandler } = require("../../../Core/http-handler");
 const configuration = require("../../../Core/config");
 const ZelfProofModule = require("../../ZelfProof/modules/zelf-proof.module");
@@ -392,15 +393,17 @@ const getDomains = async (ctx, next) => {
 
         const { includeNonPaid } = ctx.request.query;
 
-        const domains = getAllSupportedDomains(
-            licenses,
-            includeNonPaid !== undefined ? !Boolean(includeNonPaid === "true") : configuration.env === "development" ? false : true,
+        const domains = filterOfferedDomains(
+            getAllSupportedDomains(
+                licenses,
+                includeNonPaid !== undefined ? !Boolean(includeNonPaid === "true") : configuration.env === "development" ? false : true,
+            ),
         );
 
         ctx.body = { data: domains };
     } catch (error) {
         console.error("Error loading domains:", error);
-        const domains = getAllSupportedDomains();
+        const domains = filterOfferedDomains(getAllSupportedDomains());
         ctx.body = { data: domains };
     }
 

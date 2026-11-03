@@ -5,11 +5,14 @@
  *   zelf_premium_1y, zelf_unlimited_1y — auto-renewing subscription (+1 year per INITIAL_PURCHASE / RENEWAL)
  *   zelf_premium_2y, zelf_unlimited_2y — one-time (+2 years)
  *   zelf_premium_3y, zelf_unlimited_3y — one-time (+3 years)
+ *   zelf_premium_4y, zelf_unlimited_4y — one-time (+4 years), only when the license has a "4" cell
+ *   zelf_premium_5y, zelf_unlimited_5y — one-time (+5 years), only when the license has a "5" cell
  *   zelf_premium_lifetime, zelf_unlimited_lifetime — lifetime (100-year sentinel)
+ * Free is not a store product.
  */
 
 const SUBSCRIPTION_PRODUCT_RE = /^zelf_(premium|unlimited)_(1y)$/i;
-const ONE_TIME_PRODUCT_RE = /^zelf_(premium|unlimited)_(2y|3y|lifetime)$/i;
+const ONE_TIME_PRODUCT_RE = /^zelf_(premium|unlimited)_(2y|3y|4y|5y|lifetime)$/i;
 
 /** @type {Record<string, { plan: "premium"|"unlimited", duration: string, subscription: boolean }>} */
 const ZELF_ID_REVENUECAT_PRODUCT_MAP = Object.freeze({
@@ -19,6 +22,10 @@ const ZELF_ID_REVENUECAT_PRODUCT_MAP = Object.freeze({
     zelf_unlimited_2y: { plan: "unlimited", duration: "2", subscription: false },
     zelf_premium_3y: { plan: "premium", duration: "3", subscription: false },
     zelf_unlimited_3y: { plan: "unlimited", duration: "3", subscription: false },
+    zelf_premium_4y: { plan: "premium", duration: "4", subscription: false },
+    zelf_unlimited_4y: { plan: "unlimited", duration: "4", subscription: false },
+    zelf_premium_5y: { plan: "premium", duration: "5", subscription: false },
+    zelf_unlimited_5y: { plan: "unlimited", duration: "5", subscription: false },
     zelf_premium_lifetime: { plan: "premium", duration: "lifetime", subscription: false },
     zelf_unlimited_lifetime: { plan: "unlimited", duration: "lifetime", subscription: false },
 });

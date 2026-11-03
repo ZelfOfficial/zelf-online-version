@@ -27,6 +27,7 @@ const { resolveEncryptVersion } = require("./tags-addresses.module");
 
 const { generateHoldDomain } = require("./domain-registry.module");
 const { getDomainConfig } = require("../config/supported-domains");
+const { assertDomainOfferedForNewNames } = require("../../ZelfID/modules/zelf-id-plan.module");
 const TagsRegistrationModule = require("./tags-registration.module");
 const { extractZelfProofFromQR } = require("./qr-zelfproof-extractor.module");
 const SessionModule = require("../../Session/modules/session.module");
@@ -60,6 +61,7 @@ const leaseTag = async (params, authUser) => {
     const domainConfig = getDomainConfig(domain);
 
     if (!domainConfig) throw new Error(`Unsupported domain: ${domain}`);
+    assertDomainOfferedForNewNames(domainConfig);
 
     // Get tag key using the method
     const tagKey = domainConfig.getTagKey() || "tagName";
@@ -175,7 +177,7 @@ const leaseTag = async (params, authUser) => {
  * @param {Object} authUser
  */
 const searchTag = async (params, authUser) => {
-    const { tagName, domain, key, value, environment, type, domainConfig, duration, includeAllAddressPages } = params;
+    const { tagName, domain, key, value, environment, type, domainConfig, duration, includeAllAddressPages, plan } = params;
 
     try {
         const _domainConfig = domainConfig || getDomainConfig(domain);
@@ -190,6 +192,7 @@ const searchTag = async (params, authUser) => {
                 type: type || "both",
                 domainConfig: _domainConfig,
                 duration: duration || "1",
+                plan,
                 includeAllAddressPages,
             },
             authUser

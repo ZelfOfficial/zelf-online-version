@@ -5,7 +5,7 @@ const TagsIPFSModule = require("../../Tags/modules/tags-ipfs.module");
 const TagsArweaveModule = require("../../Tags/modules/tags-arweave.module");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { cleanExtraParamsForPinata, resolveEncryptVersion, stampExtraParamsVersion } = require("../../Tags/modules/tags-addresses.module");
-const { FREE_EXPIRATION_YEARS, getBareName, getReservationPinName, getReservationExpiresAt } = require("./zelf-id-plan.module");
+const { freeTermYearsForName, getBareName, getReservationPinName, getReservationExpiresAt } = require("./zelf-id-plan.module");
 const { formatLeaseDate } = require("../../Tags/modules/lease-date.util");
 
 const attachReferral = (metadata, referralTagObject, storageKey) => {
@@ -36,7 +36,9 @@ const confirmZelfId = async (tagObject, referralTagObject, domainConfig, securit
     const tagName = `${getBareName(tagObject[storageKey] || tagObject.tagName || tagObject.zelfName)}.${domain}`;
 
     const plan = options.plan || "free";
-    const expirationYears = plan === "free" ? FREE_EXPIRATION_YEARS : 1;
+    // New free leases: 1–5 characters use the short-name hold, 6+ use the 100-year free term.
+    // Paid plans keep the 1-year stamp this function already used. Existing pins are not rewritten.
+    const expirationYears = plan === "free" ? freeTermYearsForName(tagName, domainConfig) : 1;
 
     const extraParams = {
         origin: tagObject.origin || "online",
