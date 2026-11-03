@@ -527,7 +527,8 @@ const leaseConfirmation = async (params) => {
 };
 
 /**
- * Persist a Zelf ID lease: 1–27 characters confirm as `free` mainnet (`name.zelf`, 100-year sentinel).
+ * Persist a Zelf ID lease: 1–27 characters confirm as `free` mainnet (`name.zelf`).
+ * 1–5 characters expire after the short-name hold (1 year). 6–27 expire after 100 years.
  * Upgrade pricing stays on the license quote for search/checkout; lease pins are always free.
  * @param {Object} tagObject
  * @param {Object|null} referralTagObject

@@ -4,7 +4,7 @@ jest.mock("../../Repositories/Wallet/modules/stellar", () => ({
 }));
 
 const moment = require("moment");
-const { FREE_EXPIRATION_YEARS, getBareName } = require("../../Repositories/ZelfID/modules/zelf-id-plan.module");
+const { freeTermYearsForName, getBareName } = require("../../Repositories/ZelfID/modules/zelf-id-plan.module");
 
 const licenseDomain = () => ({
 	getTagKey: () => "tagName",
@@ -35,7 +35,8 @@ jest.mock("../../Repositories/ZelfID/modules/zelf-ids-registration.module", () =
 		const bare = getBareName(tagObject.tagName || tagObject.zelfName);
 		const tagName = `${bare}.zelf`;
 		const plan = options.plan || "free";
-		const expiresAt = moment().add(plan === "free" ? FREE_EXPIRATION_YEARS : 1, "year").format("YYYY-MM-DD HH:mm:ss");
+		const years = plan === "free" ? freeTermYearsForName(tagName, licenseDomain()) : 1;
+		const expiresAt = moment().add(years, "year").format("YYYY-MM-DD HH:mm:ss");
 		tagObject.ipfs = {
 			publicData: {
 				tagName,
@@ -90,7 +91,12 @@ const expectFreeMainnetLease = (publicData, bare) => {
 	expect(publicData.plan).toBe("free");
 	expect(publicData.type).toBe("mainnet");
 	const years = moment(publicData.expiresAt, "YYYY-MM-DD HH:mm:ss").diff(moment(), "year", true);
-	expect(years).toBeGreaterThanOrEqual(99);
+	if (bare.length <= 5) {
+		expect(years).toBeGreaterThan(0.9);
+		expect(years).toBeLessThan(1.2);
+	} else {
+		expect(years).toBeGreaterThanOrEqual(99);
+	}
 	expect(publicData.tagName).not.toMatch(/\.hold/i);
 };
 

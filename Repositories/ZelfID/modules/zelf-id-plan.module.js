@@ -3,7 +3,8 @@
  * Prices come from the domain license (`tags.payment.pricingTable` via
  * `domainConfig.getPrice`). Do not hardcode dollar amounts here.
  *
- * 1–5 and 6–27 characters lease as `free` with a 100-year sentinel. Short names
+ * 1–5 character names lease as `free` for the short-name hold (`ZELF_ID_RESERVATION_DURATION`, 1 year).
+ * 6–27 character names lease as `free` for `FREE_EXPIRATION_YEARS` (100). Short names
  * may upgrade to **unlimited** only; long names may choose premium or unlimited.
  * New leases no longer create `.hold` pins; existing holds still convert on payment.
  * An expired paid year reads as `plan: free`. Paid Lifetime stores 100 years from
@@ -36,8 +37,7 @@ const LIFETIME_EXPIRATION_YEARS = 100;
 /**
  * Names of this length or shorter are the short-name hold: free for the
  * reservation window (`ZELF_ID_RESERVATION_DURATION`, 1 year), not `FREE_EXPIRATION_YEARS`.
- * Lease (`confirmZelfId`) still stamps `FREE_EXPIRATION_YEARS` for every free plan,
- * including these names. Search reports this split; lease is unchanged.
+ * New free leases (`confirmZelfId`) use the same split. Already stored pins are not rewritten.
  */
 const SHORT_FREE_NAME_MAX_LENGTH = 5;
 const PAID_HORIZON_YEARS = 50;
@@ -329,7 +329,7 @@ const licensedFreeTermYears = (domainConfig, length) => {
  * Free registration term for this name.
  * 1–5 characters: short-name hold (`ZELF_ID_RESERVATION_DURATION`, 1 year unless the license says otherwise).
  * 6+ characters: `FREE_EXPIRATION_YEARS` (100) unless the license says otherwise.
- * `confirmZelfId` still stamps `FREE_EXPIRATION_YEARS` for every free lease. This helper does not change that.
+ * `confirmZelfId` uses this for new free leases. Paid terms and already stored pins are unchanged.
  * @param {string} [tagName]
  * @param {Object} [domainConfig]
  * @returns {number}
