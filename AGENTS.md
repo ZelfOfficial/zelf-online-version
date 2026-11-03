@@ -67,4 +67,5 @@ This is a Koa backend API with MongoDB, Mongoose, and JWT-protected routes.
 
 -   Backend source docs live in this repo (`README.md`, `tests/README.md`, `security/`, feature notes).
 -   Public API docs belong in `zelf-documentation/docs/api/`.
+-   Zelf ID plan caps for the caller are `GET /api/zelf-keys/limits` (same payload at `GET /api/zelf-ids/limits`). New non-EVM chains go through `POST /api/zelf-ids/chains/activate`.
 -   Zelf ID v4 plans (1–27 chars lease as `free` on mainnet; legacy `.hold` records still honored on payment/search), and payment routes: `zelf-documentation` Changelog (`2026-08-31-zelf-id-migration-v4`) and `docs/api/zelf-ids/unit-tests.md`. Source notes: `Repositories/ZelfID/README.md`.

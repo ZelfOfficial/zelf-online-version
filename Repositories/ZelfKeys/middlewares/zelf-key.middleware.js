@@ -719,6 +719,7 @@ module.exports = {
 	summaryValidation,
 	changeMasterPasswordValidation,
 	limitsValidation,
+	requireVerifiedWallet,
 	purchaseSlotValidation,
 	deleteZelfKeyValidation,
 };

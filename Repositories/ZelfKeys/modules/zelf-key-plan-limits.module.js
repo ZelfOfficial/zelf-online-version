@@ -6,6 +6,7 @@ const config = require("../../../Core/config");
 const { effectivePlan } = require("../../ZelfID/modules/zelf-id-plan.module");
 const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
 const SlotAccount = require("../models/zelf-key-slot-account.model");
+const SwapUsage = require("../../ZelfID/models/zelf-id-swap-usage.model");
 
 const PLAN_RANK = { free: 0, premium: 1, unlimited: 2 };
 const KINDS = new Set(["password", "zotp"]);
@@ -151,6 +152,15 @@ const limitField = (override, key, fallback) => {
     return Math.floor(n);
 };
 
+const boolField = (override, key, fallback) => {
+    if (!override || typeof override !== "object" || !Object.prototype.hasOwnProperty.call(override, key)) return fallback;
+    const value = override[key];
+    if (typeof value === "boolean") return value;
+    if (value === 1 || value === "true") return true;
+    if (value === 0 || value === "false") return false;
+    return fallback;
+};
+
 const planEntry = (plans, plan) => {
     if (!Array.isArray(plans)) return null;
     return (
@@ -162,16 +172,25 @@ const planEntry = (plans, plan) => {
     );
 };
 
+const FALLBACK_PLAN_LIMITS = {
+    passwords: 5,
+    zotp: 3,
+    swapsPerMonth: null,
+    nonEvmChains: false,
+};
+
 /**
- * Password and 2FA caps for a plan. Domain `zelfkeys.planLimits` (or a matching `zelfkeys.plans` row)
- * replaces only the fields it sets. `limits.zelfkeys` on the license is an org seat count and is not used here.
+ * Caps for a plan. Domain `zelfkeys.planLimits` (or a matching `zelfkeys.plans` row)
+ * replaces only the fields it sets. `null` on a count means unlimited.
+ * `nonEvmChains` is whether that plan may activate a new non-EVM chain.
+ * `limits.zelfkeys` on the license is an org seat count and is not used here.
  * @param {string} plan
  * @param {Object} [domainConfig]
- * @returns {{ passwords: number|null, zotp: number|null }}
+ * @returns {{ passwords: number|null, zotp: number|null, swapsPerMonth: number|null, nonEvmChains: boolean }}
  */
 const limitsForPlan = (plan, domainConfig) => {
     const normalized = normalizePlan(plan);
-    const base = config.zelfKeysVault?.plans?.[normalized] || config.zelfKeysVault?.plans?.free || { passwords: 5, zotp: 3 };
+    const base = config.zelfKeysVault?.plans?.[normalized] || config.zelfKeysVault?.plans?.free || FALLBACK_PLAN_LIMITS;
     const fromPlans = planEntry(domainConfig?.zelfkeys?.plans, normalized);
     const nested = fromPlans?.limits && typeof fromPlans.limits === "object" ? fromPlans.limits : fromPlans;
     const fromTable = domainConfig?.zelfkeys?.planLimits?.[normalized];
@@ -180,6 +199,35 @@ const limitsForPlan = (plan, domainConfig) => {
     return {
         passwords: limitField(override, "passwords", base.passwords),
         zotp: limitField(override, "zotp", base.zotp),
+        swapsPerMonth: limitField(override, "swapsPerMonth", base.swapsPerMonth === undefined ? null : base.swapsPerMonth),
+        nonEvmChains: boolField(override, "nonEvmChains", Boolean(base.nonEvmChains)),
+    };
+};
+
+const liftsNumericLimit = (current, candidate) => {
+    if (current === null) return false;
+    if (candidate === null) return true;
+    return candidate > current;
+};
+
+/**
+ * Higher plans whose cap is strictly above `plan` (`null` is above every number).
+ * A boolean capability is lifted when this plan is false and the higher plan is true.
+ * @param {string} plan
+ * @param {Object} [domainConfig]
+ * @returns {{ passwords: string[], zotp: string[], swaps: string[], nonEvmChains: string[] }}
+ */
+const upgradePlans = (plan, domainConfig) => {
+    const normalized = normalizePlan(plan);
+    const current = limitsForPlan(normalized, domainConfig);
+    const higher = Object.keys(PLAN_RANK).filter((name) => PLAN_RANK[name] > PLAN_RANK[normalized]);
+    const pick = (predicate) => higher.filter((name) => predicate(limitsForPlan(name, domainConfig)));
+
+    return {
+        passwords: pick((limits) => liftsNumericLimit(current.passwords, limits.passwords)),
+        zotp: pick((limits) => liftsNumericLimit(current.zotp, limits.zotp)),
+        swaps: pick((limits) => liftsNumericLimit(current.swapsPerMonth, limits.swapsPerMonth)),
+        nonEvmChains: pick((limits) => current.nonEvmChains === false && limits.nonEvmChains === true),
     };
 };
 
@@ -689,13 +737,182 @@ const purchaseExtraSlot = async (body, authUser, options = {}) => {
     };
 };
 
+const periodKeyFromDate = (date) => moment.utc(toDate(date)).format("YYYY-MM");
+
+const duplicateKeyError = (error) => {
+    const code = error?.code ?? error?.cause?.code;
+    if (code === 11000) return true;
+    const message = `${error?.message || ""} ${error?.cause?.message || ""}`;
+    return message.includes("E11000") || message.includes("duplicate key") || /must be unique/i.test(message);
+};
+
+let swapIndexesReady = null;
+/** Unique (zelfName, periodKey) is built explicitly. Production may leave mongoose autoIndex off. */
+const ensureSwapIndexes = () => {
+    if (mongoose.connection.readyState !== 1) return Promise.resolve();
+    if (!swapIndexesReady) {
+        swapIndexesReady = SwapUsage.createIndexes().catch((error) => {
+            swapIndexesReady = null;
+            throw error;
+        });
+    }
+    return swapIndexesReady;
+};
+
+const assertSwapStore = () => {
+    if (mongoose.connection.readyState !== 1) {
+        throw planError(503, "ERR_SWAP_STORE_UNAVAILABLE", "Swap store is unavailable");
+    }
+};
+
+/**
+ * Successful swaps already counted for this Zelf ID in the UTC month.
+ * @param {string} zelfName
+ * @param {string} periodKey
+ * @returns {Promise<number>}
+ */
+const readSwapCount = async (zelfName, periodKey) => {
+    if (mongoose.connection.readyState !== 1) {
+        if (process.env.NODE_ENV === "test") return 0;
+        throw planError(503, "ERR_SWAP_STORE_UNAVAILABLE", "Swap store is unavailable");
+    }
+    const doc = await SwapUsage.findOne({ zelfName, periodKey }).lean();
+    return Number(doc?.count) || 0;
+};
+
+const swapLimitReached = ({ plan, count, limit, periodKey }) =>
+    planError(409, "ERR_PLAN_LIMIT_REACHED", "Plan limit reached", {
+        kind: "swaps",
+        count,
+        limit,
+        plan,
+        periodKey,
+        tokenCost: null,
+        extraSlots: 0,
+    });
+
+/**
+ * Hold one successful-swap slot. `limit === null` never blocks.
+ * The caller releases the hold when the LI.FI request fails.
+ * @returns {Promise<{ count: number }>}
+ */
+const reserveSwap = async ({ identity, periodKey, limit, plan }) => {
+    assertSwapStore();
+    await ensureSwapIndexes();
+
+    if (limit !== null) {
+        const current = await readSwapCount(identity.zelfName, periodKey);
+        if (current >= limit) throw swapLimitReached({ plan, count: current, limit, periodKey });
+    }
+
+    const match =
+        limit === null
+            ? { zelfName: identity.zelfName, periodKey }
+            : { zelfName: identity.zelfName, periodKey, count: { $lt: limit } };
+
+    const incremented = await SwapUsage.findOneAndUpdate(match, { $inc: { count: 1 } }, { new: true }).lean();
+    if (incremented) return { count: incremented.count };
+
+    if (limit !== null) {
+        const current = await readSwapCount(identity.zelfName, periodKey);
+        if (current >= limit) throw swapLimitReached({ plan, count: current, limit, periodKey });
+    }
+
+    try {
+        const created = await SwapUsage.create({
+            zelfName: identity.zelfName,
+            domain: identity.domain,
+            tagName: identity.tagName,
+            periodKey,
+            count: 1,
+        });
+        return { count: created.count };
+    } catch (error) {
+        if (!duplicateKeyError(error)) throw error;
+        const raced = await SwapUsage.findOneAndUpdate(match, { $inc: { count: 1 } }, { new: true }).lean();
+        if (raced) return { count: raced.count };
+        const current = await readSwapCount(identity.zelfName, periodKey);
+        throw swapLimitReached({ plan, count: current, limit, periodKey });
+    }
+};
+
+const releaseSwap = async ({ zelfName, periodKey }) => {
+    if (mongoose.connection.readyState !== 1) return;
+    await SwapUsage.findOneAndUpdate({ zelfName, periodKey, count: { $gt: 0 } }, { $inc: { count: -1 } });
+};
+
+/**
+ * Reserve one swap, run `execute`, and release the reservation if it throws.
+ * A failed request is not counted. The reservation is what stops two callers
+ * from both passing the cap.
+ * GET /api/lifi/quote is a price lookup and is not an execution.
+ * The counted call is POST /api/lifi/execute-advanced-step-transaction,
+ * which asks LI.FI for the transaction the app signs.
+ * @param {Object} params
+ * @param {Object} params.authUser
+ * @param {Function} params.execute
+ * @returns {Promise<{ result: *, swaps: { count: number, limit: number|null, periodKey: string, plan: string } }>}
+ */
+const executeLimitedSwap = async ({ authUser, execute, ...options }) => {
+    const entitlement = await resolveEntitlement(authUser, options);
+    const limits = limitsForPlan(entitlement.plan, entitlement.domainConfig);
+    const periodKey = periodKeyFromDate(options.now);
+    let reserved = null;
+
+    reserved = await reserveSwap({
+        identity: entitlement.identity,
+        periodKey,
+        limit: limits.swapsPerMonth,
+        plan: entitlement.plan,
+    });
+
+    try {
+        const result = await execute();
+        const swaps = {
+            count: reserved.count,
+            limit: limits.swapsPerMonth,
+            periodKey,
+            plan: entitlement.plan,
+        };
+        reserved = null;
+        return { result, swaps };
+    } catch (error) {
+        if (reserved) {
+            try {
+                await releaseSwap({ zelfName: entitlement.identity.zelfName, periodKey });
+            } catch (releaseError) {
+                console.error("swap release failed:", releaseError?.message || releaseError);
+            }
+        }
+        throw error;
+    }
+};
+
+const presentPlanContract = ({ plan, domainConfig, passwordCount, passwordLimit, zotpCount, zotpLimit, swapCount, periodKey }) => {
+    const limits = limitsForPlan(plan, domainConfig);
+    return {
+        passwords: { count: passwordCount, limit: passwordLimit },
+        zotp: { count: zotpCount, limit: zotpLimit },
+        swaps: {
+            count: swapCount,
+            limit: limits.swapsPerMonth,
+            periodKey,
+        },
+        nonEvmChains: limits.nonEvmChains,
+        upgrade: upgradePlans(plan, domainConfig),
+    };
+};
+
 const getPlanUsage = async (authUser, counts, options = {}) => {
     const entitlement = await resolveEntitlement(authUser, options);
     const account = await loadAccount(entitlement.identity.zelfName);
     const { onChain, balanceAvailable } = await readBalanceForUsage(entitlement.publicData, options);
     const spent = account.spent || 0;
+    const periodKey = periodKeyFromDate(options.now);
+    const swapCount =
+        options.swapCount == null ? await readSwapCount(entitlement.identity.zelfName, periodKey) : Number(options.swapCount) || 0;
 
-    return buildUsage({
+    const usage = buildUsage({
         plan: entitlement.plan,
         counts,
         slots: account.slots,
@@ -708,6 +925,20 @@ const getPlanUsage = async (authUser, counts, options = {}) => {
         zelfName: entitlement.identity.zelfName,
         balanceAvailable,
     });
+
+    return {
+        ...usage,
+        ...presentPlanContract({
+            plan: usage.plan,
+            domainConfig: entitlement.domainConfig,
+            passwordCount: usage.kinds.password.used,
+            passwordLimit: usage.kinds.password.limit,
+            zotpCount: usage.kinds.zotp.used,
+            zotpLimit: usage.kinds.zotp.limit,
+            swapCount,
+            periodKey,
+        }),
+    };
 };
 
 module.exports = {
@@ -726,6 +957,13 @@ module.exports = {
     limitReachedError,
     normalizeKind,
     limitsForPlan,
+    upgradePlans,
+    periodKeyFromDate,
+    readSwapCount,
+    reserveSwap,
+    releaseSwap,
+    executeLimitedSwap,
+    ensureSwapIndexes,
     loadAccount,
     planError,
     purchaseExtraSlot,

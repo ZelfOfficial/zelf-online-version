@@ -7,6 +7,9 @@ const MonthlyAccessController = require("../controllers/zelf-id-monthly-access.c
 const Middleware = require("../middlewares/zelf-id.middleware");
 const MyPlanMiddleware = require("../middlewares/zelf-ids-my-plan.middleware");
 const MonthlyAccessMiddleware = require("../middlewares/zelf-id-monthly-access.middleware");
+const ChainMiddleware = require("../middlewares/zelf-id-chains.middleware");
+const ChainController = require("../controllers/zelf-id-chains.controller");
+const ZelfKeyMiddleware = require("../../ZelfKeys/middlewares/zelf-key.middleware");
 const FaceMiddleware = require("../../Face/middlewares/face.middleware");
 const RbacMiddleware = require("../../Tags/middlewares/rbac.middleware");
 
@@ -30,6 +33,12 @@ module.exports = (server) => {
     server.get(`${PATH}/wallet-balances`, Middleware.walletBalancesValidation, Controller.getWalletBalances);
 
     server.get(`${PATH}/my-plan`, MyPlanMiddleware.myPlanValidation, MyPlanController.myPlan);
+
+    server.get(`${PATH}/limits`, ZelfKeyMiddleware.limitsValidation, ChainController.limits);
+
+    server.get(`${PATH}/chains`, ChainMiddleware.statusValidation, ChainController.status);
+
+    server.post(`${PATH}/chains/activate`, ChainMiddleware.activateValidation, ChainController.activate);
 
     server.get(`${PATH}/monthly-access`, MonthlyAccessMiddleware.statusValidation, MonthlyAccessController.status);
 
