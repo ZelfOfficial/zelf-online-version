@@ -215,7 +215,10 @@ const buildStandardRow = ({
 		txnFee: formatDecimalString(txnFee, 8),
 		timestamp: ts,
 		blocktime: ts,
+		// Calendar day the wallet apps group on. A missing date is not the same as "now":
+		// clients that ignore `timestamp` were filing these rows under the current day.
 		age: ts ? moment(ts * 1000).fromNow() : "N/A",
+		date: ts ? moment.unix(ts).utc().format("YYYY-MM-DD HH:mm:ss") : "",
 		status: "Success",
 	};
 };
