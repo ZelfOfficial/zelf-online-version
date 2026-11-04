@@ -21,6 +21,8 @@ jest.mock("../../Repositories/Tags/modules/tags-arweave.module", () => ({
     tagRegistration: jest.fn(async () => null),
 }));
 
+jest.mock("stellar-hd-wallet", () => ({ default: {} }));
+
 const ZelfIdModule = require("../../Repositories/ZelfID/modules/zelf-id.module");
 const TagsIPFSModule = require("../../Repositories/Tags/modules/tags-ipfs.module");
 const { syncAddresses } = require("../../Repositories/ZelfID/modules/zelf-ids-sync-addresses.module");
@@ -122,7 +124,7 @@ describe("zelf-ids-sync-addresses.module", () => {
     });
 
     test("syncAddresses applies valid fields and reports partial rejection", async () => {
-        mockTagSearch({ plan: "premium" });
+        mockTagSearch();
         const syncPublicData = await buildSignedSync("qa99.zelf", {
             tonAddress: VALID_TON_B,
             btcAddress: "bad-btc",
@@ -149,7 +151,7 @@ describe("zelf-ids-sync-addresses.module", () => {
     });
 
     test("syncAddresses succeeds for a valid signature and multiple addresses", async () => {
-        mockTagSearch({ plan: "premium", ethAddress: owner.address, tonAddress: undefined, btcAddress: undefined });
+        mockTagSearch({ ethAddress: owner.address, tonAddress: undefined, btcAddress: undefined });
         const syncPublicData = await buildSignedSync("qa99.zelf", {
             tonAddress: VALID_TON_B,
             btcAddress: VALID_BTC,
@@ -161,14 +163,35 @@ describe("zelf-ids-sync-addresses.module", () => {
         expect(result.rejected).toEqual({});
     });
 
-    test("syncAddresses rejects a new non-EVM chain on Free before it is stored", async () => {
-        mockTagSearch();
-        const syncPublicData = await buildSignedSync("qa99.zelf", { tonAddress: VALID_TON_B });
-
-        await expect(syncAddresses({ tagName: "qa99", domain: "zelf", syncPublicData }, {})).rejects.toMatchObject({
-            clientCode: "ERR_PLAN_LIMIT_REACHED",
-            details: { kind: "nonEvmChain", chain: "ton", plan: "free" },
+    test("a Free offline registration can sync derived sui, xlm, and ton addresses", async () => {
+        mockTagSearch({
+            plan: "free",
+            type: "mainnet",
+            origin: "offline",
+            suiAddress: undefined,
+            xlmAddress: undefined,
+            tonAddress: undefined,
         });
-        expect(TagsIPFSModule.upsertSearchablePins).not.toHaveBeenCalled();
+        const syncPublicData = await buildSignedSync("qa99.zelf", {
+            suiAddress: "0x7ba661f0e68dcfa31c8c20f21d42bc0b973920ee79904bd5683c9259a9925fdf",
+            xlmAddress: "GA5XIGA5C7QTPTWXQHY6MCJRMTRZDOSHR6EFIBNDQTCQHG262N4GGKTM",
+            tonAddress: VALID_TON_B,
+        });
+        const ctx = {
+            status: 200,
+            state: { user: {}, extractedDomain: "zelf", extractedName: "qa99" },
+            request: { body: { tagName: "qa99.zelf", domain: "zelf", syncPublicData } },
+        };
+
+        const { syncAddresses: syncAddressesRoute } = require("../../Repositories/ZelfID/controllers/zelf-id.controller");
+        await syncAddressesRoute(ctx);
+
+        expect(ctx.status).toBe(200);
+        expect(ctx.body.updated.sort()).toEqual(["stellar", "sui", "ton"]);
+        expect(ctx.body.rejected).toEqual({});
+        const addresses = TagsIPFSModule.upsertSearchablePins.mock.calls.at(-1)[0].addresses;
+        expect(addresses.suiAddress).toBe("0x7ba661f0e68dcfa31c8c20f21d42bc0b973920ee79904bd5683c9259a9925fdf");
+        expect(addresses.xlmAddress).toBe("GA5XIGA5C7QTPTWXQHY6MCJRMTRZDOSHR6EFIBNDQTCQHG262N4GGKTM");
+        expect(addresses.tonAddress).toBe(VALID_TON_B);
     });
 });
