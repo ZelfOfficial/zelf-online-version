@@ -6,7 +6,7 @@ const config = require("../../../Core/config");
 
 // Create axios instance with timeout and better error handling
 const agent = new https.Agent({
-    rejectUnauthorized: false,
+    rejectUnauthorized: true,
 });
 
 const instance = axios.create({

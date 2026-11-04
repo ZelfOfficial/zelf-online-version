@@ -3,7 +3,7 @@ const https = require("https");
 const { getTRXPrice } = require("./trx-price");
 
 const agent = new https.Agent({
-	rejectUnauthorized: false,
+	rejectUnauthorized: true,
 });
 
 /**

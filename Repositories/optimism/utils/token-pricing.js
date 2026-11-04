@@ -3,7 +3,7 @@ const https = require("https");
 const { getETHPrice } = require("./eth-price");
 
 const agent = new https.Agent({
-	rejectUnauthorized: false,
+	rejectUnauthorized: true,
 });
 
 /**
