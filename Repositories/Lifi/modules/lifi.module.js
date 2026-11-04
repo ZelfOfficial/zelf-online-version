@@ -3,14 +3,32 @@ const { getCleanInstance } = require("../../../Core/axios");
 
 const instance = getCleanInstance(30000);
 
-const lifiRequest = () => ({
-	url: config.lifi.url,
-	integrator: config.lifi.integrator,
-	headers: { headers: { "x-api-key": config.lifi.apiKey } },
-});
+/**
+ * LI.FI authenticates with `x-lifi-api-key`. Omit the header when no key is configured:
+ * a wrong key is rejected, and quotes still succeed without one.
+ * @returns {{ url: string, integrator: string|undefined, headers: Object }}
+ */
+const lifiRequest = () => {
+	const apiKey = typeof config.lifi.apiKey === "string" ? config.lifi.apiKey.trim() : "";
+	const headers = {};
 
-const EXECUTE_SOLANA_SWAP_REQUIRED_PARAMS = {
-	fromChain: true,
+	if (apiKey) headers["x-lifi-api-key"] = apiKey;
+
+	return {
+		url: config.lifi.url,
+		integrator: config.lifi.integrator,
+		headers,
+	};
+};
+
+const isBlank = (value) => value === undefined || value === null || value === "";
+
+/**
+ * Fields a LI.FI step must have before `/advanced/stepTransaction`.
+ * `fromChain` is not part of the quote step. A falsy extra such as Solana
+ * `svmMaxSupportedTransactionVersion: 0` is not a missing field.
+ */
+const EXECUTE_STEP_REQUIRED_PARAMS = {
 	id: true,
 	tool: true,
 	type: true,
@@ -22,6 +40,7 @@ const EXECUTE_SOLANA_SWAP_REQUIRED_PARAMS = {
 		slippage: true,
 		toAddress: true,
 		toChainId: true,
+		toToken: true,
 	},
 };
 
@@ -34,7 +53,11 @@ const getChains = async (params) => {
 
 const getQuote = async (params) => {
 	const lifi = lifiRequest();
-	const { data } = await instance.get(`${lifi.url}/quote`, { params: { ...params, integrator: lifi.integrator }, headers: lifi.headers });
+	const quoteParams = { ...params };
+	delete quoteParams.referrer;
+	if (lifi.integrator) quoteParams.integrator = lifi.integrator;
+
+	const { data } = await instance.get(`${lifi.url}/quote`, { params: quoteParams, headers: lifi.headers });
 
 	return data;
 };
@@ -68,21 +91,27 @@ const getTools = async (params) => {
 };
 
 const executeAdvancedStepTransaction = async (params) => {
-	const requiredParams = Object.keys(EXECUTE_SOLANA_SWAP_REQUIRED_PARAMS);
+	const requiredParams = Object.keys(EXECUTE_STEP_REQUIRED_PARAMS).filter((key) => key !== "action");
+	const missingParams = requiredParams.filter((param) => isBlank(params?.[param]));
 
-	let missingParams = requiredParams.filter((param) => !params[param]);
-	let missingActionParams = Object.keys(params?.action || {}).filter((param) => !params?.action?.[param]);
+	if (isBlank(params?.action) || typeof params.action !== "object") missingParams.push("action");
+
+	const missingActionParams =
+		params?.action && typeof params.action === "object"
+			? Object.keys(EXECUTE_STEP_REQUIRED_PARAMS.action).filter((param) => isBlank(params.action[param]))
+			: [];
 
 	if (missingParams.length > 0 || missingActionParams.length > 0) {
-		throw new Error(
-			`Missing required parameters: ${missingParams.join(", ")} ${
-				missingActionParams.length > 0 ? `action.${missingActionParams.join(", action.")}` : ""
-			}`
-		);
+		const actionMessage = missingActionParams.length > 0 ? `action.${missingActionParams.join(", action.")}` : "";
+		throw new Error(`Missing required parameters: ${[missingParams.join(", "), actionMessage].filter(Boolean).join(" ")}`);
 	}
 
 	const lifi = lifiRequest();
-	const { data } = await instance.post(`${lifi.url}/advanced/stepTransaction`, { ...params, integrator: lifi.integrator }, lifi.headers);
+	const body = { ...params };
+	delete body.referrer;
+	if (lifi.integrator) body.integrator = lifi.integrator;
+
+	const { data } = await instance.post(`${lifi.url}/advanced/stepTransaction`, body, { headers: lifi.headers });
 
 	return data;
 };

@@ -3,42 +3,62 @@ const Joi = require("joi");
 
 const { string, object, array, validate, stringEnum, forbidden, stringOrNumber, minMaxNumber, number } = require("../../../Core/JoiUtils");
 
+/** Top-level and included LI.FI step types. `stringEnum` takes one array. */
+const LIFI_STEP_TYPES = ["swap", "lifi", "cross", "protocol", "custom"];
+
+/**
+ * Token object on a LI.FI step (`action.fromToken` / `action.toToken`).
+ * A quote from li.quest and from GET /api/lifi/quote sends this object, not an address string.
+ */
+const lifiToken = () =>
+	object({
+		address: string().required(),
+		chainId: stringOrNumber().required(),
+		decimals: number().required(),
+		symbol: string().required(),
+	}).unknown(true);
+
 const schemas = {
 	executeAdvancedStepTransaction: {
-		fromChain: string().required(),
+		// Present on older app payloads. A li.quest quote step does not include it.
+		fromChain: stringOrNumber(),
 		id: string().required(),
-		integrator: forbidden(),
+		// Echoed on the quote. Execute overwrites it with config.lifi.integrator.
+		integrator: string(),
 		referrer: forbidden(),
 		tool: string().required(),
-		type: stringEnum("swap", "lifi", "cross").required(),
+		type: stringEnum(LIFI_STEP_TYPES).required(),
 		action: object({
 			fromAddress: string().required(),
 			fromAmount: stringOrNumber().required(),
 			fromChainId: stringOrNumber().required(),
-			fromToken: string().required(),
+			fromToken: lifiToken().required(),
 			slippage: minMaxNumber(0, 1).required(),
 			toAddress: string().required(),
 			toChainId: stringOrNumber().required(),
-			toToken: string().required(),
-		}).required(),
+			toToken: lifiToken().required(),
+		})
+			.unknown(true)
+			.required(),
 		toolDetails: object({
 			key: string(),
 			name: string(),
 			logoURI: string(),
-		}),
+		}).unknown(true),
 		estimate: object({
 			approvalAddress: string().required(),
-			data: object(),
-			executionDuration: string().required(),
+			executionDuration: stringOrNumber().required(),
 			feeCosts: array().required(),
 			fromAmount: stringOrNumber().required(),
-			fromAmountUSD: stringOrNumber().required(),
+			fromAmountUSD: stringOrNumber(),
 			gasCosts: array().required(),
 			toAmount: stringOrNumber().required(),
 			toAmountMin: stringOrNumber().required(),
-			toAmountUSD: stringOrNumber().required(),
+			toAmountUSD: stringOrNumber(),
 			tool: string().required(),
-		}),
+		})
+			.unknown(true)
+			.required(),
 	},
 	getChains: {
 		chainTypes: string(),
@@ -76,7 +96,22 @@ const schemas = {
 };
 
 const executeAdvancedStepTransactionValidation = async (ctx, next) => {
-	if (!_configValidation(ctx) || !_validate(ctx, "body", schemas.executeAdvancedStepTransaction)) return;
+	if (!_configValidation(ctx)) return;
+
+	// Keep the quote step unchanged: no coercion and no dropped fields. The body is posted to LI.FI as-is.
+	const valid = Joi.object(schemas.executeAdvancedStepTransaction).unknown(true).validate(ctx.request.body, {
+		abortEarly: false,
+		convert: false,
+		stripUnknown: false,
+	});
+
+	if (valid.error) {
+		ctx.status = 400;
+		ctx.body = { validationError: valid.error.message };
+		return;
+	}
+
+	ctx.request.body = valid.value;
 
 	return next();
 };
