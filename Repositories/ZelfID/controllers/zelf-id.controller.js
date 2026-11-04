@@ -1,10 +1,12 @@
+const ZaiIdentity = require("../../ZAI/modules/zai-identity.module");
 const Module = require("../modules/zelf-id.module");
 const RevenueCatModule = require("../../Tags/modules/revenue-cat.module");
 const RewardRoutesController = require("../../Tags/controllers/reward-routes.controller");
-const { updateOldTagObject } = require("../../Tags/modules/my-tags.module");
+const { updateOldTagObject, sendEmailReceipt, extendLicenseForOwner } = require("../../Tags/modules/my-tags.module");
 const ZelfIdRecoveryModule = require("../modules/zelf-id-recovery.module");
 const TagsSearchModule = require("../../Tags/modules/tags-search.module");
 const { getAllSupportedDomains } = require("../../Tags/modules/domain-registry.module");
+const { filterOfferedDomains } = require("../../Tags/modules/domain.class");
 const { errorHandler } = require("../../../Core/http-handler");
 const configuration = require("../../../Core/config");
 const ZelfProofModule = require("../../ZelfProof/modules/zelf-proof.module");
@@ -13,8 +15,10 @@ const { hasMissingOwner, applyPreviewPublicData } = require("../../Tags/modules/
 const TagWalletBalancesModule = require("../../Tags/modules/tag-wallet-balances.module");
 const MyZelfIdModule = require("../modules/my-zelf-id.module");
 const ZelfIdsOfflineModule = require("../modules/zelf-ids-offline.module");
+const ZelfIdsSyncAddressesModule = require("../modules/zelf-ids-sync-addresses.module");
 const ZelfIdsStripeModule = require("../modules/zelf-ids-stripe.module");
 const ZelfIdsRevenueCatModule = require("../modules/zelf-ids-revenue-cat.module");
+const { runMonthlyAccess } = require("../modules/zelf-id-monthly-access.module");
 
 /**
  * Keep full pin name (e.g. user.zelfpay) for IPFS lookup; middleware only supplies registry TLD + local name.
@@ -96,12 +100,14 @@ const searchTagsByDomain = async (ctx) => {
     try {
         const { domain, storage, limit, pageOffset, name } = ctx.request.query;
 
-        let data = await TagsSearchModule.searchByDomain({ domain, storage, limit, pageOffset, name }, ctx.state.user);
+        const result = await TagsSearchModule.searchByDomain({ domain, storage, limit, pageOffset, name }, ctx.state.user);
 
         ctx.body = {
-            data,
-            limit,
-            total: data.length,
+            data: result.rows,
+            limit: result.limit,
+            pageOffset: result.pageOffset,
+            total: result.total,
+            ...(result.incomplete ? { incomplete: true } : {}),
         };
     } catch (error) {
         const _exception = errorHandler(error, ctx);
@@ -152,7 +158,41 @@ const leaseOffline = async (ctx) => {
 
         ctx.status = _exception.status;
 
-        ctx.body = { message: _exception.message, code: _exception.code };
+        ctx.body = {
+            message: _exception.message,
+            code: _exception.code,
+            ...(error?.details && typeof error.details === "object" ? error.details : {}),
+        };
+        if (error.rejected) {
+            ctx.body.rejected = error.rejected;
+        }
+    }
+};
+
+const syncAddresses = async (ctx) => {
+    try {
+        const { extractedDomain, extractedName } = ctx.state;
+
+        const requestData = {
+            ...ctx.request.body,
+            tagName: resolveFullTagNameForRequest(ctx.request.body.tagName, extractedName, extractedDomain),
+            domain: extractedDomain,
+        };
+
+        ctx.body = await ZelfIdsSyncAddressesModule.syncAddresses(requestData, ctx.state.user);
+    } catch (error) {
+        const _exception = errorHandler(error, ctx);
+
+        ctx.status = _exception.status;
+
+        ctx.body = {
+            message: _exception.message,
+            code: _exception.code,
+            ...(error?.details && typeof error.details === "object" ? error.details : {}),
+        };
+        if (error.rejected) {
+            ctx.body.rejected = error.rejected;
+        }
     }
 };
 
@@ -241,9 +281,11 @@ const decryptTag = async (ctx) => {
             domain: extractedDomain,
         };
 
-        const data = await Module.decryptTag(requestData, ctx.state.user);
-
-        ctx.body = { data };
+        await runMonthlyAccess(ctx, "decrypt", async () => {
+            const data = await Module.decryptTag(requestData, ctx.state.user);
+            ZaiIdentity.attachIdentityToken(data, requestData.domain);
+            return data;
+        });
     } catch (error) {
         const _exception = errorHandler(error, ctx);
 
@@ -257,8 +299,8 @@ const revenueCatWebhook = async (ctx) => {
     try {
         // The Tags revenue-cat module has no `revenueCatWebhook` export, so this
         // route always failed. Zelf IDs use their own v4 handler.
-        const data = await ZelfIdsRevenueCatModule.confirmRevenueCatPurchase(ctx.request.body.event, {
-            allowSandbox: configuration.env !== "production",
+        const data = await ZelfIdsRevenueCatModule.webhookHandler(ctx.request.body.event, {
+            allowSandbox: configuration.env !== "production" || Boolean(configuration.revenueCat?.allowSandbox),
         });
 
         ctx.body = { data };
@@ -322,15 +364,17 @@ const getDomains = async (ctx, next) => {
 
         const { includeNonPaid } = ctx.request.query;
 
-        const domains = getAllSupportedDomains(
-            licenses,
-            includeNonPaid !== undefined ? !Boolean(includeNonPaid === "true") : configuration.env === "development" ? false : true,
+        const domains = filterOfferedDomains(
+            getAllSupportedDomains(
+                licenses,
+                includeNonPaid !== undefined ? !Boolean(includeNonPaid === "true") : configuration.env === "development" ? false : true,
+            ),
         );
 
         ctx.body = { data: domains };
     } catch (error) {
         console.error("Error loading domains:", error);
-        const domains = getAllSupportedDomains();
+        const domains = filterOfferedDomains(getAllSupportedDomains());
         ctx.body = { data: domains };
     }
 
@@ -404,11 +448,13 @@ const getWalletBalances = async (ctx, next) => {
 
 const paymentOptions = async (ctx) => {
     try {
-        const { tagName, domain, duration, plan } = ctx.request.query;
+        const { tagName, domain, duration, plan, referralTagName, coupon } = ctx.request.query;
         const reducedFeeRequested = Boolean(ctx.state.reducedFeeRequested);
         const data = await MyZelfIdModule.getPaymentOptions(tagName, domain, duration, ctx.state.user, {
             reducedFeeRequested,
             requestedPlan: plan,
+            referralTagName,
+            coupon,
         });
 
         ctx.body = { data };
@@ -422,8 +468,13 @@ const paymentOptions = async (ctx) => {
 
 const paymentConfirmation = async (ctx) => {
     try {
-        const { tagName, domain, network, token } = ctx.request.body;
-        const data = await MyZelfIdModule.verifyPaymentConfirmation(tagName, domain, network, token);
+        const { tagName, domain, network, token, faceBase64, masterPassword, password } = ctx.request.body;
+        const data = await MyZelfIdModule.verifyPaymentConfirmation(tagName, domain, network, token, {
+            authUser: ctx.state.user,
+            faceBase64,
+            masterPassword,
+            password,
+        });
 
         ctx.body = { data };
     } catch (error) {
@@ -472,8 +523,40 @@ const stripeCheckout = async (ctx) => {
 
 const stripeSession = async (ctx) => {
     try {
-        const { sessionId } = ctx.request.query;
-        const data = await ZelfIdsStripeModule.confirmFromSessionId(sessionId);
+        const { sessionId, token } = ctx.request.query;
+        const data = await ZelfIdsStripeModule.pollStripeSession({
+            sessionId,
+            token,
+            authUser: ctx.state.user,
+        });
+
+        ctx.body = { data };
+    } catch (error) {
+        const _exception = errorHandler(error, ctx);
+
+        ctx.status = _exception.status;
+        ctx.body = { message: _exception.message, code: _exception.code };
+    }
+};
+
+const receiptEmail = async (ctx) => {
+    try {
+        const { tagName, domain, network, email, token } = ctx.request.body;
+        const data = await sendEmailReceipt(tagName, domain, network, email, token);
+
+        ctx.body = { data, payload: { tagName, domain, network, token } };
+    } catch (error) {
+        const _exception = errorHandler(error, ctx);
+
+        ctx.status = _exception.status;
+        ctx.body = { message: _exception.message, code: _exception.code };
+    }
+};
+
+const extendLicenseForOwnerHandler = async (ctx) => {
+    try {
+        const { tagName, domain, duration, faceBase64, password } = ctx.request.body;
+        const data = await extendLicenseForOwner(tagName, domain, duration, { faceBase64, password }, ctx.state.user);
 
         ctx.body = { data };
     } catch (error) {
@@ -489,6 +572,7 @@ module.exports = {
     searchTagsByDomain,
     leaseTag,
     leaseOffline,
+    syncAddresses,
     leaseRecovery,
     previewTag,
     previewZelfProof,
@@ -507,4 +591,6 @@ module.exports = {
     smartContractPaymentConfirmation,
     stripeCheckout,
     stripeSession,
+    receiptEmail,
+    extendLicenseForOwner: extendLicenseForOwnerHandler,
 };

@@ -5,6 +5,13 @@ const { assertTagAvailable } = require("../../Tags/modules/tag-availability");
  */
 const moment = require("moment");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
+const {
+    NO_PASSWORD_PLACEHOLDER,
+    effectivePassword,
+    resolveSecurityType,
+    decryptWithPasswordFallback,
+    healDecryptedTagPassword,
+} = require("./zelf-id-password.module");
 const TagsSearchModule = require("../../Tags/modules/tags-search.module");
 const { generateMnemonic } = require("../../Wallet/modules/helpers");
 const { createEthWallet } = require("../../Wallet/modules/eth");
@@ -15,7 +22,7 @@ const { createStellarWallet } = require("../../Wallet/modules/stellar");
 const { createPolkadotWallet, createKusamaWallet } = require("../../Wallet/modules/polkadot-kusama");
 const { createTonWallet } = require("../../Wallet/modules/ton");
 const { createAptosWallet } = require("../../Wallet/modules/aptos");
-const { decrypt, preview, previewWithLegacyFallback, applyPreviewHasPassword } = require("../../ZelfProof/modules/zelf-proof.module");
+const { decrypt, preview, previewWithLegacyFallback, applyPreviewHasPassword, _formattingError, ZELFPROOF_CLIENT_ERROR_STATUS } = require("../../ZelfProof/modules/zelf-proof.module");
 const OfflineProofModule = require("../../../Core/offline-proof");
 const config = require("../../../Core/config");
 const { confirmPayUniqueAddress } = require("../../purchase-zelf/modules/balance-checker.module");
@@ -34,10 +41,11 @@ const jwt = require("jsonwebtoken");
 const {
     resolveZelfIdPlan,
     resolveComplimentaryPlan,
-    requiresHoldReservation,
     isUnpaidExpiredReservation,
     effectivePlan,
     getZelfIdPrice,
+    applyAvailableNameOffer,
+    assertDomainOfferedForNewNames,
 } = require("./zelf-id-plan.module");
 
 /**
@@ -46,6 +54,23 @@ const {
  * @returns {Object}
  */
 const withV4 = (data) => ({ ...data, stack: "v4" });
+
+const throwMappedZelfProofError = (errPayload) => {
+    const raw = typeof errPayload === "string" ? { code: errPayload, message: errPayload } : errPayload || {};
+    const formatted = _formattingError({
+        code: raw.code || raw.message,
+        message: raw.message || raw.code || "decrypt_failed",
+        status: ZELFPROOF_CLIENT_ERROR_STATUS[raw.code],
+    });
+    const error = new Error(formatted.code || formatted.message || "decrypt_failed");
+
+    error.status = formatted.status || 500;
+    error.code = formatted.code || "InternalServerError";
+
+    throw error;
+};
+
+
 
 /**
  * Add `origin: "online"` and short `v: 4` to encrypt cleartext.
@@ -90,6 +115,7 @@ const leaseTag = async (params, authUser) => {
     const domainConfig = getDomainConfig(domain);
 
     if (!domainConfig) throw new Error(`Unsupported domain: ${domain}`);
+    assertDomainOfferedForNewNames(domainConfig);
 
     const tagKey = domainConfig.getTagKey() || "tagName";
 
@@ -103,14 +129,11 @@ const leaseTag = async (params, authUser) => {
 
     if (!face) throw new Error("409:face_not_found");
 
-    if (!password && securityType !== "withoutPassword") throw new Error("409:password_not_found");
+    // Derived from the decrypted password only (client securityType is ignored, incl. legacy "securePassword").
+    // No password (or the face-only placeholder) means a face-only proof.
+    securityType = resolveSecurityType(password);
 
-    if (password && !securityType) {
-        securityType = /^\d{6}$/.test(password) ? "pin" : "password";
-    }
-
-    const proofSecurityType =
-        securityType === "pin" ? "pin" : securityType === "password" || securityType === "securePassword" ? "password" : "";
+    const proofSecurityType = securityType === "withoutPassword" ? "" : securityType;
 
     const { eth, btc, solana, sui, stellar, polkadot, kusama, ton, aptos, zkProof, mnemonic, arweave } = await _createWalletsFromPhrase({
         ...params,
@@ -171,6 +194,9 @@ const leaseTag = async (params, authUser) => {
         password
     );
 
+    const SessionModule = require("../../Session/modules/session.module");
+    await SessionModule.markSessionIdentityVerified(authUser, tagName, domain);
+
     return {
         ipfs: [tagObject.ipfs],
         available: false,
@@ -207,7 +233,7 @@ const leaseTag = async (params, authUser) => {
  * @returns {Promise<Object>} search result (`available`, `tagName`, `tagObject?`, `price?`)
  */
 const searchTag = async (params, authUser) => {
-    const { tagName, domain, key, value, environment, type, domainConfig, duration, includeAllAddressPages } = params;
+    const { tagName, domain, key, value, environment, type, domainConfig, duration, includeAllAddressPages, plan } = params;
 
     try {
         const _domainConfig = domainConfig || getDomainConfig(domain);
@@ -227,14 +253,27 @@ const searchTag = async (params, authUser) => {
             authUser
         );
 
-        const released = applyExpiredPlanDowngrade(
+        if (result?.tagObject?.publicData) {
+            const { readLeaseSearchResult } = require("./zelf-id-plan-term.module");
+            await readLeaseSearchResult(result);
+        }
+
+        const priced = attachAvailableZelfIdPricing(
             await releaseExpiredUnpaidReservation(result, {
                 tagName,
                 domain,
                 domainConfig: _domainConfig,
                 duration: duration || "1",
-            })
+                plan,
+            }),
+            {
+                tagName,
+                duration: duration || "1",
+                domainConfig: _domainConfig,
+                plan,
+            }
         );
+        const released = applyExpiredPlanDowngrade(priced, _domainConfig);
 
         if (released.ipfs?.length) {
             for (let index = 0; index < released.ipfs.length; index++) {
@@ -266,32 +305,34 @@ const decryptTag = async (params, authUser) => {
 
     const searchResult = await searchTag({ tagName, domain, domainConfig, environment: "all", includeAllAddressPages: true }, authUser);
 
-    if (searchResult.available) return searchResult;
+    if (searchResult.available) throw new Error("404:tag_not_found");
 
     const tagObject = searchResult.tagObject;
 
     if (!tagObject?.zelfProof) throw new Error("404:tag_not_found");
 
-    const { face, password } = await _decryptParams(params, authUser);
+    const { face, password: rawPassword } = await _decryptParams(params, authUser);
 
+    // Face-only proofs are decrypted without a password (placeholder accepted); a stale hasPassword never drops a needed password.
     const decryptPayload = {
         addServerPassword: Boolean(params.addServerPassword),
         faceBase64: face,
-        password,
         zelfProof: tagObject?.zelfProof,
         hasPassword: tagObject.publicData.hasPassword,
     };
 
     let needsLegacyUpgrade = resolveEncryptVersion(tagObject.publicData) !== 4;
-    const decryptedZelfProof = await decrypt(withV4(decryptPayload));
+    const { result: decryptedZelfProof, password } = await decryptWithPasswordFallback((args) => decrypt(withV4(args)), decryptPayload, {
+        password: rawPassword,
+        hasPassword: tagObject.publicData?.hasPassword,
+    });
+    decryptPayload.password = password;
 
     if (decryptedZelfProof.error) {
-        const error = new Error(decryptedZelfProof.error.code);
-
-        error.status = 409;
-
-        throw error;
+        throwMappedZelfProofError(decryptedZelfProof.error);
     }
+
+    const healedHasPassword = healDecryptedTagPassword(tagObject, password);
 
     const { mnemonic, zkProof, solanaSecretKey } = decryptedZelfProof.metadata;
 
@@ -304,8 +345,15 @@ const decryptTag = async (params, authUser) => {
         zkProof,
         solanaSecretKey,
         arweavePrivateKey: arweave.privateKey,
-        password,
+        password: password || rawPassword,
     });
+
+    if (healedHasPassword) {
+        tagsToAdd.push({ name: "hasPassword", value: "true", new: false });
+        if (tagObject.publicData?.st) {
+            tagsToAdd.push({ name: "st", value: tagObject.publicData.st, new: false });
+        }
+    }
 
     let upgradedLegacy = false;
 
@@ -335,6 +383,13 @@ const decryptTag = async (params, authUser) => {
             tagObject.publicData[tag.name] = tag.value;
         }
     }
+
+    const SessionModule = require("../../Session/modules/session.module");
+    await SessionModule.markSessionIdentityVerified(
+        authUser,
+        tagObject.publicData[tagKey] || tagObject.publicData.tagName || tagObject.publicData.zelfName || tagName,
+        domain
+    );
 
     return {
         ...tagObject,
@@ -369,7 +424,7 @@ const decryptTag = async (params, authUser) => {
  * @returns {Promise<Object>} `{ preview, tagObject }` or availability/price payload
  */
 const previewTag = async (params, authUser) => {
-    const domainConfig = getDomainConfig(params.domain);
+    const domainConfig = params.domainConfig || getDomainConfig(params.domain);
 
     const searchResult = await searchTag({ ...params, domainConfig, environment: "all" }, authUser);
 
@@ -472,8 +527,9 @@ const leaseConfirmation = async (params) => {
 };
 
 /**
- * Persist a Zelf ID lease: 6+ characters confirm as free; short names with price > 0 get a 5-hour hold.
- * A leftover `$0` quote confirms as complimentary unlimited for short names; long names stay free.
+ * Persist a Zelf ID lease: 1–27 characters confirm as `free` mainnet (`name.zelf`).
+ * 1–5 characters expire after the short-name hold (1 year). 6–27 expire after 100 years.
+ * Upgrade pricing stays on the license quote for search/checkout; lease pins are always free.
  * @param {Object} tagObject
  * @param {Object|null} referralTagObject
  * @param {Object} domainConfig
@@ -505,14 +561,7 @@ const persistZelfIdLease = async (tagObject, referralTagObject, domainConfig, se
 
     const quotePrice = Number(priced.price);
 
-    if (requiresHoldReservation(tagName) && quotePrice > 0) {
-        await ZelfIdsRegistrationModule.reserveZelfId(tagObject, referralTagObject, domainConfig, securityType, authUser);
-        return;
-    }
-
-    if (!requiresHoldReservation(tagName)) {
-        tagObject.price = 0;
-    }
+    tagObject.price = 0;
 
     const complimentary = resolveComplimentaryPlan({ tagName, price: quotePrice });
 
@@ -521,16 +570,32 @@ const persistZelfIdLease = async (tagObject, referralTagObject, domainConfig, se
     });
 };
 
-const applyExpiredPlanDowngrade = (result) => {
+/**
+ * Show the effective plan on a search result. Remember the plan that was actually pinned
+ * so a later unlock does not store this read-time value.
+ * @param {Object} result
+ * @param {Object} domainConfig
+ * @returns {Object}
+ */
+const applyExpiredPlanDowngrade = (result, domainConfig) => {
     const publicData = result?.tagObject?.publicData;
     if (!publicData) return result;
 
-    const plan = effectivePlan(publicData);
-    if (plan === publicData.plan) return result;
+    const plan = effectivePlan(publicData, domainConfig);
+    if (!plan || plan === publicData.plan) return result;
 
-    result.tagObject.publicData = { ...publicData, plan };
+    result.tagObject.publicData = { ...publicData, plan, _pinnedPlan: publicData.plan || null };
     return result;
 };
+
+/**
+ * Available-name search/preview pricing. The record plan is free (`price.price` 0)
+ * unless the client asked for a paid plan. Dollars come only from `planPricing`.
+ * @param {Object} result
+ * @param {Object} context
+ * @returns {Object}
+ */
+const attachAvailableZelfIdPricing = (result, context) => applyAvailableNameOffer(result, context);
 
 /**
  * Unpin an unpaid reservation whose window has passed and mark the name available.
@@ -571,15 +636,12 @@ const releaseExpiredUnpaidReservation = async (result, context = {}) => {
 
     delete available.tagObject;
 
-    if (context.domainConfig) {
-        available.price = getZelfIdPrice({
-            tagName: context.tagName,
-            duration: context.duration || "1",
-            domainConfig: context.domainConfig,
-        });
-    }
-
-    return available;
+    return attachAvailableZelfIdPricing(available, {
+        tagName: context.tagName,
+        duration: context.duration || "1",
+        domainConfig: context.domainConfig,
+        plan: context.plan,
+    });
 };
 
 const _findDuplicatedTag = async (tagName, domain, domainConfig) => {
@@ -656,25 +718,7 @@ const _createWalletsFromPhrase = async (params) => {
     };
 };
 
-const _decryptParams = async (params, authUser) => {
-    if (params.removePGP) {
-        return {
-            password: params.password,
-            mnemonic: params.mnemonic,
-            face: params.faceBase64,
-        };
-    }
-
-    const password = params.password ? await SessionModule.sessionDecrypt(params.password, authUser) : null;
-    const mnemonic = params.mnemonic ? await SessionModule.sessionDecrypt(params.mnemonic, authUser) : null;
-    const face = params.faceBase64 ? await SessionModule.sessionDecrypt(params.faceBase64, authUser) : null;
-
-    return {
-        password,
-        mnemonic,
-        face,
-    };
-};
+const _decryptParams = (params, authUser) => ZelfIdPartsModule.decryptParams(params, authUser);
 
 /**
  * Decrypt the stored proof on v4 then unpin IPFS.
@@ -704,9 +748,7 @@ const deleteTag = async (params, authUser) => {
     const decryptedZelfProof = await decrypt(withV4(decryptPayload));
 
     if (decryptedZelfProof.error) {
-        const error = new Error(decryptedZelfProof.error.code);
-        error.status = 409;
-        throw error;
+        throwMappedZelfProofError(decryptedZelfProof.error);
     }
 
     const deletedFiles = [];

@@ -1,8 +1,13 @@
 const { koaBody } = require("koa-body");
-const config = require("./config");
 
+/**
+ * The app's body parser options. `includeUnparsed` keeps the exact bytes received in
+ * ctx.request.rawBody: the Stripe webhook verifies its signature over them (re-serializing the
+ * parsed JSON never matches), and the zAI callback and the Bitcoin RPC proxy read them too.
+ */
 const BODY_OPTIONS = {
     parsedMethods: ["POST", "PUT", "PATCH", "DELETE"],
+    includeUnparsed: true,
     multipart: true,
     formLimit: "6mb",
     jsonLimit: "10mb",
@@ -13,25 +18,6 @@ const BODY_OPTIONS = {
     },
 };
 
-/**
- * Routes that verify a signature over the exact bytes received. Stripe signs the raw payload;
- * re-serializing the parsed JSON never matches it, so every webhook failed verification.
- */
-const RAW_BODY_PATHS = [config.basePath("/stripe/webhook")];
+const createBodyParser = () => koaBody(BODY_OPTIONS);
 
-const _normalizePath = (path) => String(path || "").replace(/\/+$/, "").toLowerCase();
-
-/**
- * The app's body parser. On RAW_BODY_PATHS it also keeps the unparsed body in
- * ctx.request.rawBody; everywhere else it behaves as before (no extra copy of large bodies).
- * @param {{ rawBodyPaths?: string[] }} [options]
- */
-const createBodyParser = ({ rawBodyPaths = RAW_BODY_PATHS } = {}) => {
-    const parse = koaBody(BODY_OPTIONS);
-    const parseKeepingRaw = koaBody({ ...BODY_OPTIONS, multipart: false, includeUnparsed: true });
-    const rawPaths = new Set(rawBodyPaths.map(_normalizePath));
-
-    return (ctx, next) => (rawPaths.has(_normalizePath(ctx.path)) ? parseKeepingRaw(ctx, next) : parse(ctx, next));
-};
-
-module.exports = { createBodyParser, RAW_BODY_PATHS };
+module.exports = { BODY_OPTIONS, createBodyParser };

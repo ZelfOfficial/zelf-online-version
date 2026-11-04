@@ -1,5 +1,6 @@
 const { array, any, jsonRpcParams, string, stringOrNumber, validate } = require("../../../Core/JoiUtils");
 const config = require("../../../Core/config");
+const { maxBatch, maxBodyBytes } = require("../../../Core/rpc-upstreams");
 
 const RESERVED_CHAIN_PATH = new Set(["chains", "request"]);
 
@@ -55,10 +56,50 @@ const requestValidation = async (ctx, next) => {
  * controller can produce per-item responses; on single-object input, replaces
  * `ctx.request.body` with the validated value (existing behavior).
  */
+const measuredBodyBytes = (body) => {
+    if (body == null || body === "") return 0;
+    if (typeof body === "string") return Buffer.byteLength(body);
+    if (Buffer.isBuffer(body)) return body.length;
+    try {
+        return Buffer.byteLength(JSON.stringify(body));
+    } catch {
+        return Number.MAX_SAFE_INTEGER;
+    }
+};
+
+const tooLargeBody = (ctx, asJsonRpc) => {
+    ctx.status = 413;
+    ctx.body = asJsonRpc
+        ? {
+              jsonrpc: "2.0",
+              id: ctx.request.body?.id ?? null,
+              error: { code: -32600, message: "Request too large" },
+          }
+        : { error: "rpc_body_too_large" };
+};
+
+/**
+ * Reject oversized RPC bodies. The global koa-body limit is much higher (uploads);
+ * this cap applies only to RPC routes.
+ */
+const assertRpcBodyLimit = (asJsonRpc = false) => async (ctx, next) => {
+    const max = maxBodyBytes();
+    const headerLen = Number(ctx.get("content-length") || 0);
+    if ((Number.isFinite(headerLen) && headerLen > max) || measuredBodyBytes(ctx.request.body) > max) {
+        tooLargeBody(ctx, asJsonRpc);
+        return;
+    }
+    await next();
+};
+
 const validateJsonRpcBody = (ctx) => {
     const body = ctx.request.body;
 
     if (Array.isArray(body)) {
+        if (body.length > maxBatch()) {
+            tooLargeBody(ctx, true);
+            return false;
+        }
         if (!body.length) {
             ctx.status = 200;
             ctx.body = {
@@ -98,6 +139,10 @@ const validateJsonRpcBody = (ctx) => {
 
 /** JWT extension proxy: uses config.extension.rpc.chains (same JSON-RPC body as public /api/rpc/:chainKey). */
 const jsonRpcValidationExtension = async (ctx, next) => {
+    if (measuredBodyBytes(ctx.request.body) > maxBodyBytes() || Number(ctx.get("content-length") || 0) > maxBodyBytes()) {
+        tooLargeBody(ctx, true);
+        return;
+    }
     if (!config.extension?.rpc?.chains || !Object.keys(config.extension.rpc.chains).length) {
         ctx.status = 200;
         ctx.body = {
@@ -123,6 +168,10 @@ const jsonRpcValidationExtension = async (ctx, next) => {
 };
 
 const jsonRpcValidation = async (ctx, next) => {
+    if (measuredBodyBytes(ctx.request.body) > maxBodyBytes() || Number(ctx.get("content-length") || 0) > maxBodyBytes()) {
+        tooLargeBody(ctx, true);
+        return;
+    }
     if (!config.rpc?.chains || !Object.keys(config.rpc.chains).length) {
         ctx.status = 200;
         ctx.body = {
@@ -151,4 +200,5 @@ module.exports = {
     requestValidation,
     jsonRpcValidation,
     jsonRpcValidationExtension,
+    assertRpcBodyLimit,
 };

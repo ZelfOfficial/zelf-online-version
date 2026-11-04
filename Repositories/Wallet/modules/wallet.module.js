@@ -218,6 +218,10 @@ const decryptWallet = async (params, authUser) => {
 		faceBase64: face,
 		password,
 		addServerPassword: Boolean(params.addServerPassword),
+		publicData: params.publicData,
+		v: params.v,
+		encryptVersion: params.encryptVersion,
+		stack: params.stack,
 	});
 
 	if (decryptedWallet.error) {
@@ -231,6 +235,9 @@ const decryptWallet = async (params, authUser) => {
 	if (!params?.skipQRCode) {
 		image = await encryptQR({ ...decryptedWallet, faceBase64: face, password });
 	}
+
+	const SessionModule = require("../../Session/modules/session.module");
+	await SessionModule.markSessionIdentityVerified(authUser, zelfName || decryptedWallet?.publicData?.zelfName, params.domain);
 
 	return {
 		...decryptedWallet,
@@ -262,6 +269,10 @@ const validateZkProof = async (params, authUser) => {
 		faceBase64: face,
 		password,
 		addServerPassword: Boolean(params.addServerPassword),
+		publicData: params.publicData,
+		v: params.v,
+		encryptVersion: params.encryptVersion,
+		stack: params.stack,
 	});
 
 	if (decryptedZelfProof.error) {
@@ -290,6 +301,10 @@ const seeWallet = async (params) => {
 	const decryptedWallet = await preview({
 		zelfProof,
 		addServerPassword: Boolean(addServerPassword),
+		publicData: params.publicData,
+		v: params.v,
+		encryptVersion: params.encryptVersion,
+		stack: params.stack,
 	});
 
 	return decryptedWallet;
@@ -352,7 +367,10 @@ const importWallet = async (params, authUser) => {
 		addServerPassword: Boolean(params.addServerPassword),
 	};
 
-	return _saveImportedWallet(wallet, params, dataToEncrypt, password, authUser);
+	const saved = await _saveImportedWallet(wallet, params, dataToEncrypt, password, authUser);
+	const SessionModule = require("../../Session/modules/session.module");
+	await SessionModule.markSessionIdentityVerified(authUser, zelfName, params.domain);
+	return saved;
 };
 
 /**

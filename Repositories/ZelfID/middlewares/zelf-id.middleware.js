@@ -1,4 +1,5 @@
-const { string, number, validate, stringEnum } = require("../../../Core/JoiUtils");
+const { string, number, boolean, validate, stringEnum, object } = require("../../../Core/JoiUtils");
+const { checkoutSessionIdJoi } = require("../../Stripe/modules/stripe-checkout-session.module");
 const jwt = require("jsonwebtoken");
 const moment = require("moment");
 const config = require("../../../Core/config");
@@ -15,6 +16,45 @@ const leaseOfflineSchema = {
     zelfProofQRCode: string(),
     referralTagName: string(),
     duration: string(),
+    sync: boolean(),
+    syncPublicData: object().unknown(true),
+    syncPassword: string(),
+    password: string(),
+};
+
+const syncAddressesSchema = {
+    tagName: string().required(),
+    domain: string().required(),
+    zelfProofQRCode: string(),
+    syncPublicData: object({
+        _syncSignature: string().required(),
+        _syncIssuedAt: string().required(),
+    }).unknown(true),
+};
+
+const syncAddressesValidation = async (ctx, next) => {
+    const valid = validate(syncAddressesSchema, ctx.request.body);
+
+    if (valid.error) {
+        ctx.status = 409;
+        ctx.body = { validationError: valid.error.message };
+        return;
+    }
+
+    const { tagName, domain } = ctx.request.body;
+    const { domain: extractedDomain, name } = TagsMiddleware.extractDomainAndName(tagName, domain);
+    const domainValidation = await TagsMiddleware.validateDomainAndName(extractedDomain, name);
+
+    if (!domainValidation.valid) {
+        ctx.status = 409;
+        ctx.body = { validationError: domainValidation.error };
+        return;
+    }
+
+    ctx.state.extractedDomain = extractedDomain;
+    ctx.state.extractedName = name;
+
+    await next();
 };
 
 const leaseOfflineValidation = async (ctx, next) => {
@@ -26,12 +66,22 @@ const leaseOfflineValidation = async (ctx, next) => {
         return;
     }
 
-    const { tagName, domain, zelfProof, zelfProofQRCode } = ctx.request.body;
+    const { tagName, domain, zelfProof, zelfProofQRCode, sync, syncPublicData } = ctx.request.body;
 
     if (!zelfProof && !zelfProofQRCode) {
         ctx.status = 409;
         ctx.body = { validationError: "missing zelfProof" };
         return;
+    }
+
+    if (sync && !syncPublicData) {
+        ctx.status = 409;
+        ctx.body = { validationError: "missing syncPublicData" };
+        return;
+    }
+
+    if (ctx.request.body.syncPassword && !ctx.request.body.password) {
+        ctx.request.body.password = ctx.request.body.syncPassword;
     }
 
     const { domain: extractedDomain, name } = TagsMiddleware.extractDomainAndName(tagName, domain);
@@ -53,49 +103,70 @@ const paymentSchemas = {
     paymentConfirmation: {
         tagName: string().required(),
         domain: string(),
-        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE", "BDAG"]).required(),
+        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE", "BDAG", "FREE"]),
         token: string().required(),
     },
     paymentOptions: {
         tagName: string().required(),
         domain: string(),
-        duration: stringEnum(["1", "2", "3", "4", "5", "lifetime"]).required(),
-        plan: stringEnum(["premium", "unlimited"]).optional(),
+        duration: string().required(), // allowed values come from the license planPricing
+        plan: string().optional(), // offered plans come from the license planPricing
+        referralTagName: string().optional(), // coupon = license payment.whitelist referrer
+        coupon: string().allow("", null), // percent-off plan coupon code
     },
     stripeCheckout: {
         tagName: string().required(),
         domain: string(),
-        duration: stringEnum(["1", "2", "3", "4", "5", "lifetime"]).required(),
-        plan: stringEnum(["premium", "unlimited", "free"]).optional(),
+        duration: string().required(), // allowed values come from the license planPricing
+        plan: string().optional(), // "free" or a plan the license prices
         token: string().required(),
         locale: string(),
         email: string(),
     },
     stripeSession: {
-        sessionId: string().required(),
+        sessionId: checkoutSessionIdJoi(),
     },
     revenueCatEvent: {
         type: string().required(),
         id: string().required(),
         product_id: string().required(),
-        transaction_id: string().required(),
+        transaction_id: string().allow("", null),
         environment: string().required(),
         price: number().allow(null),
     },
 };
 
-/**
- * RevenueCat calls this with the Authorization header set in its dashboard.
- * In production only the RevenueCat client JWT (REVENUECAT_ALLOWED_EMAIL) may
- * call it: session tokens are free to mint, and the event extends a Zelf ID.
- */
-const revenueCatWebhookValidation = async (ctx, next) => {
-    const { clientId, email } = ctx.state.user || {};
-    const allowedEmail = config.revenueCat?.allowedEmail;
+const crypto = require("crypto");
 
-    if (config.env === "production" && (!clientId || !allowedEmail || email !== allowedEmail)) {
-        ctx.status = 403;
-        ctx.body = { validationError: "Access forbidden" };
+const safeEqual = (a, b) => {
+    const left = Buffer.from(String(a));
+    const right = Buffer.from(String(b));
+    return left.length === right.length && crypto.timingSafeEqual(left, right);
+};
+
+/**
+ * RevenueCat sends the static Authorization header set in its dashboard (no JWT).
+ * It must equal REVENUECAT_WEBHOOK_AUTHORIZATION (falls back to JIM_INBOX_API_KEY). "Bearer <secret>" and "<secret>" are
+ * treated the same so either dashboard style works. Unset secret fails closed (503).
+ */
+const isRevenueCatAuthorized = (header, expected) => {
+    if (!expected || !header) return false;
+    const strip = (value) => String(value).trim().replace(/^Bearer\s+/i, "");
+    return safeEqual(String(header).trim(), String(expected).trim()) || safeEqual(strip(header), strip(expected));
+};
+
+const revenueCatWebhookValidation = async (ctx, next) => {
+    const expected = config.revenueCat?.webhookAuthorization;
+
+    if (!expected) {
+        ctx.status = 503;
+        ctx.body = { validationError: "RevenueCat webhook is not configured" };
+        return;
+    }
+
+    if (!isRevenueCatAuthorized(ctx.headers?.authorization, expected)) {
+        ctx.status = 401;
+        ctx.body = { validationError: "Invalid authorization" };
         return;
     }
 
@@ -104,6 +175,13 @@ const revenueCatWebhookValidation = async (ctx, next) => {
     if (!event || typeof event !== "object") {
         ctx.status = 409;
         ctx.body = { validationError: "Missing event payload" };
+        return;
+    }
+
+    // RevenueCat dashboard "Send test event": acknowledge with 200 and do nothing else (no DB writes).
+    if (event.type === "TEST") {
+        ctx.status = 200;
+        ctx.body = { received: true, ignored: "test_event" };
         return;
     }
 
@@ -116,6 +194,25 @@ const revenueCatWebhookValidation = async (ctx, next) => {
     }
 
     await next();
+};
+
+/**
+ * Duration/plan must be priced by the license for this name length (no hardcoded 1–5).
+ * @returns {string|null} validation error, or null
+ */
+const licensePlanDurationError = (tagName, domain, plan, duration) => {
+    const { getDomainConfig } = require("../../Tags/config/supported-domains");
+    const { assertLicenseOffersPlan, resolvePaidPlan } = require("../modules/zelf-id-plan.module");
+    const domainName = String(domain || String(tagName || "").split(".")[1] || "zelf").toLowerCase();
+    const domainConfig = getDomainConfig(domainName);
+    // An explicit paid plan is checked as-is (premium on a short name is rejected, not re-stamped).
+    const checkedPlan = plan && plan !== "free" ? plan : resolvePaidPlan({ tagName, domainConfig });
+    try {
+        assertLicenseOffersPlan({ domainConfig, tagName, plan: checkedPlan, duration });
+        return null;
+    } catch (error) {
+        return String(error.message || error).replace(/^409:/, "");
+    }
 };
 
 const paymentOptionsValidation = async (ctx, next) => {
@@ -138,6 +235,13 @@ const paymentOptionsValidation = async (ctx, next) => {
     if (!domainValidation.valid) {
         ctx.status = 409;
         ctx.body = { validationError: domainValidation.error };
+        return;
+    }
+
+    const planError = licensePlanDurationError(tagName, domain, ctx.request.query.plan, ctx.request.query.duration);
+    if (planError) {
+        ctx.status = 409;
+        ctx.body = { validationError: planError };
         return;
     }
 
@@ -177,18 +281,35 @@ const stripeCheckoutValidation = async (ctx, next) => {
         return;
     }
 
+    const planError = licensePlanDurationError(tagName, domain, ctx.request.body.plan, ctx.request.body.duration);
+    if (planError) {
+        ctx.status = 409;
+        ctx.body = { validationError: planError };
+        return;
+    }
+
     await next();
 };
 
 const stripeSessionValidation = async (ctx, next) => {
-    const valid = validate(paymentSchemas.stripeSession, ctx.request.query);
+    const raw = ctx.request.query?.sessionId;
+    const trimmed = typeof raw === "string" ? raw.trim() : raw;
 
-    if (valid.error) {
-        ctx.status = 409;
-        ctx.body = { validationError: valid.error.message };
+    if (raw === undefined || raw === null || trimmed === "") {
+        ctx.status = 400;
+        ctx.body = { message: "Checkout session id is required", code: "INVALID_SESSION_ID" };
         return;
     }
 
+    const valid = validate(paymentSchemas.stripeSession, { ...ctx.request.query, sessionId: trimmed });
+
+    if (valid.error) {
+        ctx.status = 400;
+        ctx.body = { message: "Checkout session id format is invalid", code: "INVALID_SESSION_ID" };
+        return;
+    }
+
+    ctx.request.query = { ...ctx.request.query, sessionId: trimmed };
     await next();
 };
 
@@ -201,7 +322,7 @@ const paymentConfirmationValidation = async (ctx, next) => {
         return;
     }
 
-    const { tagName, domain, token, network } = ctx.request.body;
+    let { tagName, domain, token, network } = ctx.request.body;
     const domainValidation = await TagsMiddleware.validateDomainAndName(domain, tagName);
 
     if (!domainValidation.valid) {
@@ -214,19 +335,36 @@ const paymentConfirmationValidation = async (ctx, next) => {
 
     if (!tokenDecoded) {
         ctx.status = 409;
-        ctx.body = { validationError: "invalid_token" };
+        ctx.body = { validationError: "INVALID_TOKEN" };
         return;
     }
 
-    if (tokenDecoded.ttl < moment().unix()) {
+    // A 100% coupon (or any other signed $0 quote) confirms with no network.
+    if (!network) {
+        if (tokenDecoded.freeCheckout !== true) {
+            ctx.status = 409;
+            ctx.body = { validationError: '"network" is required' };
+            return;
+        }
+        network = "FREE";
+        ctx.request.body.network = "FREE";
+    }
+
+    // Crypto confirms can arrive after the quote TTL when the transfer itself was sent in time.
+    // Free quotes have no chain timestamp, so an expired one stops here.
+    const cryptoConfirm = ["ETH", "SOL", "BTC", "AVAX", "BDAG", "BNB", "POL", "BASE"].includes(String(network || "").toUpperCase());
+    if (tokenDecoded.ttl < moment().unix() && !cryptoConfirm) {
         ctx.status = 409;
-        ctx.body = { validationError: "token_expired" };
+        ctx.body = { validationError: "TOKEN_EXPIRED" };
         return;
     }
 
-    if (!tokenDecoded.prices[network]) {
+    // FREE has no price entry: allowed only for a signed $0 checkout (re-quoted from the license on confirm).
+    const freeOk = network === "FREE" && tokenDecoded.freeCheckout === true;
+
+    if (!freeOk && !tokenDecoded.prices?.[network]) {
         ctx.status = 409;
-        ctx.body = { validationError: "invalid_network" };
+        ctx.body = { validationError: "INVALID_NETWORK" };
         return;
     }
 
@@ -238,6 +376,7 @@ module.exports = {
     searchByDomainValidation: TagsMiddleware.searchByDomainValidation,
     leaseValidation: TagsMiddleware.leaseValidation,
     leaseOfflineValidation,
+    syncAddressesValidation,
     leaseRecoveryValidation: TagsMiddleware.leaseRecoveryValidation,
     deleteTagValidation: TagsMiddleware.deleteTagValidation,
     previewValidation: TagsMiddleware.previewValidation,
@@ -256,4 +395,6 @@ module.exports = {
     stripeCheckoutValidation,
     stripeSessionValidation,
     smartContractPaymentConfirmationValidation: TagsMyMiddleware.smartContractPaymentConfirmationValidation,
+    receiptEmailValidation: TagsMyMiddleware.receiptEmailValidation,
+    extendLicenseForOwnerValidation: TagsMyMiddleware.extendLicenseForOwnerValidation,
 };

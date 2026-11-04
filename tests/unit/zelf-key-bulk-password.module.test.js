@@ -1,6 +1,11 @@
 jest.mock("../../Repositories/Tags/modules/tags-parts.module", () => ({
     decryptParams: jest.fn(),
     decryptPasswordParams: jest.fn(),
+    getFullTagName: jest.fn((tagName, domain) => {
+        const resolvedDomain = domain || "zelf";
+        if (tagName && tagName.includes(`.${resolvedDomain}`)) return tagName;
+        return `${tagName}.${resolvedDomain}`;
+    }),
 }));
 
 jest.mock("../../Repositories/Tags/modules/tags.module", () => ({

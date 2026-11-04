@@ -11,7 +11,7 @@ const { loadOfficialLicenses } = require("./Repositories/License/modules/license
 const { getSupportedDomains } = require("./Repositories/Tags/config/supported-domains");
 const app = new Koa();
 app.proxy = true; // Trust the proxy's X-Forwarded-For header
-// Same koa-body options as before; the Stripe webhook also gets the raw body to verify its signature.
+// Shared with the unit tests; keeps the raw body for the Stripe webhook, zAI and the RPC proxy.
 app.use(createBodyParser());
 
 // Enable CORS

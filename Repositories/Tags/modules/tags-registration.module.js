@@ -1,8 +1,8 @@
 const WalrusModule = require("../../Walrus/modules/walrus.module");
 const TagsIPFSModule = require("./tags-ipfs.module");
 const TagsArweaveModule = require("./tags-arweave.module");
-const moment = require("moment");
 const { getDomainConfig } = require("../config/supported-domains");
+const { formatLeaseDate } = require("./lease-date.util");
 const { cleanExtraParamsForPinata, resolveEncryptVersion, stampExtraParamsVersion } = require("./tags-addresses.module");
 
 /**
@@ -27,8 +27,8 @@ const confirmFreeTag = async (tagObject, referralTagObject, domainConfig, securi
                 origin: tagObject.origin || "online",
                 price: tagObject.price,
                 duration: 1,
-                registeredAt: moment().format("YYYY-MM-DD HH:mm:ss"),
-                expiresAt: moment().add(1, "year").format("YYYY-MM-DD HH:mm:ss"),
+                registeredAt: formatLeaseDate(),
+                expiresAt: formatLeaseDate(1, "year"),
                 type: "mainnet",
                 hasPassword: tagObject.hasPassword,
             },
@@ -114,8 +114,8 @@ const saveHoldTagInIPFS = async (tagObject, referralTagObject, domainConfig, sec
                 hasPassword: tagObject.hasPassword,
                 type: "hold",
                 origin: tagObject.origin || "online",
-                registeredAt: moment().format("YYYY-MM-DD HH:mm:ss"),
-                expiresAt: moment().add(30, "day").format("YYYY-MM-DD HH:mm:ss"),
+                registeredAt: formatLeaseDate(),
+                expiresAt: formatLeaseDate(30, "day"),
             },
             resolveEncryptVersion(tagObject)
         ),

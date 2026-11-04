@@ -15,7 +15,8 @@ const config = require("../../../Core/config");
 const WalrusModule = require("../../Walrus/modules/walrus.module");
 const TagsArweaveModule = require("./tags-arweave.module");
 const { generateQRFromZelfProof, QRZelfProofExtractor } = require("./qr-zelfproof-extractor.module");
-const { cleanExtraParamsForPinata, resolveEncryptVersion, stampExtraParamsVersion } = require("./tags-addresses.module");
+const { buildSearchablePinPages, cleanExtraParamsForPinata, resolveEncryptVersion, stampExtraParamsVersion } = require("./tags-addresses.module");
+const { formatLeaseDate, parseLeaseDate } = require("./lease-date.util");
 
 const envTruthy = (v) => {
     if (v == null || v === "") return false;
@@ -140,9 +141,13 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
     const domainConfig = getDomainConfig(domain);
 
     // Get current tag data
-    const tagData = await searchTag({ tagName, domain, domainConfig }, authUser);
+    const tagData = await searchTag(
+        { tagName, domain, domainConfig, duration, plan: requestOptions.plan },
+        authUser
+    );
 
-    if (tagData.available) throw new Error("404:tag_not_found");
+    // An unregistered name quotes the same free record as Zelf ID search (price 0, plans, eligibility).
+    if (tagData.available) return tagData;
 
     const tagObject = tagData.tagObject;
 
@@ -866,7 +871,7 @@ const _requiresUpdate = async (tagPayObject, priceDetails, tagObject) => {
     const registeredAtCondition = Boolean(
         tagObject.publicData.registeredAt &&
         tagPayObject?.publicData?.registeredAt &&
-        moment(tagObject.publicData.registeredAt).isAfter(moment(tagPayObject?.publicData?.registeredAt)),
+        parseLeaseDate(tagObject.publicData.registeredAt).isAfter(parseLeaseDate(tagPayObject?.publicData?.registeredAt)),
     );
 
     if (registeredAtCondition) return true;
@@ -971,8 +976,8 @@ const createTagPay = async (tagPayObject, tagObject, priceDetails, currentCount,
             btcAddress: tagPayObject.publicData.btcAddress,
             [domainConfig.getTagKey()]: tagPayObject.tagPayName,
             extraParams: JSON.stringify({
-                expiresAt: moment().add(100, "year").format("YYYY-MM-DD HH:mm:ss"),
-                registeredAt: moment().format("YYYY-MM-DD HH:mm:ss"),
+                expiresAt: formatLeaseDate(100, "year"),
+                registeredAt: formatLeaseDate(),
                 price: priceDetails.price,
                 duration: priceDetails.duration,
                 count: `${currentCount}`,
@@ -1035,9 +1040,9 @@ const buildMetadata = (params, tagObject, domainConfig) => {
                 origin: tagObject.publicData.origin || "online",
                 price,
                 duration: tagObject.publicData.duration ? `${Number(tagObject.publicData.duration) + Number(duration)}` : duration,
-                registeredAt: moment().format("YYYY-MM-DD HH:mm:ss"),
-                renewedAt: tagObject.publicData.type === "mainnet" ? moment().format("YYYY-MM-DD HH:mm:ss") : undefined,
-                expiresAt: moment(tagObject.publicData.expiresAt).add(duration, "year").format("YYYY-MM-DD HH:mm:ss"),
+                registeredAt: tagObject.publicData.registeredAt || formatLeaseDate(),
+                renewedAt: tagObject.publicData.type === "mainnet" ? formatLeaseDate() : undefined,
+                expiresAt: parseLeaseDate(tagObject.publicData.expiresAt).add(duration, "year").format("YYYY-MM-DD HH:mm:ss"),
                 type: "mainnet",
                 hasPassword: tagObject.publicData.hasPassword,
                 eventID: params.eventID || undefined,
@@ -1125,19 +1130,48 @@ const storeInWalrus = async (tagObject, domainConfig, metadata) => {
 };
 
 const storeInIPFS = async (tagObject, domainConfig, metadata) => {
-    await TagsIpfsModule.unpinContinuationSiblings(tagObject.fullTagName);
-    await TagsIpfsModule.deleteFiles([tagObject.ipfsId || tagObject.id]);
+    const fullName = tagObject.fullTagName;
+    const pages = buildSearchablePinPages({
+        reserved: metadata,
+        addresses: tagObject.publicData,
+        tagName: fullName,
+    });
+
+    const previousPrimaryId = tagObject.ipfsId || tagObject.id;
+    const previousCid = tagObject.cid || tagObject.ipfsHash || tagObject.ipfs?.cid || tagObject.ipfs?.ipfsHash;
+    const previousSiblingIds = (await TagsIpfsModule.listContinuationSiblingPinIds(fullName)) || [];
 
     tagObject.ipfs = await TagsIpfsModule.insertSearchablePins(
         {
             base64: tagObject.zelfProofQRCode,
-            name: tagObject.fullTagName,
+            name: fullName,
             reserved: metadata,
             addresses: tagObject.publicData,
             pinIt: true,
         },
         { pro: true },
     );
+
+    const uploadedId = tagObject.ipfs?.id != null ? String(tagObject.ipfs.id) : "";
+    const uploadedCid = String(tagObject.ipfs?.cid || tagObject.ipfs?.ipfsHash || tagObject.ipfs?.ipfs_pin_hash || "");
+    const samePin =
+        (previousPrimaryId && uploadedId && String(previousPrimaryId) === uploadedId) ||
+        (previousCid && uploadedCid && String(previousCid) === uploadedCid) ||
+        tagObject.ipfs?.duplicated === true ||
+        tagObject.ipfs?.is_duplicate === true ||
+        tagObject.ipfs?.saved === false;
+    if (samePin) {
+        const pinId = uploadedId || (previousPrimaryId != null ? String(previousPrimaryId) : "");
+        if (pinId) tagObject.ipfs = await TagsIpfsModule.updateSearchablePinKeyvalues(pinId, pages.primary.keyvalues);
+    }
+
+    const keptId = tagObject.ipfs?.id != null ? String(tagObject.ipfs.id) : uploadedId;
+    const staleIds = [
+        ...new Set(
+            [previousPrimaryId, ...previousSiblingIds].filter((id) => id != null && String(id) !== "" && String(id) !== keptId).map(String)
+        ),
+    ];
+    if (!samePin && staleIds.length) await TagsIpfsModule.deleteFiles(staleIds);
 
     const ipfsRec = tagObject.ipfs;
     if (ipfsRec?.id != null && ipfsRec.id !== "") {

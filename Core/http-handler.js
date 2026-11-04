@@ -141,6 +141,35 @@ const tryCatchLog = async (status = "failed", message, code, exception, ctx = nu
 	return true;
 };
 
+const isZelfClientErrorCode = (value) => typeof value === "string" && /^ERR_[A-Z0-9_]+$/.test(value);
+
+/**
+ * `409:SOME_CODE` where the HTTP `code` and `message` are both SOME_CODE.
+ * Status stays the numeric prefix. Underscores in the message stay.
+ */
+const codedError = (statusAndCode) => {
+	const error = new Error(statusAndCode);
+	const code = String(statusAndCode).split(":").slice(1).join(":");
+	error.clientCode = code;
+	error.clientMessage = code;
+	return error;
+};
+
+/**
+ * A bare plan code (`SOME_CODE`) whose HTTP message is already that string.
+ * `code` becomes the same string. Status stays `status` (500 when omitted).
+ */
+const identifiedError = (message, status = 500) => {
+	const error = new Error(message);
+	error.status = status;
+	error.clientMessage = message;
+	error.code = message;
+	return error;
+};
+
+const resolveErrorCode = (defaultCode, optionalMessage) =>
+	isZelfClientErrorCode(optionalMessage) ? optionalMessage : defaultCode;
+
 const errorHandler = (exception, ctx = null, optionalMessage) => {
 	// if (config.env === "development") {
 	console.error({ exception });
@@ -204,12 +233,12 @@ const errorHandler = (exception, ctx = null, optionalMessage) => {
 		case "400":
 			status = 400;
 			message = optionalMessage || "Bad Request";
-			code = "BadRequest";
+			code = resolveErrorCode("BadRequest", optionalMessage);
 			break;
 		case "401":
 			status = 401;
 			message = optionalMessage || "Authentication required";
-			code = "Unauthorized";
+			code = resolveErrorCode("Unauthorized", optionalMessage);
 			break;
 		case "403":
 			status = 403;
@@ -224,7 +253,7 @@ const errorHandler = (exception, ctx = null, optionalMessage) => {
 		case "409":
 			status = 409;
 			message = optionalMessage || "Record conflicts with existing records in place.";
-			code = "Conflict";
+			code = resolveErrorCode("Conflict", optionalMessage);
 			break;
 		case "429":
 			status = 429;
@@ -264,7 +293,7 @@ const errorHandler = (exception, ctx = null, optionalMessage) => {
 		case "422":
 			status = 422;
 			message = optionalMessage || "Record cannot be saved with the current params";
-			code = "UnprocessableEntity";
+			code = resolveErrorCode("UnprocessableEntity", optionalMessage);
 			break;
 		case "423":
 			status = 423;
@@ -321,4 +350,6 @@ const errorHandler = (exception, ctx = null, optionalMessage) => {
 module.exports = {
 	tryCatchLog,
 	errorHandler,
+	codedError,
+	identifiedError,
 };

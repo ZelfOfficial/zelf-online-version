@@ -1,3 +1,4 @@
+const ZaiIdentity = require("../../ZAI/modules/zai-identity.module");
 const Module = require("../modules/tags.module");
 const RewardRoutesController = require("./reward-routes.controller");
 const { updateOldTagObject } = require("../modules/my-tags.module");
@@ -5,12 +6,14 @@ const TagsRecoveryModule = require("../modules/tags-recovery.module");
 const TagsOfflineModule = require("../modules/tags-offline.module");
 const TagsSearchModule = require("../modules/tags-search.module");
 const { getAllSupportedDomains } = require("../modules/domain-registry.module");
+const { filterOfferedDomains } = require("../modules/domain.class");
 const { errorHandler } = require("../../../Core/http-handler");
 const configuration = require("../../../Core/config");
 const ZelfProofModule = require("../../ZelfProof/modules/zelf-proof.module");
 const { resolveEncryptVersion } = require("../modules/tags-addresses.module");
 const { hasMissingOwner, applyPreviewPublicData } = require("../../Tags/modules/tag-preview-public-data");
 const TagWalletBalancesModule = require("../modules/tag-wallet-balances.module");
+const { runMonthlyAccess } = require("../../ZelfID/modules/zelf-id-monthly-access.module");
 
 /**
  * Keep full pin name (e.g. user.zelfpay) for IPFS lookup; middleware only supplies registry TLD + local name.
@@ -103,12 +106,14 @@ const searchTagsByDomain = async (ctx) => {
     try {
         const { domain, storage, limit, pageOffset, name } = ctx.request.query;
 
-        let data = await TagsSearchModule.searchByDomain({ domain, storage, limit, pageOffset, name }, ctx.state.user);
+        const result = await TagsSearchModule.searchByDomain({ domain, storage, limit, pageOffset, name }, ctx.state.user);
 
         ctx.body = {
-            data,
-            limit,
-            total: data.length,
+            data: result.rows,
+            limit: result.limit,
+            pageOffset: result.pageOffset,
+            total: result.total,
+            ...(result.incomplete ? { incomplete: true } : {}),
         };
     } catch (error) {
         const _exception = errorHandler(error, ctx);
@@ -197,6 +202,9 @@ const leaseOfflineTag = async (ctx) => {
         ctx.status = _exception.status;
 
         ctx.body = { message: _exception.message, code: _exception.code };
+        if (error.rejected) {
+            ctx.body.rejected = error.rejected;
+        }
     }
 };
 
@@ -310,9 +318,11 @@ const decryptTag = async (ctx) => {
             domain: extractedDomain,
         };
 
-        const data = await Module.decryptTag(requestData, ctx.state.user);
-
-        ctx.body = { data };
+        await runMonthlyAccess(ctx, "tags-decrypt", async () => {
+            const data = await Module.decryptTag(requestData, ctx.state.user);
+            ZaiIdentity.attachIdentityToken(data, requestData.domain);
+            return data;
+        });
     } catch (error) {
         const _exception = errorHandler(error, ctx);
 
@@ -383,15 +393,17 @@ const getDomains = async (ctx, next) => {
 
         const { includeNonPaid } = ctx.request.query;
 
-        const domains = getAllSupportedDomains(
-            licenses,
-            includeNonPaid !== undefined ? !Boolean(includeNonPaid === "true") : configuration.env === "development" ? false : true,
+        const domains = filterOfferedDomains(
+            getAllSupportedDomains(
+                licenses,
+                includeNonPaid !== undefined ? !Boolean(includeNonPaid === "true") : configuration.env === "development" ? false : true,
+            ),
         );
 
         ctx.body = { data: domains };
     } catch (error) {
         console.error("Error loading domains:", error);
-        const domains = getAllSupportedDomains();
+        const domains = filterOfferedDomains(getAllSupportedDomains());
         ctx.body = { data: domains };
     }
 

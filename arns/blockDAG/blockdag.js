@@ -20,21 +20,21 @@
 		// Ensure domain is bdag for BlockDAG
 		const finalDomain = domain === "bdag" ? "bdag" : "bdag";
 
-		const apiUrl = isLocalhost ? "http://localhost:3050" : `https://v3.zelf.world`;
+		const apiUrl = isLocalhost ? "http://localhost:3050" : `https://v4.zelf.world`;
 
 		let bdagNameObject = {};
 		const apiBaseUrl = `${apiUrl}/api/tags/search`;
 
 		// Currency icon mapping
 		const currencyIcons = {
-			blockDAG: "https://bn2q32x744st6np7o5q3bdbzorr7jert2n6uxornedveocmw2dsa.arweave.net/C3UN6v_nJT81_3dhsIw5dGP0kjPTfUu6LSDqRwmW0OQ", // BlockDAG icon
-			ethereum: "https://dp44frbowjposjoknmyo4bon7om2gk4sdxbag3jnmooxqkz4uzfa.arweave.net/G_nCxC6yXuklymsw7gXN-5mjK5IdwgNtLWOdeCs8pko", // Ethereum icon
-			solana: "https://vw3ypbantpnrcc662suuvlnpcl4eewxt2janvyt2jppaabwelaaq.arweave.net/rbeHhA2b2xEL3tSpSq2vEvhCWvPSQNriekveAAbEWAE", // Solana icon
-			bitcoin: "https://ai4zitgjrujeosrovx6fkcqj4cfqt3iw7qhi677wj52iih34zkwa.arweave.net/AjmUTMmNEkdKLq38VQoJ4IsJ7Rb8Do9_9k90hB98yqw", // Bitcoin icon
-			avalanche: "https://rjzku6wtmhlkitxpklwzsgtjmpfd6tclwkwgrwlywfbnzhkerylq.arweave.net/inKqetNh1qRO71LtmRppY8o_TEuyrGjZeLFC3J1Ejhc", // AVAX icon
-			Polygon: "https://ow622ynu5zaenumha7edaxqxaib4k5p6rgdcccgdojpzatqcidma.arweave.net/db2tYbTuQEbRhwfIMF4XAgPFdf6JhiEIw3JfkE4CQNg", // Polygon icon
-			bnb: "https://kwrwz2x744st6np7o5q3bdbzorr7jert2n6uxornedveocmw2dsa.arweave.net/VaNs6vF5YUDvYQCC5hHXBnvWaI5E7mfgHvab_FaQdMM", // BNB icon
-			Sui: "https://ypl6m7xa4pfbuou25qjcfkbbsk26a4qehcxbhmbqn53a6ik6bg7q.arweave.net/w9fmfuDjyho6muwSIqghkrXgcgQ4rhOwMG92DyFeCb8", // SUI icon
+			blockDAG: "https://arweave.net/C3UN6v_nJT81_3dhsIw5dGP0kjPTfUu6LSDqRwmW0OQ",
+			ethereum: "https://arweave.net/G_nCxC6yXuklymsw7gXN-5mjK5IdwgNtLWOdeCs8pko",
+			solana: "https://arweave.net/rbeHhA2b2xEL3tSpSq2vEvhCWvPSQNriekveAAbEWAE",
+			bitcoin: "https://arweave.net/AjmUTMmNEkdKLq38VQoJ4IsJ7Rb8Do9_9k90hB98yqw",
+			avalanche: "https://arweave.net/inKqetNh1qRO71LtmRppY8o_TEuyrGjZeLFC3J1Ejhc",
+			Polygon: "https://arweave.net/db2tYbTuQEbRhwfIMF4XAgPFdf6JhiEIw3JfkE4CQNg",
+			bnb: "https://arweave.net/VaNs6vF5YUDvYQCC5hHXBnvWaI5E7mfgHvab_FaQdMM",
+			Sui: "https://arweave.net/w9fmfuDjyho6muwSIqghkrXgcgQ4rhOwMG92DyFeCb8",
 		};
 
 		function _generateUniqueIdentifier() {
@@ -93,29 +93,26 @@
 				headers.append("Authorization", `Bearer ${localStorage.getItem("sessionToken")}`);
 				headers.append("Content-Type", "application/json");
 
-				// Build URL with query parameters
-				const url = new URL(apiBaseUrl);
-				url.searchParams.append("tagName", tagName);
-				url.searchParams.append("domain", domain);
-				url.searchParams.append("environment", "arweave");
-				url.searchParams.append("type", "mainnet");
-
-				// Set up GET options
-				const options = {
-					method: "GET",
-					headers: headers,
-				};
-
-				// Fetch the data from the API
-				const response = await fetch(url.toString(), options);
-
-				// Check if the response is OK
-				if (!response.ok) {
-					throw new Error(`Failed to fetch data: ${response.statusText}`);
+				// v4 Zelf IDs first (IPFS + Arweave), v3 tags as fallback.
+				let data = null;
+				for (const [path, environment] of [["/api/zelf-ids/search", "all"], ["/api/tags/search", "arweave"]]) {
+					try {
+						const url = new URL(`${apiUrl}${path}`);
+						url.searchParams.append("tagName", tagName);
+						url.searchParams.append("domain", domain);
+						url.searchParams.append("environment", environment);
+						url.searchParams.append("type", "mainnet");
+						const response = await fetch(url.toString(), { method: "GET", headers });
+						if (!response.ok) continue;
+						const responseData = await response.json();
+						if (responseData?.data?.tagObject) {
+							data = responseData.data;
+							break;
+						}
+					} catch (lookupError) {
+						console.warn("Zelf ID lookup failed", path, lookupError);
+					}
 				}
-
-				const responseData = await response.json();
-				const data = responseData.data;
 
 				if (!data || !data.tagObject) throw new Error("No tag object received from API");
 

@@ -3,6 +3,7 @@ const moment = require("moment");
 const https = require("https");
 const { get_ApiKey } = require("../../Solana/modules/oklink");
 const StandardizedChainFormatter = require("../../class/standardized-chain-formatter");
+const { getTickerPrice } = require("../../binance/modules/binance.module");
 const { getTokenPrice } = require("../utils/token-pricing");
 const commonTokens = require("../data/common-tokens.json");
 

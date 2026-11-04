@@ -2,14 +2,16 @@ const ZelfIdModule = require("./zelf-id.module");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
 const { decrypt } = require("../../ZelfProof/modules/zelf-proof.module");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
+const { effectivePassword, resolveSecurityType } = require("./zelf-id-password.module");
+const { parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 
 const withV4 = (data) => ({ ...data, stack: "v4" });
 
 /**
  * Re-lease from an existing proof (import onto a name). Always v4.
  *
- * Inbound after Joi: `zelfProof`, `tagName`, `domain`, `faceBase64`, `password`, `os` required.
- * Optional: `addServerPassword`, `referralTagName`, `tolerance`, `duration`, `removePGP`, `captchaToken`.
+ * Inbound after Joi: `zelfProof`, `tagName`, `domain`, `faceBase64`, `os` required.
+ * Optional: `password` (omit or send the placeholder for face-only), `securityType`, `addServerPassword`, `referralTagName`, `tolerance`, `duration`, `removePGP`, `captchaToken`.
  *
  * @param {Object} payload
  * @param {Object} authUser
@@ -30,7 +32,10 @@ const leaseRecovery = async (payload, authUser) => {
 
     await ZelfIdModule._findDuplicatedTag(tagName, domain, domainConfig);
 
-    const { face, password } = await ZelfIdPartsModule.decryptParams(payload, authUser);
+    const { face, password: rawPassword } = await ZelfIdPartsModule.decryptParams(payload, authUser);
+
+    // Face-only: no password (placeholder accepted for older clients).
+    const password = effectivePassword({ password: rawPassword });
 
     const decryptedZelfProof = await decrypt(
         withV4({
@@ -53,6 +58,8 @@ const leaseRecovery = async (payload, authUser) => {
 
     const tagKey = domainConfig.getTagKey();
 
+    await _assertSourceNameNotActive(decryptedZelfProof.publicData?.[tagKey], domain, domainConfig, eth.address, tagName);
+
     const dataToEncrypt = {
         publicData: {
             ethAddress: eth.address,
@@ -69,7 +76,7 @@ const leaseRecovery = async (payload, authUser) => {
             solanaSecretKey: solana.secretKey,
         },
         faceBase64: face,
-        password,
+        ...(password ? { password } : {}),
         _id: tagName,
         tolerance: payload.tolerance,
         addServerPassword: Boolean(payload.addServerPassword),
@@ -96,14 +103,14 @@ const leaseRecovery = async (payload, authUser) => {
 
     tagObject.zelfProof = skipZelfProof ? zelfProof : tagObject.zelfProof;
 
-    const securityType = password ? (/^\d{6}$/.test(password) ? "pin" : "password") : null;
+    const securityType = resolveSecurityType(password);
 
     await ZelfIdModule.persistZelfIdLease(tagObject, referralTagObject, domainConfig, securityType, authUser);
 
     const pgp = await ZelfIdPartsModule.generatePGPKeys(
         dataToEncrypt,
         { eth, btc, solana, sui, stellar, arweave, polkadot, kusama, ton, aptos },
-        password
+        password || rawPassword
     );
 
     return {
@@ -122,6 +129,39 @@ const leaseRecovery = async (payload, authUser) => {
     };
 };
 
+/**
+ * Refuse recovery when the proof's original name is still active for the same wallet:
+ * that is a sign-in, not a recovery, and would mint a second name for one wallet.
+ * Expired names (expiresAt in the past) may be recovered onto a new name.
+ */
+const _assertSourceNameNotActive = async (sourceName, domain, domainConfig, ethAddress, newTagName) => {
+    if (!sourceName || sourceName === newTagName) return;
+
+    let result;
+
+    try {
+        result = await ZelfIdModule.searchTag({ tagName: sourceName, domain, domainConfig, environment: "all" });
+    } catch (_error) {
+        return;
+    }
+
+    if (!result || result.available) return;
+
+    const publicData = result.tagObject?.publicData || {};
+
+    if (publicData.ethAddress && ethAddress && publicData.ethAddress.toLowerCase() !== ethAddress.toLowerCase()) return;
+
+    const expiresAt = publicData.expiresAt ? parseLeaseDate(publicData.expiresAt).valueOf() : NaN;
+
+    if (Number.isFinite(expiresAt) && expiresAt < Date.now()) return;
+
+    const error = new Error("409:zelf_id_still_active");
+    // Keep a stable code for clients (errorHandler otherwise returns only "Conflict").
+    error.clientCode = "ERR_ZELF_ID_STILL_ACTIVE";
+    throw error;
+};
+
 module.exports = {
     leaseRecovery,
+    _assertSourceNameNotActive,
 };

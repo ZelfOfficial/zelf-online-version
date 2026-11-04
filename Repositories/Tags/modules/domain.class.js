@@ -1,4 +1,5 @@
 const config = require("../../../Core/config");
+const { codedError } = require("../../../Core/http-handler");
 /**
  * Domain Class
  *
@@ -56,6 +57,18 @@ class Domain {
 
         this.zelfkeys = {
             plans: domainData.zelfkeys?.plans || [],
+            /**
+             * Optional per-plan caps. Keys are plan names (`free`, `premium`, `unlimited`).
+             * Shape: `{ passwords, zotp, swapsPerMonth, nonEvmChains }`.
+             * A numeric field replaces the config cap; `null` means unlimited for that count.
+             * `nonEvmChains` is a boolean: the plan may activate a new non-EVM chain.
+             * Omitted fields keep the config default. This is separate from `limits.zelfkeys`,
+             * which is the org seat count from the Stripe license, not a password cap.
+             */
+            planLimits:
+                domainData.zelfkeys?.planLimits && typeof domainData.zelfkeys.planLimits === "object"
+                    ? domainData.zelfkeys.planLimits
+                    : {},
             payment: {
                 whitelist: domainData.zelfkeys?.payment?.whitelist || domainData.zelfkeys?.whitelist || {},
                 pricingTable: domainData.zelfkeys?.payment?.pricingTable || domainData.zelfkeys?.pricingTable || {},
@@ -123,11 +136,7 @@ class Domain {
         if (plan !== "premium" && plan !== "unlimited") return fallback;
 
         const planTable = this.tags?.payment?.planPricing?.[plan];
-        if (planTable && typeof planTable === "object" && Object.keys(planTable).length > 0) {
-            return planTable;
-        }
-
-        return fallback;
+        return planTable && typeof planTable === "object" ? planTable : {};
     }
 
     /**
@@ -137,8 +146,79 @@ class Domain {
      * @returns {number|undefined}
      */
     _lookupTablePrice(table, length, duration) {
-        if (length >= 6 && length <= 15) return table?.["6-15"]?.[duration];
-        return table?.[length]?.[duration];
+        if (!table || typeof table !== "object") return undefined;
+        if (table[length]?.[duration] != null) return table[length][duration];
+
+        // Range keys from the license, e.g. "6-15", "16-27".
+        for (const [key, cells] of Object.entries(table)) {
+            const match = /^(\d+)-(\d+)$/.exec(key);
+            if (match && length >= Number(match[1]) && length <= Number(match[2]) && cells?.[duration] != null) {
+                return cells[duration];
+            }
+        }
+
+        return undefined;
+    }
+
+    /**
+     * Price for a Zelf ID plan read ONLY from the license `tags.payment.planPricing`
+     * (no Tags table, no code defaults). Undefined means the license does not sell it.
+     * @param {"premium"|"unlimited"|string} plan
+     * @param {number} length
+     * @param {string} [duration]
+     * @returns {number|undefined}
+     */
+    licensePlanPrice(plan, length, duration = "1") {
+        const table = this.tags?.payment?.planPricing?.[plan];
+        const price = this._lookupTablePrice(table, length, `${duration}`);
+        return typeof price === "number" && Number.isFinite(price) ? price : undefined;
+    }
+
+    /**
+     * Whether the license offers `plan` (for `duration`, when given) to a name of `length`.
+     * @param {string} plan
+     * @param {number} length
+     * @param {string} [duration]
+     * @returns {boolean}
+     */
+    licenseOffersPlan(plan, length, duration) {
+        if (duration != null) return this.licensePlanPrice(plan, length, duration) !== undefined;
+        const table = this.tags?.payment?.planPricing?.[plan];
+        if (!table || typeof table !== "object") return false;
+        return this.licensePlanDurations(plan, length).length > 0;
+    }
+
+    /**
+     * Durations the license prices for `plan` at this name length (e.g. ["1","2","3","lifetime"]).
+     * Read from the license cells; nothing is hardcoded.
+     * @param {string} plan
+     * @param {number} length
+     * @returns {string[]}
+     */
+    licensePlanDurations(plan, length) {
+        const table = this.tags?.payment?.planPricing?.[plan];
+        if (!table || typeof table !== "object") return [];
+
+        const durations = new Set();
+        for (const [key, cells] of Object.entries(table)) {
+            const range = /^(\d+)-(\d+)$/.exec(key);
+            const covers = range ? length >= Number(range[1]) && length <= Number(range[2]) : Number(key) === length;
+            if (!covers || !cells || typeof cells !== "object") continue;
+            for (const [duration, price] of Object.entries(cells)) {
+                if (typeof price === "number" && Number.isFinite(price)) durations.add(duration);
+            }
+        }
+
+        return [...durations];
+    }
+
+    /**
+     * True when this license sells at least one plan cell (`tags.payment.planPricing`).
+     * Domains with an empty table (live `.avax`) are not offered for new names.
+     * @returns {boolean}
+     */
+    offersPlanPricing() {
+        return domainOffersPlanPricing(this);
     }
 
     /**
@@ -170,24 +250,24 @@ class Domain {
 
         const length = splitTagName[0].length;
         const plan = options && typeof options === "object" ? options.plan : undefined;
+        const zelfIdQuote = Boolean(options && typeof options === "object" && options.zelfIdQuote);
         const fallbackTable = this.tags?.payment?.pricingTable || {};
-        const table = this._pricingTableForPlan(plan);
+        const isPlan = plan === "premium" || plan === "unlimited";
+        let price;
 
-        if (!fallbackTable && !table) return 0;
-
-        if (!["1", "2", "3", "4", "5", "lifetime"].includes(`${duration}`))
-            throw new Error("Invalid duration. Use '1', '2', '3', '4', '5' or 'lifetime'.");
-
-        let price = this._lookupTablePrice(table, length, duration);
-        if (price == null && table !== fallbackTable) {
+        if (isPlan) {
+            // Zelf ID plans: ONLY the license planPricing. No Tags table, no hardcoded default.
+            price = this.licensePlanPrice(plan, length, `${duration}`);
+            if (price === undefined) {
+                throw codedError("409:PLAN_DURATION_NOT_OFFERED_BY_LICENSE");
+            }
+        } else {
             price = this._lookupTablePrice(fallbackTable, length, duration);
         }
 
+        // No hardcoded default: a name/duration the license does not price is not for sale.
         if (price == null) {
-            if (length < 1 || length > 27) {
-                throw new Error("Invalid name length. Length must be between 1 and 27.");
-            }
-            price = 24;
+            throw new Error("409:price_not_in_license");
         }
 
         // Adjust price for development environment
@@ -214,17 +294,25 @@ class Domain {
                 discountType = "amount";
                 price = price - discount;
             }
-        } else if (referralTagName) {
-            // default discount 10 %
+        } else if (referralTagName && !isPlan && !zelfIdQuote) {
+            // Legacy Tags default when the license has no whitelist entry for this referrer.
+            // Zelf ID quotes use whitelist coupons only (no hardcoded referral %).
             price = price - price * 0.1;
         }
+
+        const rewardPrice = this.tags?.payment?.rewardPrice;
+        const rewardBasis = isPlan || zelfIdQuote ? priceWithoutDiscount : price;
+        const reward =
+            typeof rewardPrice === "number" && rewardPrice > 0
+                ? Math.max(Math.round((rewardBasis / rewardPrice) * 100) / 100, 0)
+                : 0;
 
         // Round to 2 decimal places (nearest cent)
         return {
             duration,
             price: Math.max(Math.round(price * 100) / 100, 0),
             currency: "USD",
-            reward: Math.max(Math.round((price / this.tags?.payment.rewardPrice) * 100) / 100, 0),
+            reward,
             discount,
             priceWithoutDiscount,
             discountType,
@@ -562,8 +650,47 @@ class DomainFactory {
 // Create singleton instance (domains will be loaded when needed)
 const domainFactory = new DomainFactory();
 
+/**
+ * True when `tags.payment.planPricing` contains at least one numeric cell.
+ * An empty object is not an offer. No USD amount is invented here.
+ * @param {Object} [domainConfig]
+ * @returns {boolean}
+ */
+const domainOffersPlanPricing = (domainConfig) => {
+    const planPricing = domainConfig?.tags?.payment?.planPricing;
+    if (!planPricing || typeof planPricing !== "object" || Array.isArray(planPricing)) return false;
+
+    for (const table of Object.values(planPricing)) {
+        if (!table || typeof table !== "object" || Array.isArray(table)) continue;
+        for (const cells of Object.values(table)) {
+            if (!cells || typeof cells !== "object" || Array.isArray(cells)) continue;
+            for (const price of Object.values(cells)) {
+                if (typeof price === "number" && Number.isFinite(price)) return true;
+            }
+        }
+    }
+
+    return false;
+};
+
+/**
+ * Drop domains whose license has no plan prices (the public domains list).
+ * @param {Object} [domains]
+ * @returns {Object}
+ */
+const filterOfferedDomains = (domains) => {
+    if (!domains || typeof domains !== "object") return domains;
+    const offered = {};
+    for (const [name, config] of Object.entries(domains)) {
+        if (domainOffersPlanPricing(config)) offered[name] = config;
+    }
+    return offered;
+};
+
 module.exports = {
     Domain,
     DomainFactory,
     domainFactory,
+    domainOffersPlanPricing,
+    filterOfferedDomains,
 };

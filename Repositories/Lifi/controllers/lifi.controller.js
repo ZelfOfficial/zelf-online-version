@@ -1,4 +1,6 @@
 const Module = require("../modules/lifi.module.js");
+const { errorHandler } = require("../../../Core/http-handler");
+const { executeLimitedSwap } = require("../../ZelfKeys/modules/zelf-key-plan-limits.module");
 
 /**
  * @param {Object} ctx
@@ -95,12 +97,25 @@ const getTools = async (ctx) => {
  */
 const executeAdvancedStepTransaction = async (ctx) => {
 	try {
-		const data = await Module.executeAdvancedStepTransaction(ctx.request.body);
+		const outcome = await executeLimitedSwap({
+			authUser: ctx.state.user,
+			execute: () => Module.executeAdvancedStepTransaction(ctx.request.body),
+		});
 
-		ctx.body = { data };
+		ctx.body = { data: outcome.result, swaps: outcome.swaps };
 	} catch (error) {
-		ctx.status = error.status || 500;
+		if (error?.clientCode) {
+			const handled = errorHandler(error, ctx);
+			ctx.status = handled.status;
+			ctx.body = {
+				message: handled.message,
+				code: handled.code,
+				...(error.details && typeof error.details === "object" ? error.details : {}),
+			};
+			return;
+		}
 
+		ctx.status = error.status || 500;
 		ctx.body = { error: error.message };
 	}
 };

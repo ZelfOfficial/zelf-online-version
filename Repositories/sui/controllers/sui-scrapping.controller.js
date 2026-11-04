@@ -1,16 +1,21 @@
 const Module = require("../modules/sui-scrapping.module");
 
+const safeLog = (value) => String(value || "sui_upstream_unavailable").replace(/https?:\/\/\S+/gi, "[url]").slice(0, 200);
+
+const fail = (ctx, error, label) => {
+	const code = error.code || error.message || "sui_upstream_unavailable";
+	console.error(`[sui] ${label}: ${safeLog(code)}`);
+	ctx.status = error.status || 500;
+	ctx.body = { error: error.message || code, code };
+};
+
 const address = async (ctx) => {
 	try {
 		const data = await Module.getAddress(ctx.request.params);
 
 		ctx.body = { data };
 	} catch (error) {
-		console.error(error);
-
-		ctx.status = error.status || 500;
-
-		ctx.body = { error: error.message };
+		fail(ctx, error, "address");
 	}
 };
 
@@ -20,11 +25,7 @@ const transactions = async (ctx) => {
 
 		ctx.body = { data };
 	} catch (error) {
-		console.error(error);
-
-		ctx.status = error.status || 500;
-
-		ctx.body = { error: error.message };
+		fail(ctx, error, "transactions");
 	}
 };
 
@@ -34,11 +35,7 @@ const transaction = async (ctx) => {
 
 		ctx.body = { data };
 	} catch (error) {
-		console.error(error);
-
-		ctx.status = error.status || 500;
-
-		ctx.body = { error: error.message };
+		fail(ctx, error, "transaction");
 	}
 };
 
@@ -48,11 +45,7 @@ const tokens = async (ctx) => {
 
 		ctx.body = { data };
 	} catch (error) {
-		console.error(error);
-
-		ctx.status = error.status || 500;
-
-		ctx.body = { error: error.message };
+		fail(ctx, error, "tokens");
 	}
 };
 module.exports = {

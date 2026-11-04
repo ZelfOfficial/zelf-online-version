@@ -1,6 +1,7 @@
 const config = require("../../../Core/config");
 const Controller = require("../controllers/lawyer.controller");
 const Middleware = require("../middlewares/lawyer.middleware");
+const FaceMiddleware = require("../../Face/middlewares/face.middleware");
 
 const base = "/lawyers";
 
@@ -20,17 +21,17 @@ module.exports = (server) => {
 	server.get(`${PATH}/me`, Controller.getMyProfile);
 
 	// Invite a lawyer
-	server.post(`${PATH}/invite`, Middleware.inviteValidation, Controller.generateInvitation);
+	server.post(`${PATH}/invite`, Middleware.inviteValidation, FaceMiddleware.gate("lawyer-face"), Controller.generateInvitation);
 
 	// Update lawyer profile
-	server.put(`${PATH}/profile`, Middleware.updateProfileValidation, Controller.updateProfile);
+	server.put(`${PATH}/profile`, Middleware.updateProfileValidation, FaceMiddleware.gate("lawyer-face"), Controller.updateProfile);
 
 	// Preferred lawyers
 	server.get(`${PATH}/preferred`, Controller.getPreferred);
 	server.put(`${PATH}/preferred`, Middleware.setPreferredValidation, Controller.setPreferred);
 
 	// Remove lawyer
-	server.del(`${PATH}`, Middleware.removeValidation, Controller.remove);
+	server.del(`${PATH}`, Middleware.removeValidation, FaceMiddleware.gate("lawyer-face"), Controller.remove);
 
 	// ERC8004 endpoints
 	server.post(`${PATH}/register-identity`, Controller.registerIdentity);

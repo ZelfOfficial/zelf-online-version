@@ -186,9 +186,9 @@ describe("Lease Offline API Integration Tests - Real Server", () => {
 					.set("Authorization", `Bearer ${authToken}`)
 					.send(leaseData);
 
-				// Should return either 409 (validation/tag exists) or 500 (ZelfProof error)
+				// Should return either 409 (validation/tag exists/domain not offered) or 500 (ZelfProof error)
 				expect([409, 500]).toContain(response.status);
-				expect(response.body.error || response.body.validationError).toBeDefined();
+				expect(response.body.error || response.body.validationError || response.body.code).toBeDefined();
 			}
 		});
 

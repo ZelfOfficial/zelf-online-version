@@ -1,4 +1,5 @@
 const Module = require("../modules/zelf-keys-subscription.module.js");
+const { errorHandler } = require("../../../Core/http-handler");
 
 const getActiveSubscription = async (ctx) => {
 	try {
@@ -140,10 +141,13 @@ const checkSession = async (ctx) => {
 	} catch (error) {
 		console.error("Error checking session:", error);
 
-		ctx.status = error.status || 500;
+		const _exception = errorHandler(error, ctx);
+
+		ctx.status = _exception.status;
 		ctx.body = {
-			error: error.message,
 			success: false,
+			message: _exception.message,
+			code: _exception.code,
 		};
 	}
 };

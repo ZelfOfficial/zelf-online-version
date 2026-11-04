@@ -1,139 +1,66 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>BlockDAG Name Service</title>
-		<link
-			rel="stylesheet"
-			href="https://nem2bofpmmfwmlgiibs7e54olpf7dcgl5bkkxv7roo6ou42aihca.arweave.net/aRmguK9jC2YsyEBl8neOW8vxiMvoVKvX8XO86nNAQcQ"
-		/>
-
-		<!-- icon for the tab -->
-		<link
-			rel="icon"
-			type="image/x-icon"
-			href="https://dthn3plzgi5c3d3hfrpkahrp7ljvept54k2v5hzavyuvvaum4fhq.arweave.net/HM7dvXkyOi2PZyxeoB4v-tNSPn3itV6fIK4pWoKM4U8"
-		/>
-		<link
-			rel="icon"
-			type="image/png"
-			sizes="256x256"
-			href="https://5nus3zwkvzbe7iyc3skx5a223hc3lghsqkfkb3fj767tsqmvqlla.arweave.net/62kt5squQk-jAtyVfoNa2cW1mPKCiqDsqf-_OUGVgtY"
-		/>
-		<link
-			rel="icon"
-			type="image/png"
-			sizes="164x164"
-			href="https://4zhi5jxgc7f5n35rmg3mih2nzykfz6eizrjsfai5cpxfjso3ahga.arweave.net/5k6OpuYXy9bvsWG2xB9NzhRc-IjMUyKBHRPuVMnbAcw"
-		/>
-		<link
-			rel="icon"
-			type="image/png"
-			sizes="128x128"
-			href="https://lezfgy6lkhop5q74x3ukqbpzex7bgo3zag4ihnyg432dlmmkvb2q.arweave.net/WTJTY8tR3P7D_L7oqAX5Jf4TO3kBuIO3Bub0NbGKqHU"
-		/>
-		<link
-			rel="icon"
-			type="image/png"
-			sizes="16x16"
-			href="https://jxbc5qod5fbuhrn2wze7suelhbborkogf42uzbsamqzku7adkdda.arweave.net/TcIuwcPpQ0PFurZJ-VCLOELoqcYvNUyGQGQyqnwDUMY"
-		/>
-		<link
-			rel="icon"
-			type="image/png"
-			sizes="48x48"
-			href="https://5uisd2vw2vzdzblm6pzchnnjmbfdmsg2udmiwui6cdzfmqlq3ega.arweave.net/7REh6rbVcjyFbPPyI7WpYEo2SNqg2ItRHhDyVkFw2Qw"
-		/>
-		<link rel="preconnect" href="https://fonts.googleapis.com" />
-		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-		<link
-			href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=Anek+Devanagari:wght@400;600;700&display=swap"
-			rel="stylesheet"
-		/>
+		<link rel="stylesheet" href="./blockdag.css" data-arns-css="https://arweave.net/b3VIOSd7gbSHh9KhBr2-CBSiGXQ3xElfZZ-d9YGuk1k" />
+		<link rel="icon" type="image/x-icon" href="https://arweave.net/HM7dvXkyOi2PZyxeoB4v-tNSPn3itV6fIK4pWoKM4U8" />
+		<link rel="icon" type="image/png" sizes="256x256" href="https://arweave.net/62kt5squQk-jAtyVfoNa2cW1mPKCiqDsqf-_OUGVgtY" />
+		<link rel="icon" type="image/png" sizes="164x164" href="https://arweave.net/5k6OpuYXy9bvsWG2xB9NzhRc-IjMUyKBHRPuVMnbAcw" />
+		<link rel="icon" type="image/png" sizes="128x128" href="https://arweave.net/WTJTY8tR3P7D_L7oqAX5Jf4TO3kBuIO3Bub0NbGKqHU" />
+		<link rel="icon" type="image/png" sizes="16x16" href="https://arweave.net/TcIuwcPpQ0PFurZJ-VCLOELoqcYvNUyGQGQyqnwDUMY" />
+		<link rel="icon" type="image/png" sizes="48x48" href="https://arweave.net/7REh6rbVcjyFbPPyI7WpYEo2SNqg2ItRHhDyVkFw2Qw" />
 	</head>
 	<body>
-		<div class="container">
-			<!-- Left Column (now with BDAG name and QR code) -->
-			<div class="right-column">
-				<div class="right-content">
-					<!-- BDAG Name Display -->
-					<h1 class="bdag-name" id="bdagName">[YOUR_NAME].BDAG</h1>
-
-					<!-- QR Code Card -->
-					<div class="qr-section">
-						<div class="qr-card">
-							<img
-								id="bdagproof"
-								src="https://arweave.net/szXAC_kSbjeLsB7hrZj0dID73GZEkDYPVUlI5ROAW7c"
-								alt="BDAG Proof QR Code"
-							/>
-						</div>
-
-						<!-- Download Section -->
-						<div class="download-section">
-							<p class="download-text">Get your BDAG name now</p>
-							<button class="download-button" id="downloadButton">
-								<span>Download App</span>
-							</button>
-						</div>
-					</div>
-				</div>
+		<main class="page">
+			<div class="blockdag-logo">
+				<img src="https://arweave.net/ID0Hum0y57LJ9wNOc65ZtUPaaQnLIc6ZALav5awU2Xs" alt="BlockDAG" />
 			</div>
+			<p class="eyebrow">BlockDAG Name Service</p>
+			<h1 class="bdag-name" id="bdagName">yourname.bdag</h1>
 
-			<!-- Right Column (now with address cards and referral) -->
-			<div class="left-column">
-				<div class="background-pattern"></div>
-				<div class="left-content">
-					<!-- BlockDAG Logo -->
-					<div class="blockdag-logo">
-						<img
-							src="https://ea6qpotnglt3fspxanhhhlszwvb5u2ijzmq45giaw2x6llau3f5q.arweave.net/ID0Hum0y57LJ9wNOc65ZtUPaaQnLIc6ZALav5awU2Xs"
-							alt="BlockDAG Logo"
-						/>
+			<div class="layout">
+				<section class="qr-section">
+					<div class="qr-card">
+						<img id="bdagproof" src="https://arweave.net/szXAC_kSbjeLsB7hrZj0dID73GZEkDYPVUlI5ROAW7c" alt="BDAG proof" />
 					</div>
-					<!-- Address Cards Grid -->
-					<div class="addresses-grid" id="addressesGrid"></div>
+					<div class="download-section">
+						<p class="download-text">Get your BDAG name now</p>
+						<button class="download-button" id="downloadButton" type="button">Download app</button>
+					</div>
+				</section>
 
-					<!-- Referral Section -->
+				<section class="details">
+					<div class="addresses-grid" id="addressesGrid"></div>
 					<div class="referral-section">
 						<div class="referral-header">
-							<h2 class="referral-title">Do you want to get your own BDAG name?</h2>
-							<p class="referral-subtitle">Use my BDAG name and get 10% off on your first purchase</p>
+							<h2 class="referral-title">Get your own BDAG name</h2>
+							<p class="referral-subtitle">Use my BDAG name and get 10% off on your first purchase.</p>
 						</div>
 						<div class="referral-code-container" id="copyReferralCode">
 							<span class="referral-code" id="bdag-name-copy">...</span>
-							<button class="copy-button-secondary">
-								<span>Copy</span>
-								<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-									<path
-										d="M16 1H4C2.9 1 2 1.9 2 3V17H4V3H16V1ZM19 5H8C6.9 5 6 5.9 6 7V21C6 22.1 6.9 23 8 23H19C20.1 23 21 22.1 21 21V7C21 5.9 20.1 5 19 5ZM19 21H8V7H19V21Z"
-										fill="white"
-									/>
-								</svg>
-							</button>
+							<button class="copy-button-secondary" type="button">Copy</button>
 						</div>
 					</div>
-				</div>
+				</section>
 			</div>
-		</div>
+		</main>
 
-		<!-- Loading Badge -->
 		<div class="loading-badge" id="loadingBadge" style="display: none">
 			<div class="spinner"></div>
 			<span class="badge-label">Loading from <span class="badge-source">Arweave</span></span>
 		</div>
-
-		<!-- Toast Container -->
 		<div class="toast-container" id="toastContainer"></div>
-
-		<!-- Script -->
 		<script>
 			const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+			const styleLink = document.querySelector("[data-arns-css]");
+			if (!isLocalhost && styleLink) {
+				const nextCss = styleLink.getAttribute("data-arns-css");
+				if (nextCss && nextCss.startsWith("https://")) styleLink.href = nextCss;
+			}
 			const script = document.createElement("script");
-			script.src = isLocalhost
-				? "./blockdag.js"
-				: "https://kjxcu5hntwhnenjljkdd6w73oadmu323j4gr3y7bu6lp5ems36wa.arweave.net/Um4qdO2djtI1K0qGP1v7cAbKb1tPDR3j4aeW_pGS36w";
+			script.src = isLocalhost ? "./blockdag.js" : "https://arweave.net/Bi1vHttkox28kMMQB9LIPm_gTHTikYdU1eIkqqE1Lqw";
 			document.body.appendChild(script);
 		</script>
 	</body>

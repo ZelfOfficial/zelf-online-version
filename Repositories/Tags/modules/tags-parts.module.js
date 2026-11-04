@@ -19,18 +19,12 @@ const SessionModule = require("../../Session/modules/session.module");
  * @returns {Object} - Decrypted parameters
  */
 const decryptParams = async (params, authUser) => {
-    if (params.removePGP) {
-        return {
-            face: params.faceBase64,
-            password: params.password,
-            mnemonic: params.mnemonic,
-        };
-    }
-
-    // Only decrypt if the values exist and are not null/undefined
-    const password = params.password ? await SessionModule.sessionDecrypt(params.password, authUser) : null;
-    const mnemonic = params.mnemonic ? await SessionModule.sessionDecrypt(params.mnemonic, authUser) : null;
-    const face = params.faceBase64 ? await SessionModule.sessionDecrypt(params.faceBase64, authUser) : null;
+    // One rule per field, whatever removePGP says: armored PGP -> session-decrypt, anything else is plaintext.
+    const [password, mnemonic, face] = await Promise.all([
+        SessionModule.decryptIfPGP(params.password, authUser),
+        SessionModule.decryptIfPGP(params.mnemonic, authUser),
+        SessionModule.decryptIfPGP(params.faceBase64, authUser),
+    ]);
 
     return { password, mnemonic, face };
 };

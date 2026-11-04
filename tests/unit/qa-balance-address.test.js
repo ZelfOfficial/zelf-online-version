@@ -9,7 +9,9 @@ test('bounceable, non-bounceable and raw TON spellings resolve the same account'
 });
 test('RouteScan integer quantities keep token decimals instead of inflating the balance', () => {
     expect(mapRouteScanHolding({tokenQuantity:'1234567890123456789',tokenDecimals:18,tokenSymbol:'WAVAX'}).amount).toBe('1.234567890123456789');
-    expect(() => mapRouteScanHolding({tokenQuantity:'unknown',tokenDecimals:18})).toThrow();
+    expect(mapRouteScanHolding({tokenQuantity:'unknown',tokenDecimals:18})).toBeNull();
+    expect(mapRouteScanHolding({tokenQuantity:'1',tokenAddress:'0xFF498d'})).toBeNull();
+    expect(mapRouteScanHolding({tokenQuantity:'1000',tokenDecimals:'18',tokenSymbol:'X'}).amount).toBe('0.000000000000001');
 });
 
 test('EVM lookups try the checksum and lowercase spellings the registry may hold (#562)', () => {

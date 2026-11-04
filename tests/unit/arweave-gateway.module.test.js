@@ -5,6 +5,8 @@ const {
 	getPublicGatewayUrl,
 	getArnsGatewayHost,
 	buildTxUrl,
+	resolveContentUrl,
+	_clearContentUrlCache,
 	buildExplorerUrl,
 	buildArnsUndernameUrl,
 	isSingleTagLookupKey,
@@ -15,6 +17,7 @@ const {
 describe("arweave-gateway.module", () => {
 	beforeEach(() => {
 		jest.restoreAllMocks();
+		_clearContentUrlCache();
 	});
 
 	it("returns default ranked graphql gateways", () => {
@@ -26,7 +29,7 @@ describe("arweave-gateway.module", () => {
 	});
 
 	it("returns default arns gateway host", () => {
-		expect(getArnsGatewayHost()).toBe(config.arwave.arnsGatewayHost);
+		expect(getArnsGatewayHost()).toBe("ar.io");
 	});
 
 	it("builds tx and explorer urls", () => {
@@ -34,9 +37,25 @@ describe("arweave-gateway.module", () => {
 		expect(buildExplorerUrl("abc123")).toBe("https://viewblock.io/arweave/tx/abc123");
 	});
 
+	it("returns the ar.io url when that gateway serves the transaction", async () => {
+		const probe = jest.fn(async (url) => url.startsWith("https://ar.io/"));
+
+		await expect(resolveContentUrl("abc123", { probe, now: () => 1 })).resolves.toBe("https://ar.io/abc123");
+		expect(probe).toHaveBeenCalledTimes(1);
+		expect(probe.mock.calls[0][0]).toBe("https://ar.io/abc123");
+	});
+
+	it("falls through to arweave.net when ar.io does not serve the transaction", async () => {
+		const probe = jest.fn(async (url) => url.startsWith("https://arweave.net/"));
+
+		await expect(resolveContentUrl("def456", { probe, now: () => 1 })).resolves.toBe("https://arweave.net/def456");
+		expect(probe.mock.calls[0][0]).toBe("https://ar.io/def456");
+		expect(probe.mock.calls[1][0]).toBe("https://arweave.net/def456");
+	});
+
 	it("builds arns undername urls", () => {
-		expect(buildArnsUndernameUrl("migueltrevino", "zelf")).toBe("https://migueltrevino_zelf.arweave.net");
-		expect(buildArnsUndernameUrl("migueltrevino", "bdag")).toBe("https://migueltrevino_bdag_zelf.arweave.net");
+		expect(buildArnsUndernameUrl("migueltrevino", "zelf")).toBe("https://migueltrevino_zelf.ar.io");
+		expect(buildArnsUndernameUrl("migueltrevino", "bdag")).toBe("https://migueltrevino_bdag_zelf.ar.io");
 	});
 
 	it("detects single-tag lookup keys", () => {

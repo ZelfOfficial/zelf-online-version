@@ -1,0 +1,106 @@
+{
+ "meta": {
+  "fee": 45300,
+  "preBalances": [
+   181229105,
+   0,
+   2039280,
+   1,
+   3388612899,
+   1,
+   0,
+   1461600,
+   1009200,
+   200653906
+  ],
+  "postBalances": [
+   179695365,
+   1488440,
+   2039280,
+   1,
+   3388612899,
+   1,
+   0,
+   1461600,
+   1009200,
+   200653906
+  ],
+  "preTokenBalances": [
+   {
+    "accountIndex": 2,
+    "mint": "GfF6PSkH8bKLkws5RMFdzgASwcVbgCfhhKfp8zeoFBkx",
+    "owner": "6CFZqPJeBs7R4M16Nv2sMK9v9gSJsimPomreFVtFBMY6",
+    "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "uiTokenAmount": {
+     "amount": "7560729793460",
+     "decimals": 8,
+     "uiAmount": 75607.2979346,
+     "uiAmountString": "75607.2979346"
+    }
+   }
+  ],
+  "postTokenBalances": [
+   {
+    "accountIndex": 1,
+    "mint": "GfF6PSkH8bKLkws5RMFdzgASwcVbgCfhhKfp8zeoFBkx",
+    "owner": "E5zQvcpuRdtcwZfRxBKHLgnUQRf6wCsYBf75Lix5upEG",
+    "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "uiTokenAmount": {
+     "amount": "1000000000",
+     "decimals": 8,
+     "uiAmount": 10.0,
+     "uiAmountString": "10"
+    }
+   },
+   {
+    "accountIndex": 2,
+    "mint": "GfF6PSkH8bKLkws5RMFdzgASwcVbgCfhhKfp8zeoFBkx",
+    "owner": "6CFZqPJeBs7R4M16Nv2sMK9v9gSJsimPomreFVtFBMY6",
+    "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "uiTokenAmount": {
+     "amount": "7559729793460",
+     "decimals": 8,
+     "uiAmount": 75597.2979346,
+     "uiAmountString": "75597.2979346"
+    }
+   }
+  ],
+  "err": null
+ },
+ "transaction": {
+  "message": {
+   "accountKeys": [
+    {
+     "pubkey": "6CFZqPJeBs7R4M16Nv2sMK9v9gSJsimPomreFVtFBMY6"
+    },
+    {
+     "pubkey": "2eGrYEW353qSwX1FDqTrLZiQWqxaEEYLQ5ez6QNLBCwT"
+    },
+    {
+     "pubkey": "2zmStuVSTiw7BxiSdbzmqwERX7pcRueYqAScSSw3xobc"
+    },
+    {
+     "pubkey": "11111111111111111111111111111111"
+    },
+    {
+     "pubkey": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+    },
+    {
+     "pubkey": "ComputeBudget111111111111111111111111111111"
+    },
+    {
+     "pubkey": "E5zQvcpuRdtcwZfRxBKHLgnUQRf6wCsYBf75Lix5upEG"
+    },
+    {
+     "pubkey": "GfF6PSkH8bKLkws5RMFdzgASwcVbgCfhhKfp8zeoFBkx"
+    },
+    {
+     "pubkey": "SysvarRent111111111111111111111111111111111"
+    },
+    {
+     "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+    }
+   ]
+  }
+ }
+}

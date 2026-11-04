@@ -125,6 +125,15 @@ const schemas = {
 			}).required(),
 			zelfkeys: object({
 				plans: array().items(object()).default([]),
+				planLimits: object()
+					.pattern(
+						string(),
+						object({
+							passwords: number().integer().min(0).allow(null),
+							zotp: number().integer().min(0).allow(null),
+						 }),
+					)
+					.optional(),
 				payment: object({
 					whitelist: object().default({}),
 					pricingTable: object().default({}),

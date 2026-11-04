@@ -19,6 +19,23 @@ const assertValidTonAddress = (value) => {
 	return trimmed;
 };
 
+const toRawTonAddress = (value) => {
+	try {
+		return Address.parse(String(value || "").trim()).toRawString();
+	} catch (_) {
+		return null;
+	}
+};
+
+/** True when two TON addresses (raw 0:… or friendly UQ/EQ) point to the same account. */
+const sameTonAddress = (a, b) => {
+	const ra = toRawTonAddress(a);
+	const rb = toRawTonAddress(b);
+	return ra != null && ra === rb;
+};
+
 module.exports = {
 	assertValidTonAddress,
+	sameTonAddress,
+	toRawTonAddress,
 };

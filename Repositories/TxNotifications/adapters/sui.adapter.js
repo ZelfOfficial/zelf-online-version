@@ -1,17 +1,14 @@
-const config = require("../../../Core/config");
 const { formatUnits } = require("../modules/amount.util");
 const { suiCoin } = require("../modules/tokens");
-const { ProviderError, postJson } = require("./http.util");
+const { querySuiGraphql } = require("../../sui/modules/sui-graphql.client");
 
 /**
- * Sui via GraphQL: public fullnodes answer "JSON-RPC ... has been deprecated"
- * for `suix_queryTransactionBlocks`, so this follows
- * `transactions(filter: { affectedAddress })` forward with the page cursor and
- * reads each transaction's balance changes. SUI and curated coins only;
- * transactions the owner sent are ignored.
+ * Sui via GraphQL. JSON-RPC `suix_queryTransactionBlocks` is gone on mainnet, so
+ * this follows `transactions(filter: { affectedAddress })` and reads balance
+ * changes. The endpoint list is shared with /api/sui: `${SUI_RPC_URL}/graphql`
+ * when that base is configured, then the public mainnet GraphQL service.
+ * SUI and curated coins only; transactions the owner sent are ignored.
  */
-
-const graphqlUrl = () => config.txNotifications?.suiGraphqlUrl || "https://graphql.mainnet.sui.io/graphql";
 
 const TRANSACTION_FIELDS = `
     pageInfo { endCursor }
@@ -65,9 +62,8 @@ const parseSuiTransaction = (node, address) => {
 };
 
 const query = async (text, variables) => {
-    const data = await postJson(graphqlUrl(), { query: text, variables }, { label: "sui_graphql" });
-    if (data?.errors?.length) throw new ProviderError("sui_graphql_error");
-    return data?.data?.transactions || { nodes: [], pageInfo: {} };
+    const data = await querySuiGraphql(text, variables);
+    return data?.transactions || { nodes: [], pageInfo: {} };
 };
 
 const poll = async ({ address, state = {}, seen, minTimestampMs }) => {

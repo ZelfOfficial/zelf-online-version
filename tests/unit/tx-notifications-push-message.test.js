@@ -80,7 +80,7 @@ describe("tx-notifications push text", () => {
         const newer = transfer({ network: "solana", asset: "SOL", hash: "sig-2", timestampMs: 2000 });
         const many = buildSummaryPayload({ appId: APP_ID, device: device("es"), transfers: [older, newer] });
         expect(many.contents.en).toBe("Recibiste 2 transacciones nuevas");
-        expect(many.data).toEqual({ type: "tx_received", network: "solana", hash: "sig-2", summary: "true", count: "2" });
+        expect(many.data).toMatchObject({ type: "tx_received", network: "solana", hash: "sig-2", asset: "SOL", timestamp: "2000", summary: "true", count: "2" });
 
         const one = buildSummaryPayload({ appId: APP_ID, device: device("en"), transfers: [older] });
         expect(one.contents.en).toBe("You received 1 new transaction");
@@ -95,7 +95,18 @@ describe("tx-notifications OneSignal payload", () => {
         expect(payload.include_subscription_ids).toEqual(["0b2b3c4d-1111-4222-8333-944455556666"]);
         expect(payload.existing_android_channel_id).toBe("zelf_transactions");
         expect(payload.ttl).toBe(86400);
-        expect(payload.data).toEqual({ type: "tx_received", network: "ethereum", hash: transfer().hash });
+        const t = transfer();
+        expect(payload.data).toEqual({
+            type: "tx_received",
+            network: "ethereum",
+            hash: t.hash,
+            amount: String(t.amount),
+            asset: t.asset,
+            sender: shortAddress(t.from),
+            timestamp: String(t.timestampMs),
+            date: new Date(t.timestampMs).toISOString(),
+        });
+        Object.values(payload.data).forEach((v) => expect(typeof v).toBe("string"));
     });
 
     it("collapse id and idempotency key derive from sha256(network|hash|pushSubscriptionId)", () => {

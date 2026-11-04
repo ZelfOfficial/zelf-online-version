@@ -5,14 +5,18 @@ const jsonRpcErrorBody = (id, status, error) => {
     let message = error?.message || "Internal error";
     let data = error?.details;
 
-    if (status === 400) {
-        code = -32602;
+    if (status === 400 || status === 413) {
+        code = status === 413 ? -32600 : -32602;
     } else if (status === 403) {
         code = -32601;
     } else if (status === 429) {
         code = -32005;
-    } else if (status === 502) {
+    } else if (status === 502 || status === 503) {
         code = -32603;
+    }
+
+    if (error?.clientCode) {
+        data = data == null ? { clientCode: error.clientCode } : { details: data, clientCode: error.clientCode };
     }
 
     return {

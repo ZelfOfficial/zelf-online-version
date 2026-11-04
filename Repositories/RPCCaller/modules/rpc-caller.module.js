@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const config = require("../../../Core/config");
 const RpcCaller = require("../models/rpc-caller.model");
 const RpcCallerWindow = require("../models/rpc-caller-window.model");
@@ -35,31 +36,22 @@ const rateLimitError = (retryAfterSeconds) => {
     return error;
 };
 
+const userSubject = (userKey) => {
+    const digest = crypto.createHash("sha256").update(String(userKey)).digest("hex").slice(0, 32);
+    return `u:${digest}`;
+};
+
 /**
  * Mongo-backed burst detection: per UTC minute bucket + optional rolling sum.
  * Increments the current window before enforcing limits (counts this request).
+ * `options.userKey` (JWT identifier or session id) is counted in a separate bucket.
  */
-const assertWithinRateLimit = async (ip) => {
-    const rl = config.rpc?.rateLimit;
-    if (!rl?.enabled) {
-        return;
-    }
-
-    const normalized = normalizeIp(ip);
-    if (!normalized) {
-        return;
-    }
-
-    const maxPerMinute = Math.max(1, Number(rl.maxPerMinute) || 300);
-    const rollingMinutes = Math.max(1, Number(rl.rollingMinutes) || 5);
-    const maxRolling = Math.max(0, Number(rl.maxInRollingWindow) || 0);
-    const ttlMs = Math.max(60000, Number(rl.windowTtlMs) || 2 * 60 * 60 * 1000);
-
+const consumeWindow = async (subject, { maxPerMinute, rollingMinutes, maxRolling, ttlMs }) => {
     const windowStart = utcMinuteStart();
     const expiresAt = new Date(windowStart.getTime() + ttlMs);
 
     const updated = await RpcCallerWindow.findOneAndUpdate(
-        { ip: normalized, windowStart },
+        { ip: subject, windowStart },
         {
             $inc: { count: 1 },
             $setOnInsert: { expiresAt },
@@ -74,13 +66,46 @@ const assertWithinRateLimit = async (ip) => {
     if (maxRolling > 0) {
         const cutoff = new Date(Date.now() - rollingMinutes * 60 * 1000);
         const agg = await RpcCallerWindow.aggregate([
-            { $match: { ip: normalized, windowStart: { $gte: cutoff } } },
+            { $match: { ip: subject, windowStart: { $gte: cutoff } } },
             { $group: { _id: null, total: { $sum: "$count" } } },
         ]);
         const rollingTotal = agg[0]?.total || 0;
         if (rollingTotal > maxRolling) {
             throw rateLimitError(rollingMinutes * 60);
         }
+    }
+};
+
+const assertWithinRateLimit = async (ip, options = {}) => {
+    const rl = config.rpc?.rateLimit;
+    if (!rl?.enabled) {
+        return;
+    }
+
+    const rollingMinutes = Math.max(1, Number(rl.rollingMinutes) || 5);
+    const ttlMs = Math.max(60000, Number(rl.windowTtlMs) || 2 * 60 * 60 * 1000);
+    const ipMaxPerMinute = Math.max(1, Number(rl.maxPerMinute) || 300);
+    const ipMaxRolling = Math.max(0, Number(rl.maxInRollingWindow) || 0);
+    const userMaxPerMinute = Math.max(1, Number(process.env.RPC_RATE_LIMIT_PER_USER_PER_MINUTE) || ipMaxPerMinute);
+    const userMaxRolling = Math.max(0, Number(process.env.RPC_RATE_LIMIT_PER_USER_MAX_ROLLING) || ipMaxRolling);
+
+    const normalized = normalizeIp(ip);
+    if (normalized) {
+        await consumeWindow(normalized, {
+            maxPerMinute: ipMaxPerMinute,
+            rollingMinutes,
+            maxRolling: ipMaxRolling,
+            ttlMs,
+        });
+    }
+
+    if (options.userKey) {
+        await consumeWindow(userSubject(options.userKey), {
+            maxPerMinute: userMaxPerMinute,
+            rollingMinutes,
+            maxRolling: userMaxRolling,
+            ttlMs,
+        });
     }
 };
 
@@ -184,6 +209,7 @@ const unbanIp = async (ip) => {
 
 module.exports = {
     normalizeIp,
+    userSubject,
     assertNotBanned,
     assertWithinRateLimit,
     recordRequest,

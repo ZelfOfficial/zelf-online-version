@@ -11,6 +11,17 @@ alwaysApply: true
 - Prefer the backend flow `route -> controller -> module -> model/middleware`.
 - If an older script or note mentions `api.routes.js`, treat that as stale and use the `Routes/*-repositories.js` registries instead.
 
+## Required Repository format (Miguel, 2026-10-16)
+
+Every new feature mirrors `Repositories/ZelfID` / `Repositories/Tags`:
+
+- Folders: `Repositories/<Feature>/{routes,middlewares,controllers,modules,models}`; files named `<feature>.routes.js`, `<feature>.middleware.js`, `<feature>.controller.js`, `<feature>[-part].module.js`, `<thing>.model.js`.
+- **routes**: wiring only, `server.<verb>(\`${PATH}/x\`, Middleware.xValidation, Controller.x)` with `const PATH = config.basePath(base)`. **No inline async handlers in routes.**
+- **middlewares**: Joi validation via `Core/JoiUtils` (`validate(schema, …)`, `409 { validationError }` on failure), plus auth/guard checks; they set `ctx.state` / normalise `ctx.request.body` and call `next()`.
+- **controllers**: only ctx in/out; `try { const data = await Module.x(...); ctx.body = { data }; } catch (error) { const _exception = errorHandler(error, ctx); ctx.status = _exception.status; ctx.body = { message: _exception.message, code: _exception.code }; }`.
+- **modules**: all business logic; throw `"NNN:code"` errors (optionally with `clientCode`) for `Core/http-handler` `errorHandler`.
+- Register in `Routes/unprotected-repositories.js` or `Routes/protected-repositories.js`.
+
 ## Examples
 
 ```js

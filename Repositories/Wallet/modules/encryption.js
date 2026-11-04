@@ -70,14 +70,53 @@ const encryptQR = async (data) => {
     }
 };
 
-const decrypt = async (data) => {
-    const payload = {
-        ...data,
-        zelfProof: data.zelfProof.replace(/ /g, "+"),
-    };
+const PARSE_FAILURE = /fail(?:ed)? to parse|invalid zelfproof|invalid senseprint|err_invalid_zelfproof|err_invalid_senseprint/i;
+
+const isParseFailure = (error) => {
+    const text = `${error?.code || ""} ${error?.message || ""} ${error?.error?.code || ""} ${error?.error?.message || ""}`;
+    return PARSE_FAILURE.test(text);
+};
+
+const knownStack = (data = {}) => {
+    if (data.stack === "v4") return "v4";
+    if (data.stack === "legacy") return "legacy";
+    const raw = data.v ?? data.encryptVersion ?? data.publicData?.v ?? data.publicData?.encryptVersion ?? data.publicData?.zelfEncryptVersion;
+    const version = Number.parseInt(String(raw ?? ""), 10);
+    if (version === 4) return "v4";
+    if (version === 3) return "legacy";
+    return null;
+};
+
+const withStack = (data, stack) => {
+    const payload = { ...data };
+    if (stack === "v4") payload.stack = "v4";
+    else delete payload.stack;
+    if (payload.zelfProof) payload.zelfProof = String(payload.zelfProof).replace(/ /g, "+");
+    return payload;
+};
+
+/**
+ * v4 proofs decrypt on the v4 stack. Older proofs stay on the legacy stack.
+ * When the record does not say which, a parse failure on one stack tries the other.
+ */
+const callWithStackFallback = async (data, invoke) => {
+    const stack = knownStack(data);
+    if (stack === "v4") return invoke(withStack(data, "v4"));
+    if (stack === "legacy") return invoke(withStack(data, "legacy"));
 
     try {
-        return await ZelfProofModule.decrypt(payload);
+        const legacy = await invoke(withStack(data, "legacy"));
+        if (legacy?.error && isParseFailure(legacy.error)) return invoke(withStack(data, "v4"));
+        return legacy;
+    } catch (error) {
+        if (!isParseFailure(error)) throw error;
+        return invoke(withStack(data, "v4"));
+    }
+};
+
+const decrypt = async (data) => {
+    try {
+        return await callWithStackFallback(data, (attempt) => ZelfProofModule.decrypt(attempt));
     } catch (exception) {
         const code = exception.code;
         let error = new Error(code || exception.message);
@@ -111,15 +150,14 @@ const decrypt = async (data) => {
 
 const preview = async (data) => {
     try {
-        return await ZelfProofModule.preview(data);
+        return await callWithStackFallback(data, (attempt) => ZelfProofModule.preview(attempt));
     } catch (exception) {
         console.error({
             exception,
             _exception: exception.response?.data,
         });
+        throw exception;
     }
-
-    return null;
 };
 
 module.exports = {

@@ -1,15 +1,7 @@
+// Signed acknowledgement for the old Mailgun URL. Inbound mail is stored by POST /api/mail/inbound/jim.
 const webhookHandler = async (ctx) => {
-	try {
-		const data = {
-			payload: ctx.request.body,
-		};
-
-		ctx.body = { data };
-	} catch (error) {
-		ctx.status = error?.status || 500;
-
-		ctx.body = { error: error?.message || error };
-	}
+	ctx.status = 200;
+	ctx.body = { data: { received: true, stored: false } };
 };
 
 module.exports = {

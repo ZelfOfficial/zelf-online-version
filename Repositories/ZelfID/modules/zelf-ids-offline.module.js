@@ -7,7 +7,14 @@ const { extractZelfProofFromQR, generateQRFromZelfProof } = require("../../Tags/
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const ZelfIdModule = require("./zelf-id.module");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
-const { getBareName } = require("./zelf-id-plan.module");
+const { getBareName, assertDomainOfferedForNewNames } = require("./zelf-id-plan.module");
+const { expandStoredExtraParams } = require("../../Tags/modules/tags-addresses.module");
+const {
+    normalizeTagName,
+    applyAddressSyncToRecord,
+    verifyAddressSyncOwnership,
+    validateSyncPassword,
+} = require("./zelf-ids-address-sync.module");
 
 const normalizeName = (name, domain) => {
     if (!name) return name;
@@ -18,6 +25,20 @@ const normalizeName = (name, domain) => {
 const nameFromPublicData = (publicData = {}, domainConfig) => {
     const key = domainConfig?.getTagKey?.() || "tagName";
     return publicData[key] || publicData.tagName || publicData.zelfName || publicData.id;
+};
+
+/**
+ * Version and type the proof was originally created with, read from its own cleartext.
+ * v4 online creation stamps `origin: "online"` and `v: "4"` (see zelf-id.module stampV4PublicData);
+ * anything encrypted on a device (origin "android" / "ios" / "offline", ...) is an offline proof.
+ * A proof without `v` predates v4 and is reported as v3.
+ * @param {Object} publicData
+ * @returns {{ version: string, type: "online"|"offline", origin: string|null }}
+ */
+const detectProofProvenance = (publicData = {}) => {
+    const origin = publicData.origin ? String(publicData.origin).toLowerCase() : null;
+    const v = publicData.v != null && `${publicData.v}`.trim() !== "" ? `${publicData.v}`.trim() : "3";
+    return { version: v, type: origin === "online" ? "online" : "offline", origin };
 };
 
 /**
@@ -53,12 +74,16 @@ const previewHumanAuthn = async (params = {}) => {
  * @returns {Promise<Object>}
  */
 const leaseOffline = async (params, authUser) => {
-    const { tagName, domain, referralTagName, duration } = params;
+    const { tagName, domain, referralTagName, duration, sync, syncPublicData } = params;
     let zelfProof = params.zelfProof;
     let zelfProofQRCode = params.zelfProofQRCode;
 
     const domainConfig = getDomainConfig(domain);
     if (!domainConfig) throw new Error(`409:unsupported_domain`);
+    // Address sync updates an existing record. New offline leases still require plan prices.
+    if (!sync) assertDomainOfferedForNewNames(domainConfig);
+
+    const tagKey = domainConfig.getTagKey() || "tagName";
 
     if (!zelfProof && zelfProofQRCode) {
         zelfProof = await extractZelfProofFromQR(zelfProofQRCode);
@@ -84,10 +109,77 @@ const leaseOffline = async (params, authUser) => {
         throw error;
     }
 
-    if (normalizeName(nameFromProof, resolvedDomain) !== normalizeName(tagName, resolvedDomain)) {
+    const normalizedProofTagName = normalizeName(nameFromProof, resolvedDomain);
+    const normalizedTagName = normalizeName(tagName, resolvedDomain);
+
+    if (normalizedProofTagName !== normalizedTagName) {
         const error = new Error("409:tag_does_not_match_in_zelfProof");
         error.status = 409;
         throw error;
+    }
+
+    if (sync && syncPublicData) {
+        const searchResult = await ZelfIdModule.searchTag(
+            {
+                tagName: normalizedTagName,
+                domain,
+                domainConfig,
+                environment: "all",
+                includeAllAddressPages: true,
+            },
+            authUser
+        );
+
+        if (searchResult.available || !searchResult.tagObject) {
+            const error = new Error("404:tag_not_found");
+            error.status = 404;
+            throw error;
+        }
+
+        const hasSignature = Boolean(syncPublicData._syncSignature);
+        if (hasSignature) {
+            if (
+                !verifyAddressSyncOwnership(
+                    normalizedTagName,
+                    syncPublicData,
+                    searchResult.tagObject.publicData?.ethAddress
+                )
+            ) {
+                const error = new Error("401:invalid_sync_ownership");
+                error.status = 401;
+                throw error;
+            }
+        } else if (
+            !(await validateSyncPassword(
+                zelfProof,
+                {
+                    password: params.password || params.syncPassword,
+                    faceBase64: params.faceBase64,
+                    removePGP: params.removePGP,
+                    os: params.os,
+                },
+                authUser
+            ))
+        ) {
+            const error = new Error("401:invalid_sync_password");
+            error.status = 401;
+            throw error;
+        }
+
+        const syncResult = await applyAddressSyncToRecord({
+            tagRecord: searchResult,
+            tagKey,
+            syncPublicData,
+            zelfProofQRCode,
+            domain,
+        });
+
+        return {
+            sync: true,
+            tagName: normalizedTagName,
+            domain,
+            ...syncResult,
+        };
     }
 
     await ZelfIdModule._findDuplicatedTag(tagName, domain, domainConfig);
@@ -96,8 +188,6 @@ const leaseOffline = async (params, authUser) => {
     const decrypted = await ZelfIdPartsModule.decryptParams({ password: params.password, removePGP: params.removePGP }, authUser);
     const password = decrypted.password;
     const securityType = password ? (/^\d{6}$/.test(password) ? "pin" : "password") : null;
-    const tagKey = domainConfig.getTagKey() || "tagName";
-
     const zelfIDObject = {
         ...publicData,
         [tagKey]: tagName.includes(".") ? tagName : `${tagName}.${domain}`,
@@ -111,14 +201,20 @@ const leaseOffline = async (params, authUser) => {
         v: "4",
     };
 
+    // Staff gift / re-creation: keep the version and type the proof was created with.
+    const provenance = detectProofProvenance(publicData);
+    if (params.preserveProvenance) {
+        zelfIDObject.origin = provenance.type;
+        zelfIDObject.v = provenance.version;
+    }
+
     await ZelfIdModule.persistZelfIdLease(zelfIDObject, referralTagObject, domainConfig, securityType, authUser);
 
     const persistedPublic = zelfIDObject.ipfs?.publicData || {};
     let plan = persistedPublic.plan;
     if (!plan && persistedPublic.extraParams) {
         try {
-            const extra =
-                typeof persistedPublic.extraParams === "string" ? JSON.parse(persistedPublic.extraParams) : persistedPublic.extraParams;
+            const extra = expandStoredExtraParams(persistedPublic.extraParams);
             plan = extra.plan;
         } catch (_error) {
             plan = undefined;
@@ -139,15 +235,17 @@ const leaseOffline = async (params, authUser) => {
             publicData: {
                 ...persistedPublic,
                 ...publicData,
-                origin: "offline",
-                v: "4",
+                origin: zelfIDObject.origin,
+                v: zelfIDObject.v,
                 plan,
             },
         },
+        provenance,
     };
 };
 
 module.exports = {
+    detectProofProvenance,
     previewHumanAuthn,
     leaseOffline,
 };

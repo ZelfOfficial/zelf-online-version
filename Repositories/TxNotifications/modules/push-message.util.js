@@ -77,6 +77,21 @@ const transferText = (transfer, language) => {
     return { title: texts.title, body };
 };
 
+/** Push `data` for one transfer: everything the app needs to render the detail (#561). Values are strings for OneSignal. */
+const transferData = (transfer) => {
+    const data = { type: "tx_received", network: transfer.network, hash: transfer.hash };
+    if (transfer.amount != null && transfer.amount !== "") data.amount = String(transfer.amount);
+    if (transfer.asset) data.asset = String(transfer.asset);
+    // Push payloads never carry a full address (privacy invariant); the app can resolve the full sender from network+hash.
+    const sender = shortAddress(transfer.from);
+    if (sender) data.sender = sender;
+    if (Number.isFinite(Number(transfer.timestampMs)) && transfer.timestampMs != null) {
+        data.timestamp = String(transfer.timestampMs);
+        data.date = new Date(Number(transfer.timestampMs)).toISOString();
+    }
+    return data;
+};
+
 const basePayload = ({ appId, pushSubscriptionId, title, body, data, digest }) => ({
     app_id: appId,
     include_subscription_ids: [pushSubscriptionId],
@@ -101,7 +116,7 @@ const buildTransferPayload = ({ appId, device, transfer }) => {
         pushSubscriptionId: device.pushSubscriptionId,
         title,
         body,
-        data: { type: "tx_received", network: transfer.network, hash: transfer.hash },
+        data: transferData(transfer),
         digest: transferDigest(transfer.network, transfer.hash, device.pushSubscriptionId),
     });
 };
@@ -121,7 +136,7 @@ const buildSummaryPayload = ({ appId, device, transfers }) => {
         data: {
             type: "tx_received",
             network: newest.network,
-            hash: newest.hash,
+            ...transferData(newest),
             summary: "true",
             count: String(transfers.length),
         },
@@ -130,6 +145,7 @@ const buildSummaryPayload = ({ appId, device, transfers }) => {
 };
 
 module.exports = {
+    transferData,
     ANDROID_CHANNEL_ID,
     PUSH_TTL_SECONDS,
     buildSummaryPayload,

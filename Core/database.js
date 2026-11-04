@@ -22,6 +22,22 @@ const initMongoDB = () => {
 
     MongoConnection = mongoose.connection;
 
+    // Unique indexes that guard money paths are built explicitly (autoIndex may be off in production).
+    MongoConnection.once("open", () => {
+        require("../Repositories/ZelfID/modules/zelf-ids-revenue-cat-events.module")
+            .ensureIndexes()
+            .catch((error) => console.error("RevenueCatProcessedEvent index creation failed:", error?.message || error));
+        require("../Repositories/ZelfID/modules/zelf-id-monthly-access.module")
+            .ensureIndexes()
+            .catch((error) => console.error("Monthly access index creation failed:", error?.message || error));
+        require("../Repositories/ZelfKeys/modules/zelf-key-plan-limits.module")
+            .ensureSwapIndexes()
+            .catch((error) => console.error("Swap usage index creation failed:", error?.message || error));
+        require("../Repositories/ZelfID/modules/zelf-id-chain-activation.module")
+            .ensureIndexes()
+            .catch((error) => console.error("Chain activation index creation failed:", error?.message || error));
+    });
+
     return MongoConnection;
 };
 

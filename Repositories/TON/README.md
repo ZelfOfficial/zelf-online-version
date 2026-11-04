@@ -30,4 +30,4 @@ See `.env.example`: `TON_RPC_URL`, `TON_API_KEY`, `TON_INDEXER_URL`, `TON_SERVIC
 
 Native TON token icon: `https://cdn.zelf.world/icons/ic_ton.png`
 
-Public API examples should use `https://v3.zelf.world` in external documentation.
+Public API examples should use `https://v4.zelf.world` in external documentation.

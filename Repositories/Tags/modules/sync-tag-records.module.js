@@ -8,9 +8,8 @@ const SessionModule = require("../../Session/modules/session.module");
 const TagsPartsModule = require("./tags-parts.module");
 const TagsArweaveModule = require("./tags-arweave.module");
 const TagsIPFSModule = require("./tags-ipfs.module");
-const moment = require("moment");
 const { getDomainConfig } = require("../config/supported-domains");
-const { SEARCHABLE_ADDRESS_FIELDS, cleanExtraParamsForPinata, resolveEncryptVersion, stampExtraParamsVersion } = require("./tags-addresses.module");
+const { SEARCHABLE_ADDRESS_FIELDS, fitExtraParamsForPin, resolveEncryptVersion, stampExtraParamsVersion } = require("./tags-addresses.module");
 const { upgrade } = require("../../ZelfProof/modules/zelf-proof.module");
 const { generateQRFromZelfProof } = require("./qr-zelfproof-extractor.module");
 const { effectivePlan, isUnpaidReservation } = require("../../ZelfID/modules/zelf-id-plan.module");
@@ -38,11 +37,13 @@ const isV4PublicData = (publicData = {}) => Number(publicData.v) === 4;
 const isV4LeaseComplete = (publicData = {}) =>
     isV4PublicData(publicData) && V4_LEASE_ADDRESS_FIELDS.every((field) => Boolean(publicData[field]));
 
-const shouldSkipOverflowBackfill = (publicData = {}) => isV4PublicData(publicData);
+const shouldSkipOverflowBackfill = (publicData = {}) => isV4PublicData(publicData) && !publicData._needsPinSplit;
+
+const keepStoredValue = (value) => (value === undefined || value === null || value === "" ? undefined : value);
 
 /**
- * Rebuild Pinata extraParams on decrypt re-pin. Keep st / plan so password type and plan survive.
- * Infer plan for planless mainnet (not `.hold`) via `effectivePlan`.
+ * Rebuild Pinata extraParams on decrypt re-pin.
+ * Copy the stored plan, lease, and price. The effective plan is computed when the record is read.
  * @param {Object} publicData
  * @param {Object} [options]
  * @param {number} [options.encryptVersion]
@@ -54,14 +55,13 @@ const buildRepinExtraParams = (publicData = {}, options = {}) => {
         {
             hasPassword: publicData.hasPassword,
             origin: publicData.origin || "online",
-            registeredAt: publicData.registeredAt
-                ? moment(publicData.registeredAt).add(30, "second").format("YYYY-MM-DD HH:mm:ss")
-                : undefined,
-            expiresAt: publicData.expiresAt
-                ? moment(publicData.expiresAt).add(30, "second").format("YYYY-MM-DD HH:mm:ss")
-                : undefined,
-            price: publicData.price || undefined,
-            duration: publicData.duration || undefined,
+            renewedAt: keepStoredValue(publicData.renewedAt),
+            registeredAt: keepStoredValue(publicData.registeredAt),
+            expiresAt: keepStoredValue(publicData.expiresAt),
+            planExpiresAt: keepStoredValue(publicData.planExpiresAt),
+            paymentMethod: keepStoredValue(publicData.paymentMethod),
+            price: keepStoredValue(publicData.price),
+            duration: keepStoredValue(publicData.duration),
             type: publicData.type || undefined,
         },
         version
@@ -71,9 +71,9 @@ const buildRepinExtraParams = (publicData = {}, options = {}) => {
         extraParams.st = publicData.st;
     }
 
-    const plan = publicData.plan || (!isUnpaidReservation(publicData) ? effectivePlan(publicData) : undefined);
-    if (plan) {
-        extraParams.plan = plan;
+    const pinnedPlan = Object.prototype.hasOwnProperty.call(publicData, "_pinnedPlan") ? publicData._pinnedPlan : publicData.plan;
+    if (keepStoredValue(pinnedPlan) !== undefined) {
+        extraParams.plan = pinnedPlan;
     }
 
     return extraParams;
@@ -109,10 +109,12 @@ const initTagUpdates = async (tagObject, secretKeys) => {
         tagsToAdd.push({ name: "tonAddress", value: ton.address, new: true });
     }
 
-    if (!skipAddressBackfill && !skipOverflow && !tagObject.publicData.aptosAddress) {
+    if (!skipAddressBackfill && !tagObject.publicData.aptosAddress) {
         const aptos = await createAptosWallet(mnemonic);
         tagObject.publicData.aptosAddress = aptos.address;
-        tagsToAdd.push({ name: "aptosAddress", value: aptos.address, new: true });
+        if (!skipOverflow) {
+            tagsToAdd.push({ name: "aptosAddress", value: aptos.address, new: true });
+        }
     }
 
     if (!skipAddressBackfill && !(tagObject.publicData.btcAddress || "").startsWith("bc1")) {
@@ -132,14 +134,18 @@ const initTagUpdates = async (tagObject, secretKeys) => {
     const polkadot = await createPolkadotWallet(mnemonic);
     const kusama = await createKusamaWallet(mnemonic);
 
-    if (!skipAddressBackfill && !skipOverflow && !tagObject.publicData.dotAddress) {
+    if (!skipAddressBackfill && !tagObject.publicData.dotAddress) {
         tagObject.publicData.dotAddress = polkadot.address;
-        tagsToAdd.push({ name: "dotAddress", value: polkadot.address, new: true });
+        if (!skipOverflow) {
+            tagsToAdd.push({ name: "dotAddress", value: polkadot.address, new: true });
+        }
     }
 
-    if (!skipAddressBackfill && !skipOverflow && !tagObject.publicData.ksmAddress) {
+    if (!skipAddressBackfill && !tagObject.publicData.ksmAddress) {
         tagObject.publicData.ksmAddress = kusama.address;
-        tagsToAdd.push({ name: "ksmAddress", value: kusama.address, new: true });
+        if (!skipOverflow) {
+            tagsToAdd.push({ name: "ksmAddress", value: kusama.address, new: true });
+        }
     }
 
     const domainConfig = getDomainConfig(tagObject.publicData.domain || "zelf");
@@ -181,9 +187,8 @@ const updateTags = async (tagObject, tagsToAdd, options = {}) => {
 
     const zelfProofQRCode = tagObject.zelfProofQRCode || tagObject.publicData.zelfProofQRCode;
 
-    if (!tagObject.publicData.expiresAt) tagObject.publicData.expiresAt = moment().add(1, "year").format("YYYY-MM-DD HH:mm:ss");
-
-    const extraParams = cleanExtraParamsForPinata(buildRepinExtraParams(tagObject.publicData));
+    const fitted = fitExtraParamsForPin(buildRepinExtraParams(tagObject.publicData));
+    const extraParams = fitted.extraParams;
 
     const metadata = {
         [tagKey]: tagName,
@@ -210,30 +215,53 @@ const updateTags = async (tagObject, tagsToAdd, options = {}) => {
 
     metadata.extraParams = JSON.stringify(metadata.extraParams);
 
+    const oldPrimaryId = tagObject.id ? tagObject.ipfsId || tagObject.id : null;
+    const oldContinuationIds = await TagsIPFSModule.listContinuationSiblingPinIds(tagName);
+
+    const pinPayload = {
+        base64: zelfProofQRCode,
+        name: tagName,
+        reserved: metadata,
+        addresses: tagObject.publicData,
+        pinIt: true,
+    };
+
+    const ipfs = oldPrimaryId
+        ? await TagsIPFSModule.upsertSearchablePins({ ...pinPayload, existingPrimaryPinId: oldPrimaryId }, { pro: true })
+        : await TagsIPFSModule.insertSearchablePins(pinPayload, { pro: true });
+
     let arweave = {};
-
-    await TagsIPFSModule.unpinContinuationSiblings(tagName);
-    if (tagObject.id) await TagsIPFSModule.unPinFiles([tagObject.ipfsId || tagObject.id]);
-
-    if (metadata.type === "mainnet") {
-        arweave = await TagsArweaveModule.tagRegistration(zelfProofQRCode, {
-            hasPassword: metadata.hasPassword,
-            zelfProof: tagObject.publicData?.zelfProof,
-            publicData: { ...metadata },
-            fileName: tagName,
-        });
+    if (metadata.type === "mainnet" && domainConfig?.isArweaveEnabled?.()) {
+        try {
+            arweave = await TagsArweaveModule.tagRegistration(zelfProofQRCode, {
+                hasPassword: metadata.hasPassword,
+                zelfProof: tagObject.publicData?.zelfProof,
+                publicData: { ...metadata },
+                fileName: tagName,
+            });
+        } catch (error) {
+            console.error({
+                updateTagsArweave: error.code || error.message,
+                status: error.status,
+            });
+        }
     }
 
-    const ipfs = await TagsIPFSModule.insertSearchablePins(
-        {
-            base64: zelfProofQRCode,
-            name: tagName,
-            reserved: metadata,
-            addresses: tagObject.publicData,
-            pinIt: true,
-        },
-        { pro: true },
-    );
+    const newContinuationIds = await TagsIPFSModule.listContinuationSiblingPinIds(tagName);
+    const keepIds = new Set([ipfs?.id, ...newContinuationIds].filter(Boolean));
+    const idsToUnpin = [];
+
+    if (oldPrimaryId && !keepIds.has(oldPrimaryId)) {
+        idsToUnpin.push(oldPrimaryId);
+    }
+
+    for (const id of oldContinuationIds) {
+        if (!keepIds.has(id)) idsToUnpin.push(id);
+    }
+
+    if (idsToUnpin.length) {
+        await TagsIPFSModule.unPinFiles(idsToUnpin);
+    }
 
     return {
         ipfs,
@@ -304,8 +332,12 @@ const upgradeLegacyProofAndRepin = async (tagObject, params = {}) => {
     if (!tagObject.publicData) tagObject.publicData = {};
     tagObject.publicData.v = 4;
 
+    const { mergePlanTermIntoPublicData } = require("../../ZelfID/modules/zelf-id-plan-term.module");
+    await mergePlanTermIntoPublicData(tagObject.publicData);
+
+    const storedPlan = tagObject.publicData.plan;
     const plan = effectivePlan(tagObject.publicData);
-    if (plan) {
+    if (!storedPlan && plan) {
         tagObject.publicData.plan = plan;
     } else if (isUnpaidReservation(tagObject.publicData)) {
         delete tagObject.publicData.plan;

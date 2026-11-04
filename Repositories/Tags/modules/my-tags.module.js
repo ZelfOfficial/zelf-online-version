@@ -1,4 +1,12 @@
-const { referralName, rewardFriendKeys, findReferralRecord, groupReferralRecords, explicitReferralPrice } = require("./referral-reward.util");
+const {
+    referralName,
+    rewardFriendKeys,
+    findReferralRecord,
+    groupReferralRecords,
+    explicitReferralPrice,
+    referralRewardLimit,
+    countedReferralFriends,
+} = require("./referral-reward.util");
 const config = require("../../../Core/config");
 const { searchTag } = require("./tags.module");
 const TagsSearchModule = require("./tags-search.module");
@@ -12,6 +20,8 @@ const AvalancheModule = require("../../Avalanche/modules/avalanche-scrapping.mod
 const BlockDAGModule = require("../../BlockDAG/modules/blockdag.module");
 const { sendCustomEmail } = require("../../../Core/mailgun");
 const { buildMetadata, ensureZelfProofQRCode, storeInIPFS, storeInWalrus, storeInArweave } = require("./tags-payment.module");
+const { parseLeaseDate } = require("./lease-date.util");
+const { expandStoredExtraParams } = require("./tags-addresses.module");
 const { parseTagPayAmount, coerceInitiatedAtUnix, filterSessionInboundTransactions } = require("./tag-pay-session-tx.util");
 const { verifySmartContractPayment, throwPaymentConfirmationTagNotFound } = require("./tag-smart-contract-payment.module");
 
@@ -20,8 +30,6 @@ const RewardTransfer = require("./referral-reward-transfer");
 const IPFS = require("../../../Core/ipfs");
 const TagsArweaveModule = require("./tags-arweave.module");
 const LicenseModule = require("../../License/modules/license.module");
-
-
 
 /**
  * Renew my tag
@@ -67,9 +75,13 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token) => {
 
     const initiatedAt = tokenDecoded.initiatedAt ? moment.unix(tokenDecoded.initiatedAt) : null;
 
-    const renewedAtCondition = Boolean(tagObject.publicData.renewedAt && initiatedAt && moment(tagObject.publicData.renewedAt).isAfter(initiatedAt));
+    const renewedAtCondition = Boolean(
+        tagObject.publicData.renewedAt && initiatedAt && parseLeaseDate(tagObject.publicData.renewedAt).isAfter(initiatedAt)
+    );
 
-    const registeredAtCondition = Boolean(tokenDecoded.initiatedAt && moment(tagObject.publicData.registeredAt).isAfter(initiatedAt));
+    const registeredAtCondition = Boolean(
+        tokenDecoded.initiatedAt && parseLeaseDate(tagObject.publicData.registeredAt).isAfter(initiatedAt)
+    );
 
     if (renewedAtCondition || registeredAtCondition) {
         return {
@@ -83,8 +95,7 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token) => {
         };
     }
 
-    const paymentOk =
-        paymentConfirmation && typeof paymentConfirmation === "object" && paymentConfirmation.confirmed === true;
+    const paymentOk = paymentConfirmation && typeof paymentConfirmation === "object" && paymentConfirmation.confirmed === true;
 
     if (!paymentOk) {
         const _paymentConfirmation = paymentConfirmation && typeof paymentConfirmation === "object" ? paymentConfirmation : null;
@@ -199,7 +210,7 @@ const isSolanaPaymentConfirmed = async (address, amountToPay, initiatedAtUnix) =
             balance: response?.balance,
             checkedFactor: "transactions",
         };
-    } catch (error) { }
+    } catch (error) {}
 
     return false;
 };
@@ -335,7 +346,7 @@ const isBTCPaymentConfirmed = async (address, zelfNamePrice) => {
             confirmed: !Number.isNaN(numericReceived) && numericReceived === priceNum,
             zelfNamePrice: priceNum,
         };
-    } catch (error) { }
+    } catch (error) {}
 
     return false;
 };
@@ -423,7 +434,7 @@ const addDurationToTag = async (params, tagObject) => {
     let expiresAt = null;
     try {
         if (metadata?.extraParams && typeof metadata.extraParams === "string") {
-            const parsed = JSON.parse(metadata.extraParams);
+            const parsed = expandStoredExtraParams(metadata.extraParams);
             expiresAt = parsed.expiresAt || null;
         }
     } catch (_) {
@@ -443,7 +454,7 @@ const addDurationToTag = async (params, tagObject) => {
         tagObject,
         expiresAt,
         ipfsId: ipfsRec?.id ?? tagObject.ipfsId ?? null,
-        arweaveId: arweaveSkipped ? null : arwRec?.id ?? null,
+        arweaveId: arweaveSkipped ? null : (arwRec?.id ?? null),
         masterIPFSRecord: ipfsRec,
         masterArweaveRecord: arweaveSkipped ? null : arwRec,
         arweaveSkipped,
@@ -477,8 +488,8 @@ const sendEmailReceipt = async (tagName, domain, network, email, token) => {
         tokenDecoded.prices.AVAX?.price;
 
     // Format dates for better readability
-    const transactionDate = moment(tagObject.publicData.registeredAt).format("YYYY-MM-DD HH:mm:ss");
-    const expiresDate = moment(tagObject.publicData.expiresAt).format("YYYY-MM-DD HH:mm:ss");
+    const transactionDate = parseLeaseDate(tagObject.publicData.registeredAt).format("YYYY-MM-DD HH:mm:ss");
+    const expiresDate = parseLeaseDate(tagObject.publicData.expiresAt).format("YYYY-MM-DD HH:mm:ss");
     const yearLabel = tokenDecoded.duration === 1 ? "1 YEAR" : `${tokenDecoded.duration} YEARS`;
 
     return await sendCustomEmail(
@@ -845,7 +856,10 @@ const _storeReferralRewardReceipt = async ({
  * @throws 400 domain_not_supported, or 503 domain_config_unavailable when the licenses cannot be loaded
  */
 const _requireDomainConfig = async (domain) => {
-    const name = String(domain || "").replace(/^\./, "").trim().toLowerCase();
+    const name = String(domain || "")
+        .replace(/^\./, "")
+        .trim()
+        .toLowerCase();
 
     if (!name) throw new Error("400:domain_not_supported");
 
@@ -912,7 +926,7 @@ const _findReferralRecordInStorage = async (referralTagName, friendFullTagName, 
 
     if (!friendRecord) throw new Error("referral_not_found");
 
-    return friendRecord;
+    return { friendRecord, records };
 };
 
 /**
@@ -923,8 +937,8 @@ const _findReferralRecordInStorage = async (referralTagName, friendFullTagName, 
  */
 const _durationFromRegisteredAndExpires = (registeredAt, expiresAt) => {
     if (!registeredAt || !expiresAt) return "1";
-    const start = moment(registeredAt);
-    const end = moment(expiresAt);
+    const start = parseLeaseDate(registeredAt);
+    const end = parseLeaseDate(expiresAt);
     if (!start.isValid() || !end.isValid() || end.isSameOrBefore(start)) return "1";
     const years = end.diff(start, "years", true);
     if (years >= 5) return "lifetime";
@@ -964,7 +978,7 @@ const _calculateReferralRewardAmount = (friendRecord, domainConfig, rewardType =
         tagPrice = priceResult?.price ?? 0;
     }
 
-    const znsPrice = config.token?.rewardPrice || 0.05; // Cents per ZNS
+    const znsPrice = config.getTokenPriceUsd(); // USD per ZNS token
     let rewardAmount = 0;
 
     if (tagPrice > 0) {
@@ -983,13 +997,31 @@ const _calculateReferralRewardAmount = (friendRecord, domainConfig, rewardType =
 const _readReferralReward = async (friendFullTagName, referralTagName, rewardType) => {
     const keys = rewardFriendKeys(friendFullTagName, rewardType);
     // Do not let a storage failure authorize a second payment.
-    const receipts = (await Promise.all(keys.map((key) => IPFS.filter("rewardPrimaryKey", `referral_${key}_${referralTagName}`, { throwOnError: true })))).flat();
+    const receipts = (
+        await Promise.all(keys.map((key) => IPFS.filter("rewardPrimaryKey", `referral_${key}_${referralTagName}`, { throwOnError: true })))
+    ).flat();
     const records = await ReferralRewardModel.find({ tagName: { $in: keys }, referralTagName });
     for (const record of records) await _reconcileReferralReward(record);
     const ipfsReward = receipts.find(Boolean);
-    const mongoRecord = records.find((record) => record.status === "completed" || record.payload?.signature)
-        || records.find((record) => ["pending", "processing"].includes(record.status)) || records[0];
+    const mongoRecord =
+        records.find((record) => record.status === "completed" || record.payload?.signature) ||
+        records.find((record) => ["pending", "processing"].includes(record.status)) ||
+        records[0];
     return { ipfsReward, mongoRecord, claimed: Boolean(ipfsReward || mongoRecord?.status === "completed" || mongoRecord?.payload?.signature) };
+};
+
+/** Friends (canonical names) that already have a reward paid or in flight for this referrer. */
+const _rewardedReferralFriends = async (referralTagName) => {
+    const records = await ReferralRewardModel.find(
+        { referralTagName, status: { $in: ["pending", "processing", "completed"] } },
+        { tagName: 1, domain: 1 }
+    );
+    return new Set(
+        (Array.isArray(records) ? records : []).map((r) => {
+            const name = referralName(r.tagName);
+            return name.includes(".") ? name : `${name}.${r.domain || "zelf"}`;
+        })
+    );
 };
 
 const _checkIfRewardAlreadyClaimed = async (friendFullTagName, referralTagName, rewardType) => {
@@ -1015,7 +1047,13 @@ const claimReferralReward = async (tagName, domain, friendTagName, friendDomain,
     if (rewardType && !["registration", "purchase"].includes(rewardType)) throw new Error("400:invalid_reward_type");
 
     // 1. Verify referral exists in IPFS/Arweave
-    const friendRecord = await _findReferralRecordInStorage(referralTagName, friendFullTagName, friendDomain, rewardType, authUser);
+    const { friendRecord, records: domainReferralRecords } = await _findReferralRecordInStorage(
+        referralTagName,
+        friendFullTagName,
+        friendDomain,
+        rewardType,
+        authUser
+    );
 
     const normalizedDomain = (domain || "").replace(/^\./, "").trim().toLowerCase();
 
@@ -1034,6 +1072,15 @@ const claimReferralReward = async (tagName, domain, friendTagName, friendDomain,
     }
 
     const rewardRecord = await _checkIfRewardAlreadyClaimed(friendFullTagName, referralTagName, rewardType);
+
+    // Only the first N friends earn rewards; extra referrals stay as history (#45).
+    const limit = referralRewardLimit();
+    const rewardedFriends = await _rewardedReferralFriends(referralTagName);
+    const counted = countedReferralFriends(groupReferralRecords(domainReferralRecords), rewardedFriends, limit);
+    const friendKey = referralName(friendFullTagName);
+    if (!rewardedFriends.has(friendKey) && (rewardedFriends.size >= limit || !counted.has(friendKey))) {
+        throw _claimError(409, "referral_limit_reached");
+    }
 
     const rewardAmount = _calculateReferralRewardAmount(friendRecord, domainConfig, rewardType);
     if (!Number.isFinite(rewardAmount) || rewardAmount <= 0) throw new Error("400:reward_not_eligible");
@@ -1101,13 +1148,20 @@ const getMyReferrals = async (tagName, domain, authUser) => {
     const referrals = [];
     let totalEarnedInZNS = 0;
 
+    const limit = referralRewardLimit();
+    const counted = countedReferralFriends(map, await _rewardedReferralFriends(referralTagName), limit);
+
     for (const [name, record] of map) {
         if (!name) continue;
+        const countsForReward = counted.has(name);
 
         const type = record.publicData?.type || record.metadata?.extraParams?.type || "hold";
 
-        const { ipfsReward: ipfsRegReward, mongoRecord: mongoRegRecord, claimed: regClaimed } =
-            await _readReferralReward(name, referralTagName, "registration");
+        const {
+            ipfsReward: ipfsRegReward,
+            mongoRecord: mongoRegRecord,
+            claimed: regClaimed,
+        } = await _readReferralReward(name, referralTagName, "registration");
 
         const regAmount = ipfsRegReward?.publicData?.rewardAmount || mongoRegRecord?.payload?.rewardAmount || 10;
 
@@ -1124,17 +1178,21 @@ const getMyReferrals = async (tagName, domain, authUser) => {
             rewardAmount: regClaimed ? Number(regAmount) : 0,
             rewardType: "registration",
             ipfsHash: ipfsRegReward?.cid || mongoRegRecord?.ipfsHash || null,
+            countsForReward: countsForReward || !!regClaimed,
         });
 
         // 2. Check Purchase Reward (10%) - only if mainnet
         if (type === "mainnet") {
-            const { ipfsReward: ipfsPurReward, mongoRecord: mongoPurRecord, claimed: purClaimed } =
-                await _readReferralReward(name, referralTagName, "purchase");
+            const {
+                ipfsReward: ipfsPurReward,
+                mongoRecord: mongoPurRecord,
+                claimed: purClaimed,
+            } = await _readReferralReward(name, referralTagName, "purchase");
             const purAmountPotential = _calculateReferralRewardAmount(record, domainConfig, "purchase");
             const purAmountActual = ipfsPurReward?.publicData?.rewardAmount || mongoPurRecord?.payload?.rewardAmount || purAmountPotential;
 
             if (purClaimed) totalEarnedInZNS += Number(purAmountActual);
-            if (!purClaimed && purAmountPotential <= 0) continue;
+            if ((!purClaimed && purAmountPotential <= 0) || Number(purAmountActual) <= 0) continue;
 
             referrals.push({
                 ...record,
@@ -1147,13 +1205,21 @@ const getMyReferrals = async (tagName, domain, authUser) => {
                 rewardAmount: purClaimed ? Number(purAmountActual) : 0,
                 rewardType: "purchase",
                 ipfsHash: ipfsPurReward?.cid || mongoPurRecord?.ipfsHash || null,
+                countsForReward: countsForReward || !!purClaimed,
             });
         }
     }
 
+    const friendsCount = [...map.keys()].filter(Boolean).length;
+
     return {
         referrals,
         totalEarnedInZNS,
+        // Reward cap (#45): extra referrals are history only and cannot be claimed.
+        limit,
+        friendsCount,
+        countedFriends: counted.size,
+        extraFriends: Math.max(0, friendsCount - counted.size),
     };
 };
 

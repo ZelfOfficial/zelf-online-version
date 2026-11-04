@@ -1,8 +1,9 @@
-const { ArweaveSigner, ANT } = require("@ar.io/sdk");
 const config = require("../../../Core/config");
+const solanaAnt = require("./solana-ant.client");
 
 const mappingOfSites = {
 	bdag: config.arns.blockdag_transaction_id,
+	socials: config.arns.socials_transaction_id,
 	zelf: config.arns.index_transaction_id,
 };
 
@@ -19,13 +20,9 @@ const buildWalletKey = () => ({
 	kid: "2011-04-29",
 });
 
-const initAnt = () => {
-	const walletKey = buildWalletKey();
-	return ANT.init({
-		signer: new ArweaveSigner(walletKey),
-		processId: config.arns.processId,
-	});
-};
+const initAnt = () => ({
+	getRecords: () => solanaAnt.getRecords(),
+});
 
 /**
  * Map ANT record key to domain (zelf, bdag, …).
@@ -35,7 +32,9 @@ const initAnt = () => {
 const resolveDomainForRecordKey = (recordKey) => {
 	if (!recordKey || recordKey === "@") return "zelf";
 
-	const suffixDomains = Object.keys(mappingOfSites).filter((d) => d !== "zelf");
+	const suffixDomains = Object.keys(mappingOfSites)
+		.filter((domain) => domain !== "zelf")
+		.sort((left, right) => right.length - left.length);
 	for (let index = 0; index < suffixDomains.length; index++) {
 		const domain = suffixDomains[index];
 		if (recordKey.endsWith(`_${domain}`)) return domain;
@@ -81,22 +80,9 @@ const parseRecordKey = (recordKey) => {
  * @param {number} [params.ttlSeconds]
  * @returns {Promise<Object>}
  */
-const setAntRecord = async ({ ant, recordKey, transactionId, ttlSeconds = 3600 }) => {
-	const client = ant || initAnt();
+const setAntRecord = async ({ recordKey, transactionId, ttlSeconds = 3600 }) => {
 	const txId = transactionId || resolveExpectedTransactionId(recordKey);
-
-	if (recordKey === "@") {
-		if (typeof client.setBaseNameRecord === "function") {
-			return client.setBaseNameRecord({ transactionId: txId, ttlSeconds });
-		}
-		return client.setRecord({ undername: "@", transactionId: txId, ttlSeconds }, { tags: [] });
-	}
-
-	if (typeof client.setUndernameRecord === "function") {
-		return client.setUndernameRecord({ undername: recordKey, transactionId: txId, ttlSeconds });
-	}
-
-	return client.setRecord({ undername: recordKey, transactionId: txId, ttlSeconds }, { tags: [] });
+	return solanaAnt.setRecord({ recordKey, transactionId: txId, ttlSeconds });
 };
 
 module.exports = {

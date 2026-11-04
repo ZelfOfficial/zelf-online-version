@@ -72,7 +72,7 @@ const main = async () => {
             url: `https://zelf.world/blog/bitcoin-erases-election-gains-analysis`, // hardcoded for this test
             sincerely: "Happy Reading,",
             subject: frontmatter.title, // Ensure subject is set
-            pixelUrl: `https://v3.zelf.world/api/articles/track/test-article-id/test-subscriber-id`, // Test pixel
+            pixelUrl: `https://v4.zelf.world/api/articles/track/test-article-id/test-subscriber-id`, // Test pixel
         });
 
         console.log("Done!");

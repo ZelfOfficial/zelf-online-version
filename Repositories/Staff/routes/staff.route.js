@@ -1,6 +1,7 @@
 const config = require("../../../Core/config");
 const Controller = require("../controllers/staff.controller");
 const Middleware = require("../middlewares/staff.middleware");
+const FaceMiddleware = require("../../Face/middlewares/face.middleware");
 
 const base = "/staff";
 
@@ -9,11 +10,11 @@ module.exports = (server) => {
 
 	server.get(`${PATH}`, Controller.get);
 
-	server.post(`${PATH}/invite`, Middleware.inviteValidation, Controller.generateInvitation);
+	server.post(`${PATH}/invite`, Middleware.inviteValidation, FaceMiddleware.gate("staff-face"), Controller.generateInvitation);
 
-	server.put(`${PATH}/role`, Middleware.updateRoleValidation, Controller.updateRole);
+	server.put(`${PATH}/role`, Middleware.updateRoleValidation, FaceMiddleware.gate("staff-face"), Controller.updateRole);
 
-	server.del(`${PATH}`, Middleware.removeValidation, Controller.remove);
+	server.del(`${PATH}`, Middleware.removeValidation, FaceMiddleware.gate("staff-face"), Controller.remove);
 
 	server.post(`${PATH}/passkeys`, Middleware.savePasskeyValidation, Controller.savePasskey);
 
@@ -21,5 +22,5 @@ module.exports = (server) => {
 
 	server.del(`${PATH}/passkeys`, Controller.deletePasskey);
 
-	server.put(`${PATH}`, Middleware.updateProfileValidation, Controller.updateProfile);
+	server.put(`${PATH}`, Middleware.updateProfileValidation, FaceMiddleware.gate("staff-face"), Controller.updateProfile);
 };

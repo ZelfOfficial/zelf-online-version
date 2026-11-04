@@ -23,7 +23,7 @@
 				description: "Liza have been in IT recruitment, Sales and Business Development for 13 years as well as been involved in 2 start-ups.",
 				profileImage: "https://arweave.net/8nHECUli24cVSaSW_14Tgc96h6CujiempFwrUGWLyRE",
 				currency: "blockDAG",
-				currencyIcon: "https://bn2q32x744st6np7o5q3bdbzorr7jert2n6uxornedveocmw2dsa.arweave.net/C3UN6v_nJT81_3dhsIw5dGP0kjPTfUu6LSDqRwmW0OQ",
+				currencyIcon: "https://arweave.net/C3UN6v_nJT81_3dhsIw5dGP0kjPTfUu6LSDqRwmW0OQ",
 				socialLinks: [
 					{
 						type: "linkedin",
@@ -70,7 +70,7 @@
 				description: "I'm the founder and CTO of Zelf | Verifik, building the future of decentralized identity and name services.",
 				profileImage: "https://arweave.net/1YrzcQ1c2WlFKI0TptUuwCyAUOKVnX3VV9DrXeHNO40",
 				currency: "blockDAG",
-				currencyIcon: "https://bn2q32x744st6np7o5q3bdbzorr7jert2n6uxornedveocmw2dsa.arweave.net/C3UN6v_nJT81_3dhsIw5dGP0kjPTfUu6LSDqRwmW0OQ",
+				currencyIcon: "https://arweave.net/C3UN6v_nJT81_3dhsIw5dGP0kjPTfUu6LSDqRwmW0OQ",
 				socialLinks: [
 					{
 						type: "linkedin",
@@ -121,9 +121,9 @@
 				title: "CEO | CYBERSECURITY • ZK FACE PROOFS • WEB3",
 				description:
 					'Founder & CEO of Zelf & Verifik. Verifik is Compliance aaS, Onboarding aaS, Authentication aaS tech-enabler for the Americas. My life revolves around thinking, creating and implementing ideas that positively affect everyone (employees and clients) that comes in contact with our brand. "𝐈𝐧 𝐭𝐡𝐞 𝐛𝐞𝐠𝐢𝐧𝐧𝐢𝐧𝐠 𝐰𝐚𝐬 𝐭𝐡𝐞 𝐥𝐨𝐠𝐨𝐬, 𝐭𝐡𝐞 𝐞𝐧𝐭𝐫𝐨𝐩𝐢𝐜 𝐛𝐢𝐭" - 𝐉𝐨𝐡𝐚𝐧 𝐂𝐚𝐬𝐭𝐞𝐥𝐥𝐚𝐧𝐨𝐬',
-				profileImage: "https://uowtbqmago2zrmapgrtoknc76oronbme2lipp55zft5oqquak5vq.arweave.net/o60wwYAztZiwDzRm5TRf86LmhYTS0Pf3uSz66EKAV2s",
+				profileImage: "https://arweave.net/o60wwYAztZiwDzRm5TRf86LmhYTS0Pf3uSz66EKAV2s",
 				currency: "blockDAG",
-				currencyIcon: "https://bn2q32x744st6np7o5q3bdbzorr7jert2n6uxornedveocmw2dsa.arweave.net/C3UN6v_nJT81_3dhsIw5dGP0kjPTfUu6LSDqRwmW0OQ",
+				currencyIcon: "https://arweave.net/C3UN6v_nJT81_3dhsIw5dGP0kjPTfUu6LSDqRwmW0OQ",
 				socialLinks: [
 					{
 						type: "linkedin",

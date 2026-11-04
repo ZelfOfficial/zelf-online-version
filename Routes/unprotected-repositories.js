@@ -1,5 +1,8 @@
 module.exports = (server) => {
     //A
+    require("../Repositories/ServerVersion/routes/server-version.routes")(server);
+    require("../Repositories/ZAI/routes/zai.routes")(server);
+    require("../Repositories/ZelfLink/routes/zelf-link.routes")(server);
     require("../Repositories/AppVersion/routes/app-version.routes")(server);
     //B
     //C
@@ -29,8 +32,7 @@ module.exports = (server) => {
 
     //Q
     //R
-    /** JSON-RPC proxy: no JWT; IP limits via Repositories/RPCCaller. */
-    require("../Repositories/RPC/routes/rpc.routes")(server);
+    // RPC proxy routes are registered with the protected routers (session JWT required).
     //S
     require("../Repositories/SuperAdmin/routes/super-admin.route")(server);
     require("../Repositories/Session/routes/session.route")(server);
@@ -52,4 +54,5 @@ module.exports = (server) => {
     require("../Repositories/ZelfProof/routes/zelf-proof.route")(server);
     require("../Repositories/HumanAuthn/routes/human-authn.route")(server);
     require("../Repositories/FaceCertificates/routes/face-certificates.route")(server);
+    require("../Repositories/ZelfID/routes/zelf-ids-revenue-cat.routes")(server);
 };

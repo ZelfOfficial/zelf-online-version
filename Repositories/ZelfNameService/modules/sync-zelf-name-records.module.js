@@ -3,7 +3,7 @@ const { generateSuiWalletFromMnemonic } = require("../../Wallet/modules/sui");
 const { createTonWallet } = require("../../Wallet/modules/ton");
 const { createAptosWallet } = require("../../Wallet/modules/aptos");
 const SessionModule = require("../../Session/modules/session.module");
-const moment = require("moment");
+const { parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const ArweaveModule = require("../../Arweave/modules/arweave.module");
 
@@ -68,8 +68,8 @@ const updateTags = async (zelfNameObject, tagsToAdd = []) => {
 	const extraParams = {
 		origin: zelfNameObject.publicData.origin || "online",
 		suiAddress: zelfNameObject.publicData.suiAddress,
-		registeredAt: moment(zelfNameObject.publicData.registeredAt).add(30, "second").format("YYYY-MM-DD HH:mm:ss"),
-		expiresAt: moment(zelfNameObject.publicData.expiresAt).add(30, "second").format("YYYY-MM-DD HH:mm:ss"),
+		registeredAt: parseLeaseDate(zelfNameObject.publicData.registeredAt).add(30, "second").format("YYYY-MM-DD HH:mm:ss"),
+		expiresAt: parseLeaseDate(zelfNameObject.publicData.expiresAt).add(30, "second").format("YYYY-MM-DD HH:mm:ss"),
 	};
 
 	if (zelfNameObject.publicData.price) {

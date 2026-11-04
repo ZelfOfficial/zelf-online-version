@@ -1,4 +1,5 @@
 const { getCleanInstance } = require("../../../Core/axios");
+const { extensionChains } = require("../../../Core/rpc-upstreams");
 const { generateRandomUserAgent } = require("../../../Core/helpers");
 const {
 	getNaasNodeUrl,
@@ -11,6 +12,7 @@ const moment = require("moment");
 const { getTickerPrice } = require("../../binance/modules/binance.module");
 const { getKnownSplDisplay, WSOL_MINT } = require("./solana-spl-known-metadata");
 const { enrichSplTokenRowsWithJupiter } = require("./jupiter-spl-metadata.module");
+const { summarizeParsedTransaction } = require("./solana-tx-summary");
 
 const instance = getCleanInstance(30000);
 
@@ -35,7 +37,7 @@ const solanaBookBase = async () => getNaasNodeUrl(NAAS_CHAIN.SOLANA);
  * `config.solana` queda de segundo porque puede no estar configurado.
  */
 const solanaFallbackBase = () =>
-	config.extension?.rpc?.chains?.solana?.rpcUrl || config.solana?.rpcUrl || "https://api.mainnet-beta.solana.com";
+	extensionChains().solana?.rpcUrl || config.solana?.rpcUrl || "https://api.mainnet-beta.solana.com";
 
 let rpcSeq = 0;
 const rpcCall = async (method, params, { retried401 = false, useFallbackNode = false } = {}) => {
@@ -146,21 +148,140 @@ function parsedTokenAccountsToHoldings(ownerAddress, value) {
 	};
 }
 
+/**
+ * Detail of each signature (direction, amount, asset). Without it every row went out as
+ * "0 SOL" with no direction, and the apps showed "Recibido 0 SOL" for a 10 ZNS reward.
+ *
+ * Confirmed transactions never change, so the summary is cached per signature+wallet.
+ * Lookups run a few at a time with a short deadline; a row that misses it keeps the
+ * bare signature data instead of holding the whole response.
+ */
+const TX_SUMMARY_CACHE = new Map();
+const TX_SUMMARY_CACHE_MAX = 5000;
+const TX_DETAIL_CONCURRENCY = 6;
+const TX_DETAIL_DEADLINE_MS = 4000;
+
+const cacheSummary = (key, summary) => {
+	if (TX_SUMMARY_CACHE.size >= TX_SUMMARY_CACHE_MAX) {
+		TX_SUMMARY_CACHE.delete(TX_SUMMARY_CACHE.keys().next().value);
+	}
+	TX_SUMMARY_CACHE.set(key, summary);
+};
+
+const fetchTxSummary = async (signature, owner) => {
+	const key = `${signature}:${owner}`;
+	if (TX_SUMMARY_CACHE.has(key)) return TX_SUMMARY_CACHE.get(key);
+	const tx = await rpcCall("getTransaction", [
+		signature,
+		{ encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "confirmed" },
+	]);
+	const summary = summarizeParsedTransaction(tx, owner);
+	if (summary) cacheSummary(key, summary);
+	return summary;
+};
+
+/**
+ * Fills traffic/amount/asset/from/to on rows from `mapSignatureToTxRow`.
+ * @param {Array} rows
+ * @param {string} owner
+ * @param {number} [priceSol] - to fill `fiatAmount` on SOL rows
+ */
+const enrichTxRows = async (rows, owner, priceSol = 0) => {
+	const queue = rows.filter((row) => row.status !== "Failed");
+	const work = async () => {
+		while (queue.length) {
+			const row = queue.shift();
+			try {
+				const summary = await fetchTxSummary(row.hash, owner);
+				if (!summary) continue;
+				const { tokenMint, ...fields } = summary;
+				Object.assign(row, fields);
+				if (tokenMint) row.tokenMint = tokenMint;
+				row.method = "transfer";
+				if (summary.asset === "SOL" && priceSol) row.fiatAmount = (summary.amount * priceSol).toFixed(2);
+			} catch (error) {
+				console.warn("solana tx detail:", row.hash?.slice(0, 12), error?.message || error);
+			}
+		}
+	};
+
+	let timer;
+	const deadline = new Promise((resolve) => {
+		timer = setTimeout(resolve, TX_DETAIL_DEADLINE_MS);
+	});
+	const workers = Array.from({ length: Math.min(TX_DETAIL_CONCURRENCY, queue.length) }, work);
+	await Promise.race([Promise.all(workers), deadline]).finally(() => clearTimeout(timer));
+	// Rows still queued at the deadline keep their bare data; stop the workers.
+	queue.length = 0;
+	return rows;
+};
+
 const getSignatures = async (address, limit) => {
 	const cap = Math.min(1000, Math.max(1, limit || 25));
 	const result = await rpcCall("getSignaturesForAddress", [address, { limit: cap }]);
 	return Array.isArray(result) ? result : [];
 };
 
+/** Native SOL only (no SPL scan / tx history) for fast fallback when scrapers lie about zero balance. */
+const getNativeBalanceSummary = async (params) => {
+	const address = params.id;
+	const priceNum = await getTickerPrice({ symbol: "SOL" }).then(({ price }) => Number(price) || 0).catch(() => 0);
+	const balRes = await rpcCall("getBalance", [address, { commitment: "confirmed" }]);
+	const rawLamports = balRes != null && typeof balRes === "object" && "value" in balRes ? balRes.value : balRes;
+	const balanceSol = Number(rawLamports) / 1e9;
+	const fiatBalance = parseFloat((balanceSol * priceNum).toFixed(4));
+
+	return {
+		address,
+		balance: `${balanceSol}`,
+		fiatBalance,
+		type: "system_account",
+		account: {
+			asset: "SOL",
+			fiatBalance: fiatBalance.toFixed(5),
+			price: `${priceNum}`,
+		},
+		tokenHoldings: {
+			total: 1,
+			balance: fiatBalance,
+			fiatBalance,
+			tokens: [
+				{
+					tokenType: "SOL",
+					fiatBalance,
+					symbol: "SOL",
+					name: "Solana",
+					price: priceNum,
+					amount: balanceSol,
+					image: "https://arweave.net/rO-delUT2hN1oigbIYe5nvZBaDYTvUoA-zbk623ksVg",
+				},
+			],
+		},
+		transactions: [],
+	};
+};
+
 const getAddress = async (params) => {
 	const address = params.id;
+	const pricePromise = getTickerPrice({ symbol: "SOL" }).then(({ price }) => Number(price) || 0);
+	// The history (signatures + per-transaction detail) runs alongside balance and tokens.
+	const transactionsPromise = (async () => {
+		const sigs = await getSignatures(address, 20);
+		return enrichTxRows(
+			sigs.map((s) => mapSignatureToTxRow(s, address)),
+			address,
+			await pricePromise.catch(() => 0),
+		);
+	})();
+	// Don't leave a rejection unhandled if the balance call below throws first.
+	transactionsPromise.catch(() => {});
+
 	const balRes = await rpcCall("getBalance", [address, { commitment: "confirmed" }]);
 	const rawLamports = balRes != null && typeof balRes === "object" && "value" in balRes ? balRes.value : balRes;
 	const value = Number(rawLamports);
 	const balanceSol = value / 1e9;
 
-	const { price } = await getTickerPrice({ symbol: "SOL" });
-	const priceNum = Number(price) || 0;
+	const priceNum = await pricePromise;
 
 	const tokenResult = await rpcCall("getTokenAccountsByOwner", [
 		address,
@@ -175,8 +296,7 @@ const getAddress = async (params) => {
 	}
 	tokenHoldings.total = splTotal;
 
-	const sigs = await getSignatures(address, 20);
-	const transactions = sigs.map((s) => mapSignatureToTxRow(s, address));
+	const transactions = await transactionsPromise;
 
 	const fiatBalance = parseFloat((balanceSol * priceNum).toFixed(4));
 
@@ -242,7 +362,10 @@ const getTransactions = async (params, query) => {
 	const limit = Math.min(1000, Math.max(1, Number.isFinite(show) ? show : 25));
 
 	const sigs = await getSignatures(address, limit);
-	const transactions = sigs.map((s) => mapSignatureToTxRow(s, address));
+	const transactions = await enrichTxRows(
+		sigs.map((s) => mapSignatureToTxRow(s, address)),
+		address,
+	);
 
 	return {
 		pagination: {
@@ -255,7 +378,9 @@ const getTransactions = async (params, query) => {
 };
 
 module.exports = {
+	enrichTxRows,
 	solanaBookBase,
+	getNativeBalanceSummary,
 	getAddress,
 	getTokens,
 	getTransactions,

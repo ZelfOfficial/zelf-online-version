@@ -1,3 +1,4 @@
+const moment = require("moment");
 const { addressLookupValues } = require("./ton-address-lookup.util");
 const IPFS = require("../../../Core/ipfs");
 const config = require("../../../Core/config");
@@ -13,6 +14,9 @@ const {
     isPackedAddressPublicData,
     mergeAddressKeyvaluesIntoPublicData,
     mergeContinuationAddresses,
+    buildUpsertPrimarySearchableKeyvalues,
+    expandPackedAddresses,
+    expandStoredExtraParams,
 } = require("./tags-addresses.module");
 
 /**
@@ -131,11 +135,16 @@ const _formatRecord = (item) => {
 	};
 
 	if (formattedResult?.publicData?.extraParams) {
-		const extraParams = JSON.parse(formattedResult.publicData.extraParams);
+		const extraParams = expandStoredExtraParams(formattedResult.publicData.extraParams);
 
 		Object.assign(formattedResult.publicData, extraParams);
 
 		delete formattedResult.publicData.extraParams;
+	}
+
+	if (formattedResult?.publicData && !formattedResult.publicData.registeredAt && formattedResult.date_pinned) {
+		const pinnedAt = moment(formattedResult.date_pinned);
+		if (pinnedAt.isValid()) formattedResult.publicData.registeredAt = pinnedAt.format("YYYY-MM-DD HH:mm:ss");
 	}
 
 	if (formattedResult?.publicData) {
@@ -346,16 +355,21 @@ const insertSearchablePins = async (data, authUser) => {
 		authUser
 	);
 
-	for (const page of pages.continuations) {
-		await insert(
+	for (let pageIndex = 0; pageIndex < pages.continuations.length; pageIndex += 1) {
+		const page = pages.continuations[pageIndex];
+		const placeholder = _continuationPlaceholderBase64(name, pageIndex);
+		const inserted = await insert(
 			{
-				base64,
+				base64: placeholder,
 				name: page.name,
 				metadata: page.keyvalues,
 				pinIt,
 			},
 			authUser
 		);
+		if (inserted?.id && inserted.id !== primary?.id && typeof IPFS.updateFileKeyvalues === "function") {
+			await IPFS.updateFileKeyvalues(inserted.id, page.keyvalues);
+		}
 	}
 
 	const formatted = _formatRecord(primary);
@@ -365,8 +379,178 @@ const insertSearchablePins = async (data, authUser) => {
 	return formatted;
 };
 
-const unpinContinuationSiblings = async (canonicalName) => {
-	if (!canonicalName) return null;
+/**
+ * Same QR uploads come back as the existing pin. Keyvalues are unchanged until a metadata update.
+ * @param {Object} inserted
+ * @param {string} [previousId]
+ * @param {string} [previousCid]
+ * @returns {boolean}
+ */
+const isExistingPinUpload = (inserted = {}, previousId, previousCid) => {
+	const newId = inserted.id != null ? String(inserted.id) : "";
+	const newCid = String(inserted.cid || inserted.ipfsHash || inserted.ipfs_pin_hash || "");
+	if (previousId && newId && String(previousId) === newId) return true;
+	if (previousCid && newCid && String(previousCid) === newCid) return true;
+	if (inserted.duplicated === true || inserted.is_duplicate === true || inserted.saved === false) return true;
+	return false;
+};
+
+/**
+ * Write keyvalues onto an existing pin and return the record with those values expanded.
+ * @param {string} id
+ * @param {Object} keyvalues
+ */
+const updateSearchablePinKeyvalues = async (id, keyvalues) => {
+	await IPFS.updateFileKeyvalues(id, keyvalues);
+	let row = null;
+	try {
+		row = await IPFS.getFileById(id);
+	} catch (_error) {
+		row = null;
+	}
+	const readExtra = row?.publicData?.extraParams || row?.metadata?.keyvalues?.extraParams || row?.keyvalues?.extraParams;
+	const source = readExtra ? row : { ...(row || {}), id, metadata: { keyvalues }, keyvalues };
+	const formatted = _formatRecord(source);
+	formatted.id = formatted.id || id;
+	if (keyvalues?.extraParams) {
+		const parsed = expandStoredExtraParams(keyvalues.extraParams);
+		formatted.publicData = { ...(formatted.publicData || {}), ...parsed };
+		if (parsed.plan) formatted.publicData.plan = parsed.plan;
+	}
+	return formatted;
+};
+
+const _findContinuationPinRow = async (page) => {
+	const byName = await IPFS.filter("name", page.name);
+	if (byName?.length) {
+		const exact = byName.find((row) => String(row.name || "").toLowerCase() === String(page.name).toLowerCase());
+		if (exact) return exact;
+		return byName[0];
+	}
+
+	const linkValue = page.keyvalues?.[page.linkKey];
+	if (page.linkKey && linkValue) {
+		const rows = await IPFS.filter(page.linkKey, linkValue);
+		if (rows?.length) {
+			const exact = rows.find((row) => String(row.name || "").toLowerCase() === String(page.name).toLowerCase());
+			return exact || rows[0];
+		}
+	}
+
+	return null;
+};
+
+/**
+ * Update searchable pin metadata when the QR bytes are unchanged (Pinata CID dedupe).
+ * Falls back to {@link insertSearchablePins} when no existing primary pin id is known.
+ *
+ * @param {Object} data
+ * @param {string} [data.existingPrimaryPinId]
+ * @param {string} data.base64
+ * @param {Object} data.reserved
+ * @param {Object} data.addresses
+ * @param {string} data.name
+ * @param {boolean} data.pinIt
+ * @param {Object} authUser
+ * @returns {Promise<Object>}
+ */
+const _continuationPlaceholderBase64 = (canonicalName, pageIndex) => {
+	const payload = JSON.stringify({
+		_zelfAddressContinuation: true,
+		tagName: canonicalName,
+		page: pageIndex,
+		ts: Date.now(),
+	});
+	return `data:application/json;base64,${Buffer.from(payload).toString("base64")}`;
+};
+
+const _publicDataFromKeyvalues = (keyvalues = {}) => {
+	const publicData = { ...keyvalues };
+	mergeAddressKeyvaluesIntoPublicData(publicData);
+	expandPackedAddresses(publicData);
+	return publicData;
+};
+
+const upsertSearchablePins = async (data, authUser) => {
+	const { base64, reserved, addresses, name, pinIt, existingPrimaryPinId } = data;
+	const addressMap = addresses || extractAddressKeyvaluesFromPublicData(data.addressSource || {});
+	const packedPrimaryKeyvalues = buildUpsertPrimarySearchableKeyvalues(reserved, addressMap);
+	const pages = buildSearchablePinPages({
+		reserved,
+		addresses: addressMap,
+		tagName: name,
+	});
+
+	let primaryPinId = existingPrimaryPinId || null;
+	let primaryRow = null;
+
+	if (primaryPinId) {
+		primaryRow = await IPFS.updateFileKeyvalues(existingPrimaryPinId, packedPrimaryKeyvalues);
+		primaryRow = { ...primaryRow, name };
+	} else {
+		const inserted = await insert(
+			{
+				base64,
+				name,
+				metadata: packedPrimaryKeyvalues,
+				pinIt,
+			},
+			authUser
+		);
+
+		primaryPinId = inserted?.id || null;
+		if (primaryPinId && existingPrimaryPinId && inserted?.id === existingPrimaryPinId) {
+			primaryRow = await IPFS.updateFileKeyvalues(existingPrimaryPinId, packedPrimaryKeyvalues);
+			primaryRow = { ...primaryRow, name };
+		} else {
+			primaryRow = inserted;
+		}
+	}
+
+	const packedPublic = _publicDataFromKeyvalues(packedPrimaryKeyvalues);
+	const needsContinuationPages = pages.continuations.some((page) =>
+		Object.keys(page.keyvalues).some((key) => {
+			if (key === CONTINUATION_LINK_KEY || key === CONTINUATION_LINK_KEY_2) return false;
+			const appKey = key.endsWith("Address") ? key : null;
+			return appKey && addressMap[appKey] && !packedPublic[appKey];
+		})
+	);
+
+	if (needsContinuationPages) {
+		for (let pageIndex = 0; pageIndex < pages.continuations.length; pageIndex += 1) {
+			const page = pages.continuations[pageIndex];
+			const existing = await _findContinuationPinRow(page);
+			if (existing?.id) {
+				if (existing.id !== primaryPinId) {
+					await IPFS.updateFileKeyvalues(existing.id, page.keyvalues);
+				}
+				continue;
+			}
+
+			const placeholder = _continuationPlaceholderBase64(name, pageIndex);
+			const inserted = await insert(
+				{
+					base64: placeholder,
+					name: page.name,
+					metadata: page.keyvalues,
+					pinIt,
+				},
+				authUser
+			);
+
+			if (inserted?.id && inserted.id !== primaryPinId) {
+				await IPFS.updateFileKeyvalues(inserted.id, page.keyvalues);
+			}
+		}
+	}
+
+	let formatted = _formatRecord(primaryPinId ? await IPFS.getFileById(primaryPinId) : primaryRow);
+	formatted = await _mergeAllContinuationPages(formatted);
+	return formatted;
+};
+
+const listContinuationSiblingPinIds = async (canonicalName) => {
+	if (!canonicalName) return [];
 
 	const ids = [];
 
@@ -378,6 +562,11 @@ const unpinContinuationSiblings = async (canonicalName) => {
 		}
 	}
 
+	return ids;
+};
+
+const unpinContinuationSiblings = async (canonicalName) => {
+	const ids = await listContinuationSiblingPinIds(canonicalName);
 	if (!ids.length) return null;
 
 	return unPinFiles(ids);
@@ -423,12 +612,90 @@ const unPinFiles = async (ids = []) => {
 	}
 };
 
+const SEARCH_BY_DOMAIN_ALLOWED_LIMITS = [25, 50, 100, 250, 500];
+const SEARCH_BY_DOMAIN_MAX_SCAN = 50000;
+const SEARCH_BY_DOMAIN_CACHE_TTL_MS = 60 * 1000;
+/** @type {Map<string, { at: number, rows: Array }>} */
+const searchByDomainFilteredCache = new Map();
+
+const _searchByDomainCacheKey = (domainLower, property, filterValue, namePattern) =>
+	`${domainLower}|${property}|${filterValue}|${namePattern}`;
+
+const _getCachedFilteredRows = async (property, filterValue, domainLower, namePattern) => {
+	const key = _searchByDomainCacheKey(domainLower, property, filterValue, namePattern);
+	const hit = searchByDomainFilteredCache.get(key);
+	if (hit && Date.now() - hit.at < SEARCH_BY_DOMAIN_CACHE_TTL_MS) {
+		return { rows: hit.rows, incomplete: false };
+	}
+
+	const collected = await _collectSearchByDomainRows(property, filterValue, domainLower, namePattern);
+	if (!collected.incomplete) {
+		searchByDomainFilteredCache.set(key, { at: Date.now(), rows: collected.rows });
+	}
+	return collected;
+};
+
+const normalizeSearchByDomainLimit = (limit) => {
+	const parsed = parseInt(limit, 10);
+	if (SEARCH_BY_DOMAIN_ALLOWED_LIMITS.includes(parsed)) return parsed;
+	if (Number.isFinite(parsed) && parsed > 0) return Math.min(parsed, SEARCH_BY_DOMAIN_MAX_SCAN);
+	return 50;
+};
+
+const normalizeSearchByDomainOffset = (pageOffset) => {
+	const parsed = parseInt(pageOffset, 10);
+	return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+};
+
+const _matchesSearchByDomainRow = (row, domainLower, namePattern) => {
+	if (isContinuationPublicData(row.publicData)) return false;
+	if (!_rowBelongsToDomain(row, domainLower)) return false;
+	if (!namePattern) return true;
+	const label = String(row.name || row.publicData?.zelfName || "").toLowerCase();
+	return label.includes(namePattern.toLowerCase());
+};
+
+/**
+ * Walk Pinata pages until we have the full filtered set (capped) so total + pageOffset are accurate.
+ * @param {"domain"|"name"} property
+ * @param {string} value
+ * @param {string} domainLower
+ * @param {string} namePattern
+ */
+const _collectSearchByDomainRows = async (property, value, domainLower, namePattern) => {
+	const matched = [];
+	let pageToken = null;
+
+	try {
+		while (matched.length < SEARCH_BY_DOMAIN_MAX_SCAN) {
+			const { files, nextPageToken } = await IPFS.filterPaged(property, value, { pageSize: 100, pageToken });
+			if (!files.length) break;
+
+			for (const file of files) {
+				const row = _formatSearchResults([file])[0];
+				if (!row) continue;
+				if (!_matchesSearchByDomainRow(row, domainLower, namePattern)) continue;
+				matched.push(row);
+				if (matched.length >= SEARCH_BY_DOMAIN_MAX_SCAN) break;
+			}
+
+			if (!nextPageToken || matched.length >= SEARCH_BY_DOMAIN_MAX_SCAN) break;
+			pageToken = nextPageToken;
+		}
+
+		return { rows: matched, incomplete: false };
+	} catch (error) {
+		console.error("searchByDomain scan interrupted:", error?.message || error);
+		return { rows: matched, incomplete: true };
+	}
+};
+
 /**
  * Search for tags by domain
  * @param {Object} params - Search parameters
  * @param {string} params.domain - Domain name
  * @param {Object} authUser - Authenticated user
- * @returns {Array} - Search results
+ * @returns {{ rows: Array, total: number, limit: number, pageOffset: number }}
  */
 const searchByDomain = async (params, authUser) => {
 	const { domain, limit, pageOffset, name } = params;
@@ -437,24 +704,25 @@ const searchByDomain = async (params, authUser) => {
 
 	if (!domainConfig) throw new Error("Domain not supported");
 
-	// Default to 50 records, support 25, 50, 100, 250, 500; cap matches Core/ipfs filter SAFETY_CAP
-	const paginationOptions = {
-		limit: limit ? parseInt(limit, 10) : 50,
-		pageOffset: pageOffset ? parseInt(pageOffset, 10) : 0,
-	};
-
+	const resolvedLimit = normalizeSearchByDomainLimit(limit);
+	const resolvedOffset = normalizeSearchByDomainOffset(pageOffset);
 	const namePattern = typeof name === "string" ? name.trim() : "";
+	const domainLower = String(domain).toLowerCase();
 
-	if (namePattern) {
-		const records = await IPFS.filter("name", namePattern, paginationOptions);
-		const formatted = _formatSearchResults(records);
-		const domainLower = String(domain).toLowerCase();
-		return formatted.filter((row) => !isContinuationPublicData(row.publicData) && _rowBelongsToDomain(row, domainLower));
-	}
+	const property = namePattern ? "name" : "domain";
+	const filterValue = namePattern || domain;
 
-	const records = await IPFS.filter("domain", domain, paginationOptions);
+	const { rows: allRows, incomplete } = await _getCachedFilteredRows(property, filterValue, domainLower, namePattern);
+	const total = allRows.length;
+	const rows = allRows.slice(resolvedOffset, resolvedOffset + resolvedLimit);
 
-	return _formatSearchResults(records).filter((row) => !isContinuationPublicData(row.publicData));
+	return {
+		rows,
+		total,
+		limit: resolvedLimit,
+		pageOffset: resolvedOffset,
+		...(incomplete ? { incomplete: true } : {}),
+	};
 };
 
 /**
@@ -670,8 +938,12 @@ module.exports = {
 	show,
 	insert,
 	insertSearchablePins,
+	isExistingPinUpload,
+	updateSearchablePinKeyvalues,
+	upsertSearchablePins,
 	tagRegistration,
 	unPinFiles,
+	listContinuationSiblingPinIds,
 	unpinContinuationSiblings,
 	searchByDomain,
 	searchByStorageKey,

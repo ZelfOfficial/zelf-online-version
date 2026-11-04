@@ -2,11 +2,11 @@ const SessionModule = require("../../Session/modules/session.module");
 const ArweaveModule = require("../../Arweave/modules/arweave.module");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const config = require("../../../Core/config");
-const { buildTxUrl, buildExplorerUrl } = require("../../Arweave/modules/arweave-gateway.module");
+const { resolveContentUrl, buildExplorerUrl } = require("../../Arweave/modules/arweave-gateway.module");
 const moment = require("moment");
 const axios = require("axios");
 const { encrypt, encryptQR } = require("../../Wallet/modules/encryption");
-const { mergeAddressKeyvaluesIntoPublicData } = require("../../Tags/modules/tags-addresses.module");
+const { mergeAddressKeyvaluesIntoPublicData, expandStoredExtraParams } = require("../../Tags/modules/tags-addresses.module");
 
 const zelfNamePricing = {
 	1: { 1: 240, 2: 432, 3: 612, 4: 768, 5: 900, lifetime: 3600 },
@@ -114,7 +114,7 @@ const decryptParams = async (data, authUser) => {
 const formatArweaveRecord = async (transactionRecord) => {
 	const zelfNameObject = {
 		id: transactionRecord.node?.id,
-		url: buildTxUrl(transactionRecord.node?.id),
+		url: await resolveContentUrl(transactionRecord.node?.id),
 		explorerUrl: buildExplorerUrl(transactionRecord.node?.id),
 		publicData: {},
 		zelfProofQRCode: await ArweaveModule.arweaveIDToBase64(transactionRecord.node?.id),
@@ -137,7 +137,7 @@ const formatArweaveRecord = async (transactionRecord) => {
 	zelfNameObject.zelfName = zelfNameTag ? zelfNameTag.value : null;
 
 	if (zelfNameObject.publicData.extraParams) {
-		const extraParams = JSON.parse(zelfNameObject.publicData.extraParams);
+		const extraParams = expandStoredExtraParams(zelfNameObject.publicData.extraParams);
 
 		Object.assign(zelfNameObject.publicData, extraParams);
 
@@ -186,7 +186,7 @@ const formatIPFSRecord = async (ipfsRecord, foundInArweave) => {
 	}
 
 	if (zelfNameObject.publicData.extraParams) {
-		const extraParams = JSON.parse(zelfNameObject.publicData.extraParams);
+		const extraParams = expandStoredExtraParams(zelfNameObject.publicData.extraParams);
 
 		// assign all extraParams properties to the publicData
 		Object.assign(zelfNameObject.publicData, extraParams);

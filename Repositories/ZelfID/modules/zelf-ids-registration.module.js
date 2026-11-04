@@ -1,12 +1,12 @@
 /**
  * Zelf ID v4 lease-time pins. Do not call TagsRegistrationModule from here.
  */
-const moment = require("moment");
 const TagsIPFSModule = require("../../Tags/modules/tags-ipfs.module");
 const TagsArweaveModule = require("../../Tags/modules/tags-arweave.module");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { cleanExtraParamsForPinata, resolveEncryptVersion, stampExtraParamsVersion } = require("../../Tags/modules/tags-addresses.module");
-const { ZELF_ID_RESERVATION_HOURS, FREE_EXPIRATION_YEARS, getBareName, getReservationPinName } = require("./zelf-id-plan.module");
+const { freeTermYearsForName, getBareName, getReservationPinName, getReservationExpiresAt } = require("./zelf-id-plan.module");
+const { formatLeaseDate } = require("../../Tags/modules/lease-date.util");
 
 const attachReferral = (metadata, referralTagObject, storageKey) => {
     if (!referralTagObject) return;
@@ -36,14 +36,16 @@ const confirmZelfId = async (tagObject, referralTagObject, domainConfig, securit
     const tagName = `${getBareName(tagObject[storageKey] || tagObject.tagName || tagObject.zelfName)}.${domain}`;
 
     const plan = options.plan || "free";
-    const expirationYears = plan === "free" ? FREE_EXPIRATION_YEARS : 1;
+    // New free leases: 1–5 characters use the short-name hold, 6+ use the 100-year free term.
+    // Paid plans keep the 1-year stamp this function already used. Existing pins are not rewritten.
+    const expirationYears = plan === "free" ? freeTermYearsForName(tagName, domainConfig) : 1;
 
     const extraParams = {
         origin: tagObject.origin || "online",
         price: tagObject.price,
         duration: expirationYears,
-        registeredAt: moment().format("YYYY-MM-DD HH:mm:ss"),
-        expiresAt: moment().add(expirationYears, "year").format("YYYY-MM-DD HH:mm:ss"),
+        registeredAt: formatLeaseDate(),
+        expiresAt: formatLeaseDate(expirationYears, "year"),
         type: "mainnet",
         hasPassword: tagObject.hasPassword,
         plan,
@@ -85,7 +87,8 @@ const confirmZelfId = async (tagObject, referralTagObject, domainConfig, securit
 };
 
 /**
- * Five-hour unpaid reservation. IPFS only.
+ * Legacy unpaid short-name `.hold` reservation (default one year). IPFS only.
+ * @deprecated New v4 leases no longer call this; kept for imports and existing hold payment flows.
  * @param {Object} tagObject
  * @param {Object|null} referralTagObject
  * @param {Object} domainConfig
@@ -103,8 +106,8 @@ const reserveZelfId = async (tagObject, referralTagObject, domainConfig, securit
         hasPassword: tagObject.hasPassword,
         type: "hold",
         origin: tagObject.origin || "online",
-        registeredAt: moment().format("YYYY-MM-DD HH:mm:ss"),
-        expiresAt: moment().add(ZELF_ID_RESERVATION_HOURS, "hour").format("YYYY-MM-DD HH:mm:ss"),
+        registeredAt: formatLeaseDate(),
+        expiresAt: getReservationExpiresAt(),
     };
 
     if (tagObject.price !== undefined && tagObject.price !== null && tagObject.price !== "") {

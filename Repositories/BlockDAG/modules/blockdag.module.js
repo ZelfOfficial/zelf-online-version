@@ -61,6 +61,23 @@ const withExplorerRetry = async (fn, { attempts = 3, label = "BlockDAG API" } = 
     throw lastError;
 };
 
+/**
+ * Per-step deadlines for the wallet endpoints. The apps give each network ~8 s, so a
+ * slow upstream must not hold the whole response.
+ */
+const EXPLORER_STEP_TIMEOUT_MS = 4000;
+const RPC_STEP_TIMEOUT_MS = 5000;
+const ADDRESS_STEP_TIMEOUT_MS = 5000;
+
+/** Rejects with `<label> timeout after <ms>ms` when `promise` takes longer than `ms`. */
+const withDeadline = (promise, ms, label) => {
+    let timer;
+    const deadline = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms);
+    });
+    return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+};
+
 // BlockDAG JSON-RPC — public endpoint only (dapps-rpc.bdagscan.com is broken / blocked).
 // Optional BLOCKDAG_MAIN_RPC_URL may still override; if it differs from rpcUrl we try it once then fall back.
 const BLOCKDAG_PUBLIC_RPC = "https://rpc.bdagscan.com";
@@ -98,6 +115,49 @@ const apiForAddressBalance = "https://api.bdagscan.com/v1/api/transaction/getAdd
 
 const apiForAddressTransactions = "https://api.bdagscan.com/v1/api/transaction/getTransactionByAddress";
 //?address=0x...&limit=10&page=1&export=false <-- those are the query parameters
+
+// rpc.bdagscan.com and api.bdagscan.com stop answering from the API host (timeout / Cloudflare).
+// These public endpoints stay in sync with chain 1404 and expose Blockscout address history.
+const DEFAULT_BLOCKDAG_RPC_FALLBACKS = [
+    "https://rpc.west.bdag-us.org",
+    "https://rpc.east.bdag-us.org",
+    "https://rpc.brazil.bdag-us.org",
+    "https://rpc.blockdag.solutions",
+];
+const DEFAULT_BLOCKDAG_BLOCKSCOUT_URLS = [
+    "https://explorer.east.bdag-us.org",
+    "https://explorer.west.bdag-us.org",
+    "https://explorer.brazil.bdag-us.org",
+];
+
+const splitCsv = (value) =>
+    String(value || "")
+        .split(",")
+        .map((item) => item.trim().replace(/\/$/, ""))
+        .filter(Boolean);
+
+const blockdagRpcFallbacks = () => {
+    const configured = splitCsv(process.env.BLOCKDAG_RPC_FALLBACK_URLS);
+    return configured.length ? configured : DEFAULT_BLOCKDAG_RPC_FALLBACKS;
+};
+
+const blockdagBlockscoutUrls = () => {
+    const configured = splitCsv(process.env.BLOCKDAG_BLOCKSCOUT_URLS);
+    return configured.length ? configured : DEFAULT_BLOCKDAG_BLOCKSCOUT_URLS;
+};
+
+const HISTORY_UNAVAILABLE = "HISTORY_UNAVAILABLE";
+
+const unavailableHistory = (page) => ({
+    pagination: {
+        records: "0",
+        pages: "0",
+        page: String(page ?? "0"),
+    },
+    transactions: [],
+    transactionsUnavailable: true,
+    error: HISTORY_UNAVAILABLE,
+});
 
 const apiForTransactionDetails = "https://api.bdagscan.com/v1/api/transaction/getTransactionDetails?txnHash=";
 
@@ -174,12 +234,13 @@ const apiForTransactionDetails = "https://api.bdagscan.com/v1/api/transaction/ge
  */
 
 // Helper function to get address balance and details from API
-const getAddressBalanceFromAPI = async (address) => {
+const getAddressBalanceFromAPI = async (address, { attempts = 3, timeout } = {}) => {
     try {
         return await withExplorerRetry(
             async () => {
                 const response = await instance.get(`${apiForAddressBalance}${address}`, {
                     headers: explorerApiHeaders(),
+                    ...(timeout ? { timeout } : {}),
                 });
 
                 if (response.data && response.data.status === 200 && response.data.data) {
@@ -192,7 +253,7 @@ const getAddressBalanceFromAPI = async (address) => {
                 }
                 throw new Error("Invalid API response");
             },
-            { label: "BlockDAG API balance" }
+            { label: "BlockDAG API balance", attempts }
         );
     } catch (error) {
         console.error("BlockDAG API balance fetch failed:", error.message);
@@ -201,7 +262,7 @@ const getAddressBalanceFromAPI = async (address) => {
 };
 
 // Helper function to get address transactions from API
-const getAddressTransactionsFromAPI = async (address, page = 1, limit = 20, exportData = false) => {
+const getAddressTransactionsFromAPI = async (address, page = 1, limit = 20, exportData = false, { attempts = 3, timeout } = {}) => {
     try {
         return await withExplorerRetry(
             async () => {
@@ -213,6 +274,7 @@ const getAddressTransactionsFromAPI = async (address, page = 1, limit = 20, expo
                         export: exportData,
                     },
                     headers: explorerApiHeaders(),
+                    ...(timeout ? { timeout } : {}),
                 });
 
                 if (response.data && response.data.status === 200) {
@@ -221,7 +283,7 @@ const getAddressTransactionsFromAPI = async (address, page = 1, limit = 20, expo
                 }
                 throw new Error("Invalid API response");
             },
-            { label: "BlockDAG API transactions" }
+            { label: "BlockDAG API transactions", attempts }
         );
     } catch (error) {
         console.error("BlockDAG API transactions fetch failed:", error.message);
@@ -297,11 +359,11 @@ const transformApiTransaction = (tx, address) => {
  * @param {Object} [extraHeaders] - Optional extra headers (e.g. api-key for NowNodes)
  * @returns {Promise<Object>} RPC response data
  */
-const postToRpc = async (url, method, params, extraHeaders = {}) => {
+const postToRpc = async (url, method, params, extraHeaders = {}, timeout = 2000) => {
     const response = await instance.post(
         url,
         { jsonrpc: "2.0", method, params, id: 1 },
-        { headers: { "Content-Type": "application/json", ...extraHeaders } }
+        { headers: { "Content-Type": "application/json", ...extraHeaders }, timeout }
     );
     return response.data;
 };
@@ -347,7 +409,30 @@ const requestRPC = async (method, params = []) => {
         }
     }
 
-    return postToRpc(BLOCKDAG_RPC, method, params);
+    const urls = [];
+    const pushUrl = (url) => {
+        const normalized = String(url || "").trim().replace(/\/$/, "");
+        if (!normalized) return;
+        if (urls.some((existing) => existing.replace(/\/$/, "").toLowerCase() === normalized.toLowerCase())) return;
+        urls.push(normalized);
+    };
+
+    pushUrl(BLOCKDAG_RPC);
+    for (const url of blockdagRpcFallbacks()) pushUrl(url);
+
+    let last = null;
+    for (const url of urls) {
+        try {
+            const data = await postToRpc(url, method, params);
+            if (data && !data.error) return data;
+            last = data;
+        } catch (error) {
+            console.warn(`BlockDAG RPC failed for ${method} via fallback:`, error.message);
+            last = { error: { message: error.message } };
+        }
+    }
+
+    return last || { error: { message: "RPC request failed" } };
 };
 
 /**
@@ -441,6 +526,7 @@ const fetchTransactionsFromRPC = async (address) => {
 const getLatestBlock = async () => {
     try {
         const data = await requestRPC("eth_blockNumber");
+        if (!data?.result) throw new Error(data?.error?.message || "RPC request failed");
         return parseInt(data.result, 16);
     } catch (error) {
         console.error("BlockDAG getLatestBlock error:", error.message);
@@ -454,27 +540,36 @@ const getLatestBlock = async () => {
  * @returns {Promise<Object>} Object containing balance and transaction stats
  */
 const fetchBdagBalance = async (address) => {
-    try {
-        return await getAddressBalanceFromAPI(address);
-    } catch (apiError) {
-        console.log("BlockDAG API balance fetch failed, trying RPC:", apiError.message);
-        try {
-            const data = await requestRPC("eth_getBalance", [address, "latest"]);
-            const balance = data.result ? (parseInt(data.result, 16) / Math.pow(10, 18)).toString() : "0";
-            return {
-                balance,
-                firstTransaction: null,
-                lastTransaction: null,
-            };
-        } catch (error) {
-            console.error("BlockDAG RPC balance fetch failed:", error.message);
-            return {
-                balance: "0",
-                firstTransaction: null,
-                lastTransaction: null,
-            };
-        }
+    // The explorer API (api.bdagscan.com) can hang for minutes. With 3 attempts of 15 s
+    // it took ~46 s before falling back to the RPC, longer than any client waits.
+    // Ask both at once: the RPC answers the balance in ~0.1 s, and the explorer only
+    // adds first/last transaction when it answers within its short deadline.
+    const [explorer, rpc] = await Promise.allSettled([
+        withDeadline(
+            getAddressBalanceFromAPI(address, { attempts: 1, timeout: EXPLORER_STEP_TIMEOUT_MS }),
+            EXPLORER_STEP_TIMEOUT_MS,
+            "BlockDAG API balance"
+        ),
+        withDeadline(requestRPC("eth_getBalance", [address, "latest"]), RPC_STEP_TIMEOUT_MS, "BlockDAG RPC balance"),
+    ]);
+
+    if (explorer.status === "fulfilled" && explorer.value) return explorer.value;
+
+    if (rpc.status === "fulfilled" && rpc.value?.result) {
+        return {
+            balance: (parseInt(rpc.value.result, 16) / Math.pow(10, 18)).toString(),
+            firstTransaction: null,
+            lastTransaction: null,
+        };
     }
+
+    console.error(
+        "BlockDAG balance unavailable:",
+        explorer.reason?.message || "explorer empty",
+        "/",
+        rpc.reason?.message || "rpc empty"
+    );
+    return { balance: "0", firstTransaction: null, lastTransaction: null };
 };
 
 /**
@@ -547,53 +642,156 @@ const createNativeBdagToken = (address, balance, price, fiatBalance) => {
 };
 
 /**
- * Create error transaction object
- * @param {string} address - Wallet address
- * @param {string} errorMessage - Error message
- * @returns {Object} Error transaction object
+ * Latest transactions for the wallet history: one short attempt against the explorer.
+ * The RPC has no address-history method (`getAddressTxs` is not exposed), so when the
+ * explorer is down the list is empty and `available` is false. It used to return a fake
+ * "Error" transaction that the apps rendered as a real movement.
+ * @param {string} address
+ * @returns {Promise<{ transactions: Array, available: boolean }>}
  */
-const createErrorTransaction = (address, errorMessage) => {
-    return [
-        {
-            hash: "0x" + "0".repeat(64),
-            method: "Error",
-            block: "N/A",
-            age: "N/A",
-            date: "N/A",
-            from: address,
-            traffic: "ERROR",
-            to: address,
-            fiatAmount: "0.00",
-            amount: "0",
-            asset: "BDAG",
-            txnFee: "0",
-            note: `Transaction fetch failed: ${errorMessage}`,
-        },
-    ];
+const formatWei = (wei) => {
+    try {
+        const value = BigInt(String(wei || "0"));
+        const negative = value < 0n;
+        const absolute = negative ? -value : value;
+        const base = 10n ** 18n;
+        const whole = absolute / base;
+        const fraction = (absolute % base).toString().padStart(18, "0").replace(/0+$/, "");
+        const text = fraction ? `${whole.toString()}.${fraction}` : whole.toString();
+        return negative ? `-${text}` : text;
+    } catch (error) {
+        return "0";
+    }
+};
+
+const blockscoutAddress = (field) => {
+    if (!field) return "";
+    if (typeof field === "string") return field;
+    if (typeof field === "object" && field.hash) return field.hash;
+    return "";
+};
+
+const transformBlockscoutTransaction = (tx, address) => {
+    const from = blockscoutAddress(tx.from) || address;
+    const to = blockscoutAddress(tx.to) || address;
+    const traffic = from.toLowerCase() === String(address).toLowerCase() ? "OUT" : "IN";
+    const parsed = Date.parse(tx.timestamp || "");
+    const timestamp = Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
+    const date = timestamp ? moment.unix(timestamp).utc().format("YYYY-MM-DD HH:mm:ss") : "N/A";
+
+    return {
+        hash: tx.hash || "0x" + "0".repeat(64),
+        method: tx.method || (tx.raw_input && tx.raw_input !== "0x" ? "Contract" : "Transfer"),
+        block: tx.block_number || tx.block || "N/A",
+        age: timestamp ? moment.unix(timestamp).fromNow() : "N/A",
+        date,
+        timestamp,
+        from,
+        traffic,
+        to,
+        fiatAmount: "0.00",
+        amount: formatWei(tx.value),
+        asset: "BDAG",
+        txnFee: tx.fee?.value != null ? formatWei(tx.fee.value) : "0",
+        status: tx.status === "ok" || tx.result === "success" ? "success" : tx.status || tx.result || "success",
+    };
 };
 
 /**
- * Fetch transactions for an address with timeout
- * @param {string} address - Address to fetch transactions for
- * @returns {Promise<Array>} Array of transactions
+ * Blockscout pages are newest-first. Walk only as far as the requested window.
+ * @returns {Promise<{ transactions: Array, hasNextPage: boolean, source: string }>}
  */
+const fetchBlockscoutTransactionPage = async (address, pageNum, showNum) => {
+    const needed = (pageNum + 1) * showNum;
+    let lastError = null;
+
+    for (const base of blockdagBlockscoutUrls()) {
+        try {
+            const url = `${base}/api/v2/addresses/${address}/transactions`;
+            let items = [];
+            let next = null;
+            let guard = 0;
+
+            while (items.length < needed && guard < 4) {
+                const response = await instance.get(url, {
+                    params: next || undefined,
+                    timeout: 4000,
+                    headers: { Accept: "application/json", "User-Agent": generateRandomUserAgent() },
+                    validateStatus: (status) => status < 500,
+                });
+
+                if (response.status >= 400) throw new Error(`Blockscout HTTP ${response.status}`);
+
+                const batch = Array.isArray(response.data?.items) ? response.data.items : null;
+                if (!batch) throw new Error("Blockscout response missing items");
+
+                items = items.concat(batch);
+                next = response.data?.next_page_params || null;
+                guard += 1;
+                if (!next || batch.length === 0) break;
+            }
+
+            const start = pageNum * showNum;
+            return {
+                transactions: items.slice(start, start + showNum).map((tx) => transformBlockscoutTransaction(tx, address)),
+                hasNextPage: items.length > start + showNum || Boolean(next),
+                source: "blockscout",
+            };
+        } catch (error) {
+            lastError = error;
+            console.warn(`BlockDAG Blockscout ${base} failed:`, error.message);
+        }
+    }
+
+    throw lastError || new Error(HISTORY_UNAVAILABLE);
+};
+
+/**
+ * bdagscan first, then a synced Blockscout, then the RPC method when a node actually exposes it.
+ * Throws HISTORY_UNAVAILABLE when every source fails. An empty list from a source that answered is real.
+ */
+const loadTransactionPage = async (address, pageNum, showNum) => {
+    try {
+        const apiTransactions = await getAddressTransactionsFromAPI(address, pageNum + 1, showNum, false, {
+            attempts: 1,
+            timeout: 2500,
+        });
+        const rows = (Array.isArray(apiTransactions) ? apiTransactions : []).map((tx) => transformApiTransaction(tx, address));
+        return { transactions: rows, hasNextPage: rows.length >= showNum, source: "bdagscan" };
+    } catch (error) {
+        console.log("BlockDAG API transactions fetch failed, trying Blockscout:", error.message);
+    }
+
+    try {
+        return await fetchBlockscoutTransactionPage(address, pageNum, showNum);
+    } catch (error) {
+        console.warn("BlockDAG Blockscout history failed:", error.message);
+    }
+
+    try {
+        const rpcTransactions = await fetchTransactionsFromRPC(address);
+        if (rpcTransactions.length) {
+            const start = pageNum * showNum;
+            return {
+                transactions: rpcTransactions.slice(start, start + showNum).map((tx) => transformRpcTransaction(tx, address)),
+                hasNextPage: rpcTransactions.length > start + showNum,
+                source: "rpc",
+            };
+        }
+    } catch (error) {
+        console.warn("BlockDAG RPC history failed:", error.message);
+    }
+
+    throw new Error(HISTORY_UNAVAILABLE);
+};
+
 const fetchAddressTransactions = async (address) => {
     try {
-        const transactionTimeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error("Transaction fetch timeout")), 6000);
-        });
-
-        const transactionDataPromise = getTransactionsList({
-            address,
-            page: "0",
-            show: "20",
-        });
-
-        const transactionsData = await Promise.race([transactionDataPromise, transactionTimeoutPromise]);
-        return transactionsData.transactions || [];
+        const page = await withDeadline(loadTransactionPage(address, 0, 20), ADDRESS_STEP_TIMEOUT_MS, "BlockDAG API transactions");
+        return { transactions: page.transactions, available: true };
     } catch (error) {
-        console.error("Transaction fetch failed:", error.message);
-        return createErrorTransaction(address, error.message);
+        console.warn("BlockDAG history unavailable:", error.message);
+        return { transactions: [], available: false };
     }
 };
 
@@ -646,6 +844,11 @@ const buildAddressResponse = (
 
 /**
  * Get comprehensive address information for BlockDAG
+ *
+ * Balance, price, tokens and history run in parallel, each with its own deadline, so
+ * the answer arrives in ~5 s at worst. It used to run them one after another behind a
+ * 30 s cap: with the explorer hanging it always took 30 s and the apps, which wait ~8 s,
+ * showed BlockDAG as failed (#580).
  * @param {Object} query - Query parameters containing address
  * @returns {Object} Address data with balance, tokens, and transactions
  */
@@ -653,46 +856,36 @@ const getAddress = async (query) => {
     try {
         const { address } = query;
 
-        // Add overall timeout to prevent hanging
-        const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error("BlockDAG API timeout after 30 seconds")), 30000);
-        });
+        const [bdagData, bdagPrice, tokensData, history] = await Promise.all([
+            fetchBdagBalance(address),
+            fetchBDAGPrice(),
+            withDeadline(fetchAddressTokens(address), ADDRESS_STEP_TIMEOUT_MS, "BlockDAG tokens").catch((error) => {
+                console.warn(error.message);
+                return { tokens: [], totalFiatBalance: 0 };
+            }),
+            fetchAddressTransactions(address),
+        ]);
 
-        const dataPromise = (async () => {
-            // Fetch balance first (API call)
-            const bdagData = await fetchBdagBalance(address);
+        const bdagBalance = bdagData.balance;
+        const fiatBalance = parseFloat(bdagBalance) * parseFloat(bdagPrice);
 
-            // Fetch price and tokens in parallel
-            const [bdagPrice, tokensData] = await Promise.all([fetchBDAGPrice(), fetchAddressTokens(address)]);
+        const tokens = [...tokensData.tokens];
+        tokens.unshift(createNativeBdagToken(address, bdagBalance, bdagPrice, fiatBalance));
 
-            const bdagBalance = bdagData.balance;
-
-            // Calculate fiat balance
-            const fiatBalance = parseFloat(bdagBalance) * parseFloat(bdagPrice);
-
-            // Add native BDAG token to tokens array
-            const tokens = [...tokensData.tokens];
-            const nativeBdagToken = createNativeBdagToken(address, bdagBalance, bdagPrice, fiatBalance);
-            tokens.unshift(nativeBdagToken);
-
-            // Fetch transactions
-            const transactions = await fetchAddressTransactions(address);
-
-            // Build and return response
-            return buildAddressResponse(
+        return {
+            ...buildAddressResponse(
                 address,
                 bdagBalance,
                 bdagPrice,
                 fiatBalance,
                 tokens,
-                transactions,
+                history.transactions,
                 tokensData.totalFiatBalance,
                 bdagData.firstTransaction,
                 bdagData.lastTransaction
-            );
-        })();
-
-        return await Promise.race([dataPromise, timeoutPromise]);
+            ),
+            transactionsUnavailable: !history.available,
+        };
     } catch (error) {
         console.error("BlockDAG getAddress error:", error.message || "Unknown error");
         return {
@@ -794,60 +987,30 @@ const getTokens = async (params, query) => {
  * @returns {Array} Array of transactions
  */
 const getTransactionsList = async (query) => {
+    const page = query?.page ?? "0";
+
     try {
-        const { address, page = "0", show = "100" } = query;
+        const { address, show = "20" } = query;
         const pageNum = parseInt(page, 10);
         const showNum = parseInt(show, 10);
-
-        // Try API first, fallback to RPC
-        let transactionsData = [];
-        let totalRecords = 0;
-
-        try {
-            // API uses 1-based pagination, so add 1 to pageNum
-            const apiPage = pageNum + 1;
-            const apiTransactions = await getAddressTransactionsFromAPI(address, apiPage, showNum);
-            transactionsData = apiTransactions.map((tx) => transformApiTransaction(tx, address));
-            totalRecords = apiTransactions.length;
-        } catch (apiError) {
-            console.log("BlockDAG API transactions fetch failed, trying RPC:", apiError.message);
-
-            try {
-                const rpcTransactions = await fetchTransactionsFromRPC(address);
-                totalRecords = rpcTransactions.length;
-
-                // Apply pagination
-                const startIndex = pageNum * showNum;
-                const endIndex = startIndex + showNum;
-                const paginatedTransactions = rpcTransactions.slice(startIndex, endIndex);
-
-                transactionsData = paginatedTransactions.map((tx) => transformRpcTransaction(tx, address));
-            } catch (rpcError) {
-                console.error("BlockDAG RPC transactions fetch failed:", rpcError.message);
-                return {
-                    pagination: {
-                        records: "0",
-                        pages: "0",
-                        page: page,
-                    },
-                    transactions: [],
-                };
-            }
-        }
-
-        const totalPages = Math.ceil(totalRecords / showNum);
+        const safePage = Number.isFinite(pageNum) && pageNum >= 0 ? pageNum : 0;
+        const safeShow = Number.isFinite(showNum) && showNum > 0 ? showNum : 20;
+        const pageResult = await loadTransactionPage(address, safePage, safeShow);
 
         return {
             pagination: {
-                records: totalRecords.toString(),
-                pages: totalPages.toString(),
-                page: page,
+                records: pageResult.transactions.length.toString(),
+                pages: pageResult.hasNextPage ? String(safePage + 2) : String(safePage + 1),
+                page: String(safePage),
+                hasNextPage: Boolean(pageResult.hasNextPage),
             },
-            transactions: transactionsData,
+            hasNextPage: Boolean(pageResult.hasNextPage),
+            source: pageResult.source,
+            transactions: pageResult.transactions,
         };
     } catch (error) {
         console.error("Error getting BlockDAG transactions:", error.message || "Unknown error");
-        return { pagination: { records: "0", pages: "0", page: "0" }, transactions: [] };
+        return unavailableHistory(page);
     }
 };
 

@@ -11,7 +11,11 @@ const {
     buildAddressKeyvalues,
     buildSearchablePinPages,
     cleanExtraParamsForPinata,
+    assertPinataKeyvalue,
+    collectAddressEntries,
     collectReservedKeyvalues,
+    expandStoredExtraParams,
+    fitExtraParamsForPin,
     mergeAddressKeyvaluesIntoPublicData,
     getAllChainAddresses,
     resolveEncryptVersion,
@@ -149,7 +153,7 @@ describe("tags-addresses.module", () => {
                 serializeAddressBundleToPinataKeyvalues({
                     btc: "x".repeat(PINATA_KEYVALUE_MAX_LENGTH + 1),
                 })
-            ).toThrow(/tags_addresses_field_too_long/);
+            ).toThrow("409:stored_metadata_too_long");
         });
 
         test("throws when more than three chunks would be required", () => {
@@ -471,16 +475,49 @@ describe("tags-addresses.module", () => {
             ).toBeUndefined();
         });
 
-        test("collectReservedKeyvalues omits values longer than 250 characters", () => {
-            const keyvalues = collectReservedKeyvalues({
-                tagName: "miguel.zelf",
-                domain: "zelf",
-                extraParams: JSON.stringify({ st: "a".repeat(300) }),
+        test("still reads a short-key dev pin and writes long keys", () => {
+            const expanded = expandStoredExtraParams({
+                hp: "true",
+                o: "online",
+                e: 1861852860,
+                d: "1",
+                pl: "premium",
+                v: 4,
             });
+            expect(expanded.expiresAt).toBe(require("moment").unix(1861852860).utc().format("YYYY-MM-DD HH:mm:ss"));
+            expect(expanded.plan).toBe("premium");
+            expect(expanded.duration).toBe("1");
 
-            expect(keyvalues.tagName).toBe("miguel.zelf");
-            expect(keyvalues.domain).toBe("zelf");
-            expect(keyvalues.extraParams).toBeUndefined();
+            const fitted = fitExtraParamsForPin(expanded);
+            expect(fitted.extraParams.expiresAt).toBe(expanded.expiresAt);
+            expect(fitted.extraParams.plan).toBe("premium");
+            expect(fitted.extraParams.e).toBeUndefined();
+            expect(fitted.extraParams.hp).toBeUndefined();
+        });
+
+        test("a 250-character keyvalue is kept and 251 throws before the pin", () => {
+            expect(assertPinataKeyvalue("addresses", "a".repeat(250))).toBe(250);
+            expect(assertPinataKeyvalue("referral", "b".repeat(250))).toBe(250);
+            expect(() => assertPinataKeyvalue("addresses", "a".repeat(251))).toThrow("409:stored_metadata_too_long");
+            expect(() => assertPinataKeyvalue("referral", "b".repeat(251))).toThrow("409:stored_metadata_too_long");
+
+            const overhead = JSON.stringify({ btc: "" }).length;
+            const fit = "c".repeat(PINATA_KEYVALUE_MAX_LENGTH - overhead);
+            const packed = serializeAddressBundleToPinataKeyvalues({ btc: fit });
+            expect(packed.addresses.length).toBe(PINATA_KEYVALUE_MAX_LENGTH);
+
+            expect(() => collectAddressEntries({ ethAddress: "d".repeat(251) })).toThrow("409:stored_metadata_too_long");
+            expect(collectAddressEntries({ ethAddress: "d".repeat(250) })).toEqual([["ethAddress", "d".repeat(250)]]);
+        });
+
+        test("collectReservedKeyvalues throws before a value over 250 characters is pinned", () => {
+            expect(() =>
+                collectReservedKeyvalues({
+                    tagName: "miguel.zelf",
+                    domain: "zelf",
+                    extraParams: JSON.stringify({ st: "a".repeat(300) }),
+                })
+            ).toThrow("409:stored_metadata_too_long");
         });
     });
 });

@@ -1,5 +1,6 @@
 const Stripe = require("stripe");
 const config = require("../../../Core/config");
+const { retrieveCheckoutSession, stripeClientError } = require("../../Stripe/modules/stripe-checkout-session.module");
 const { getMyLicense } = require("../../License/modules/license.module");
 const IpfsLookupCache = require("../../../Core/ipfs-lookup-cache");
 
@@ -288,23 +289,36 @@ const createPortalSession = async (authToken) => {
     return session;
 };
 
+const assertVerifySessionAuthUser = (authToken) => {
+    if (!authToken || typeof authToken !== "object") {
+        throw stripeClientError(401, "unauthorized", "Authentication required");
+    }
+
+    const isStaffUser = authToken.accountType === "staff" || authToken.accountType === "staff_account";
+    const accountEmail = isStaffUser && authToken.ownerEmail ? authToken.ownerEmail : authToken.email;
+    const normalized = accountEmail ? String(accountEmail).trim() : "";
+
+    if (!normalized) {
+        throw stripeClientError(400, "account_email_required", "Account email is required to verify checkout");
+    }
+
+    return normalized;
+};
+
 const verifySession = async (sessionId, authToken) => {
     const stripe = getStripeClient();
 
-    // Get the user's license to verify ownership matches or at least log/track
-    // In strictly safe env, we should check if session.customer_email matches user.email
-    // But Stripe checkout might use a different email if user changed it.
-    // For now, we trust the authenticated user providing a valid session ID from their flow.
-    const { myLicense } = await getMyLicense(authToken, true);
+    assertVerifySessionAuthUser(authToken);
 
-    if (!myLicense) throw new Error("404:license_not_found");
-
-    // 1. Retrieve the session
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    const session = await retrieveCheckoutSession(stripe, sessionId);
 
     if (!session) throw new Error("404:session_not_found");
 
     if (session.payment_status !== "paid") throw new Error("400:session_not_paid");
+
+    const { myLicense } = await getMyLicense(authToken, true);
+
+    if (!myLicense) throw new Error("404:license_not_found");
 
     // 2. Retrieve subscription
     const subscription = await stripe.subscriptions.retrieve(session.subscription);

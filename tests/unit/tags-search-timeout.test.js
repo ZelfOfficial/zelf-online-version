@@ -14,6 +14,9 @@ describe("tags-search.module - timeouts and early IPFS resolution", () => {
                 arweaveEnabled: true,
                 keyPrefix: "tagName",
             },
+            payment: {
+                planPricing: { premium: { "6-15": { 1: 29 } }, unlimited: { "1-5": { 1: 99 }, "6-15": { 1: 99 } } },
+            },
         },
     };
 

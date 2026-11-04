@@ -1,4 +1,6 @@
 const Module = require("../modules/pre-sale.module");
+const { errorHandler } = require("../../../Core/http-handler");
+const { isValidCheckoutSessionId } = require("../../Stripe/modules/stripe-checkout-session.module");
 
 /**
  * Handle request to create a pre-sale checkout session
@@ -74,13 +76,37 @@ const sendReceipt = async (ctx) => {
     }
 };
 
+/**
+ * Public presale snapshot, including the current ZNS token USD price.
+ */
+const getPresaleInfo = async (ctx) => {
+    try {
+        ctx.body = {
+            success: true,
+            data: Module.getPresaleInfo(),
+        };
+    } catch (error) {
+        const _exception = errorHandler(error, ctx);
+
+        ctx.status = _exception.status;
+        ctx.body = { message: _exception.message, code: _exception.code };
+    }
+};
+
 const getSessionDetails = async (ctx) => {
     try {
-        const { sessionId } = ctx.query; // GET request params
+        const raw = ctx.query?.sessionId;
+        const sessionId = typeof raw === "string" ? raw.trim() : raw;
 
         if (!sessionId) {
             ctx.status = 400;
-            ctx.body = { error: "Missing sessionId parameter" };
+            ctx.body = { message: "Missing sessionId parameter", code: "invalid_session_id" };
+            return;
+        }
+
+        if (!isValidCheckoutSessionId(sessionId)) {
+            ctx.status = 400;
+            ctx.body = { message: "Checkout session id format is invalid", code: "invalid_session_id" };
             return;
         }
 
@@ -92,13 +118,17 @@ const getSessionDetails = async (ctx) => {
         };
     } catch (error) {
         console.error("Session Details Error:", error);
-        ctx.status = error.status || 500;
-        ctx.body = { error: error.message };
+
+        const _exception = errorHandler(error, ctx);
+
+        ctx.status = _exception.status;
+        ctx.body = { message: _exception.message, code: _exception.code };
     }
 };
 
 module.exports = {
     createSession,
     sendReceipt,
+    getPresaleInfo,
     getSessionDetails,
 };

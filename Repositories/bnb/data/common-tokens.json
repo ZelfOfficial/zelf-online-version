@@ -1,0 +1,214 @@
+[
+	{
+		"name": "Tether USD",
+		"symbol": "USDT",
+		"contractAddress": "0x55d398326f99059fF775485246999027B3197955",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/825.png",
+		"stable": true
+	},
+	{
+		"name": "USD Coin",
+		"symbol": "USDC",
+		"contractAddress": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/3408.png",
+		"priceSymbol": "USDC",
+		"stable": true
+	},
+	{
+		"name": "First Digital USD",
+		"symbol": "FDUSD",
+		"contractAddress": "0xc5f0f7b66764F6ec8C8Dff7BA683102295E16409",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/26081.png",
+		"priceSymbol": "FDUSD",
+		"stable": true
+	},
+	{
+		"name": "World Liberty Financial USD",
+		"symbol": "USD1",
+		"contractAddress": "0x8d0D000Ee44948FC98c9B98A4FA4921476f08B0d",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/36148.png",
+		"priceSymbol": "USD1",
+		"stable": true
+	},
+	{
+		"name": "Dai",
+		"symbol": "DAI",
+		"contractAddress": "0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/4943.png",
+		"priceSymbol": "DAI",
+		"stable": true
+	},
+	{
+		"name": "Binance USD",
+		"symbol": "BUSD",
+		"contractAddress": "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/4687.png",
+		"stable": true
+	},
+	{
+		"name": "Wrapped BNB",
+		"symbol": "WBNB",
+		"contractAddress": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/1839.png",
+		"priceSymbol": "BNB"
+	},
+	{
+		"name": "Bitcoin (BSC)",
+		"symbol": "BTCB",
+		"contractAddress": "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/1.png",
+		"priceSymbol": "BTC"
+	},
+	{
+		"name": "Ethereum (BSC)",
+		"symbol": "ETH",
+		"contractAddress": "0x2170Ed0880ac9A755fd29B2688956BD959F933F8",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png",
+		"priceSymbol": "ETH"
+	},
+	{
+		"name": "PancakeSwap",
+		"symbol": "Cake",
+		"contractAddress": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/7186.png",
+		"priceSymbol": "CAKE"
+	},
+	{
+		"name": "XRP (BSC)",
+		"symbol": "XRP",
+		"contractAddress": "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/52.png",
+		"priceSymbol": "XRP"
+	},
+	{
+		"name": "Dogecoin (BSC)",
+		"symbol": "DOGE",
+		"contractAddress": "0xbA2aE424d960c26247Dd6c32edC70B295c744C43",
+		"decimals": 8,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/74.png",
+		"priceSymbol": "DOGE"
+	},
+	{
+		"name": "Cardano (BSC)",
+		"symbol": "ADA",
+		"contractAddress": "0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/2010.png",
+		"priceSymbol": "ADA"
+	},
+	{
+		"name": "Solana (BSC)",
+		"symbol": "SOL",
+		"contractAddress": "0x570A5D26f7765Ecb712C0924E4De545B89fD43dF",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png",
+		"priceSymbol": "SOL"
+	},
+	{
+		"name": "Chainlink (BSC)",
+		"symbol": "LINK",
+		"contractAddress": "0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/1975.png",
+		"priceSymbol": "LINK"
+	},
+	{
+		"name": "Polkadot (BSC)",
+		"symbol": "DOT",
+		"contractAddress": "0x7083609fCE4d1d8Dc0C979AAb8c869Ea2C873402",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/6636.png",
+		"priceSymbol": "DOT"
+	},
+	{
+		"name": "TRON (BSC)",
+		"symbol": "TRX",
+		"contractAddress": "0xCE7de646e7208a4Ef112cb6ed5038FA6cC6b12e3",
+		"decimals": 6,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/1958.png",
+		"priceSymbol": "TRX"
+	},
+	{
+		"name": "Uniswap (BSC)",
+		"symbol": "UNI",
+		"contractAddress": "0xBf5140A22578168FD562DCcF235E5D43A02ce9B1",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/7083.png",
+		"priceSymbol": "UNI"
+	},
+	{
+		"name": "Litecoin (BSC)",
+		"symbol": "LTC",
+		"contractAddress": "0x4338665CBB7B2485A8855A139b75D5e34AB0DB94",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/2.png",
+		"priceSymbol": "LTC"
+	},
+	{
+		"name": "Avalanche (BSC)",
+		"symbol": "AVAX",
+		"contractAddress": "0x1CE0c2827e2eF14D5C4f29a091d735A204794041",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/5805.png",
+		"priceSymbol": "AVAX"
+	},
+	{
+		"name": "Shiba Inu (BSC)",
+		"symbol": "SHIB",
+		"contractAddress": "0x2859e4544C4bB03966803b044A93563Bd2D0DD4D",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/5994.png",
+		"priceSymbol": "SHIB"
+	},
+	{
+		"name": "Trust Wallet",
+		"symbol": "TWT",
+		"contractAddress": "0x4B0F1812e5Df2A09796481Ff14017e6005508003",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/5964.png",
+		"priceSymbol": "TWT"
+	},
+	{
+		"name": "Venus",
+		"symbol": "XVS",
+		"contractAddress": "0xcF6BB5389c92Bdda8a3747Ddb454cB7a64626C63",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/7288.png",
+		"coingeckoId": "venus"
+	},
+	{
+		"name": "FLOKI",
+		"symbol": "FLOKI",
+		"contractAddress": "0xfb5B838b6cfEEdC2873aB27866079AC55363D37E",
+		"decimals": 9,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/10804.png",
+		"priceSymbol": "FLOKI"
+	},
+	{
+		"name": "Pepe (BSC)",
+		"symbol": "PEPE",
+		"contractAddress": "0x25d887Ce7a35172C62FeBFD67a1856F20FaEbB00",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/24478.png",
+		"priceSymbol": "PEPE"
+	},
+	{
+		"name": "Aave (BSC)",
+		"symbol": "AAVE",
+		"contractAddress": "0xfb6115445Bff7b52FeB98650C87f44907E58f802",
+		"decimals": 18,
+		"image": "https://s2.coinmarketcap.com/static/img/coins/64x64/7278.png",
+		"priceSymbol": "AAVE"
+	}
+]

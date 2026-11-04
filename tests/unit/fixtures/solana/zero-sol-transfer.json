@@ -1,0 +1,33 @@
+{
+ "meta": {
+  "fee": 5000,
+  "preBalances": [
+   930002,
+   0,
+   1
+  ],
+  "postBalances": [
+   925002,
+   0,
+   1
+  ],
+  "preTokenBalances": [],
+  "postTokenBalances": [],
+  "err": null
+ },
+ "transaction": {
+  "message": {
+   "accountKeys": [
+    {
+     "pubkey": "ByT9nUSEvo8oMjGVZa7jduaRmLtWsueQawknbeyLbR2G"
+    },
+    {
+     "pubkey": "E5zQvcpuRdtcwZfRxBKHLgnUQRf6wCsYBf75Lix5upEG"
+    },
+    {
+     "pubkey": "11111111111111111111111111111111"
+    }
+   ]
+  }
+ }
+}

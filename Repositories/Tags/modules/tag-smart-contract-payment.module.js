@@ -3,6 +3,7 @@ const NodeCache = require("node-cache");
 const { getAddress } = require("ethers");
 const jwt = require("jsonwebtoken");
 const moment = require("moment");
+const { parseLeaseDate } = require("./lease-date.util");
 const { searchTag } = require("./tags.module");
 const { getDomainConfig } = require("../config/supported-domains");
 const { normalizeTagPayTxHash, verifyAvalancheZelfTagPayTx } = require("./avalanche-tag-pay-verify.module");
@@ -16,9 +17,9 @@ const scPayTxCache = new NodeCache({ stdTTL: 172800, maxKeys: 50000, useClones: 
 
 const throwPaymentConfirmationTagNotFound = (tagName, domain) => {
     const fullTag = `${tagName}.${domain}`;
-    console.warn("[payment_confirmation] tag_not_found", { tagName, domain, fullTag });
-    const err = new Error("404:tag_not_found");
-    err.clientCode = "tag_not_found";
+    console.warn("[payment_confirmation] TAG_NOT_FOUND", { tagName, domain, fullTag });
+    const err = new Error("404:TAG_NOT_FOUND");
+    err.clientCode = "TAG_NOT_FOUND";
     err.clientMessage = "Tag not found or not indexed";
     throw err;
 };
@@ -396,10 +397,10 @@ function writeScPayCache(cacheKey, sc, tagNameFull, body) {
 function renewalShortCircuitFlags(tagObject, tokenDecoded) {
     const initiatedAt = tokenDecoded.initiatedAt ? moment.unix(tokenDecoded.initiatedAt) : null;
     const renewedAtCondition = Boolean(
-        tagObject.publicData.renewedAt && initiatedAt && moment(tagObject.publicData.renewedAt).isAfter(initiatedAt),
+        tagObject.publicData.renewedAt && initiatedAt && parseLeaseDate(tagObject.publicData.renewedAt).isAfter(initiatedAt),
     );
     const registeredAtCondition = Boolean(
-        tokenDecoded.initiatedAt && moment(tagObject.publicData.registeredAt).isAfter(initiatedAt),
+        tokenDecoded.initiatedAt && parseLeaseDate(tagObject.publicData.registeredAt).isAfter(initiatedAt),
     );
     return { renewedAtCondition, registeredAtCondition };
 }
@@ -586,7 +587,18 @@ async function verifyBlockdagChainOrFail({ normalizedHash, expectedContract, sc,
     });
 }
 
-async function extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject }) {
+const resolveSmartContractPaymentNetwork = (tokenDecoded = {}) => {
+    if (tokenDecoded.smartContractAVAX) return "AVAX";
+    if (tokenDecoded.smartContractBSC) return "BNB";
+    if (tokenDecoded.smartContractETH) return "ETH";
+    if (tokenDecoded.smartContractPOLYGON) return "POL";
+    if (tokenDecoded.smartContractBASE) return "BASE";
+    if (tokenDecoded.smartContractBDAG) return "BDAG";
+    return "smart_contract";
+};
+
+async function extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject, txHash, paymentNetwork }) {
+    const resolvedNetwork = paymentNetwork || resolveSmartContractPaymentNetwork(tokenDecoded);
     const { resolveEncryptVersion } = require("./tags-addresses.module");
     const encryptVersion = resolveEncryptVersion(tagObject.publicData);
     const isZelfId =
@@ -600,17 +612,79 @@ async function extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecod
         ? require("../../ZelfID/modules/my-zelf-id.module").addDurationToTag
         : require("./my-tags.module").addDurationToTag;
 
-    await addDurationToTag(
-        {
-            tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
-            price: amountToPay,
-            domain,
-            duration: tokenDecoded.duration || 1,
-            plan: tokenDecoded.plan,
-            domainConfig,
-        },
-        tagObject,
-    );
+    let claimed = null;
+    if (isZelfId && tokenDecoded.coupon?.valid === true && tokenDecoded.coupon.code) {
+        const Coupons = require("../../ZelfID/modules/zelf-ids-coupons.module");
+        try {
+            claimed = await Coupons.claimForGrant({
+                code: tokenDecoded.coupon.code,
+                zelfId: String(tokenDecoded.tagName || "").toLowerCase(),
+                plan: tokenDecoded.plan,
+                duration: tokenDecoded.duration,
+                domainConfig,
+                tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
+                signedAmount: tokenDecoded.amountDue ?? tokenDecoded.billableUsdPrice ?? tokenDecoded.prices?.[resolvedNetwork]?.price,
+            });
+        } catch (error) {
+            const { recordPurchaseManualReview } = require("../../ZelfID/modules/zelf-id-purchase-manual-review.module");
+            await recordPurchaseManualReview({
+                tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
+                domain,
+                plan: tokenDecoded.plan,
+                duration: tokenDecoded.duration,
+                price: amountToPay,
+                billableUsdPrice: tokenDecoded.amountDue ?? tokenDecoded.prices?.[resolvedNetwork]?.price,
+                cryptoSymbol: resolvedNetwork,
+                cryptoAmount: amountToPay,
+                source: resolvedNetwork,
+                violationCode: error.clientCode || "COUPON_INVALID",
+                txHash,
+                paymentNetwork: resolvedNetwork,
+                paymentInitiatedAt: tokenDecoded.initiatedAt,
+                tagObject,
+                domainConfig,
+            });
+            throw error;
+        }
+    }
+
+    let extension;
+    try {
+        extension = await addDurationToTag(
+            {
+                tagName: tagObject.publicData[domainConfig.getTagKey()].split(".")[0],
+                price: amountToPay,
+                domain,
+                duration: tokenDecoded.duration || 1,
+                plan: tokenDecoded.plan,
+                domainConfig,
+                paymentCaptured: isZelfId,
+                paymentSource: isZelfId ? resolvedNetwork : undefined,
+                paymentNetwork: resolvedNetwork,
+                txHash: isZelfId ? txHash : undefined,
+                billableUsdPrice: tokenDecoded.prices?.[resolvedNetwork]?.price,
+                cryptoSymbol: resolvedNetwork,
+                cryptoAmount: amountToPay,
+                paymentInitiatedAt: tokenDecoded.initiatedAt,
+                couponId: claimed?.couponId,
+            },
+            tagObject,
+        );
+    } catch (error) {
+        if (claimed) {
+            const Coupons = require("../../ZelfID/modules/zelf-ids-coupons.module");
+            await Coupons.releaseRedemption(claimed);
+        }
+        throw error;
+    }
+
+    if (isZelfId && extension?.manualReview) {
+        if (claimed) {
+            const Coupons = require("../../ZelfID/modules/zelf-ids-coupons.module");
+            await Coupons.releaseRedemption(claimed);
+        }
+        return extension;
+    }
 }
 
 async function verifyAvalancheSmartContractPayment(tagName, domain, token, txHash) {
@@ -667,7 +741,7 @@ async function verifyAvalancheSmartContractPayment(tagName, domain, token, txHas
 
     const licenseExtension = computeScLicenseExtension(tagObject.publicData.expiresAt, tokenDecoded.duration);
 
-    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject });
+    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject, txHash: normalizedHash });
 
     const result = {
         tagObject,
@@ -737,7 +811,7 @@ async function verifyBscSmartContractPayment(tagName, domain, token, txHash) {
 
     const licenseExtension = computeScLicenseExtension(tagObject.publicData.expiresAt, tokenDecoded.duration);
 
-    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject });
+    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject, txHash: normalizedHash });
 
     const result = {
         tagObject,
@@ -807,7 +881,7 @@ async function verifyEthSmartContractPayment(tagName, domain, token, txHash) {
 
     const licenseExtension = computeScLicenseExtension(tagObject.publicData.expiresAt, tokenDecoded.duration);
 
-    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject });
+    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject, txHash: normalizedHash });
 
     const result = {
         tagObject,
@@ -877,7 +951,7 @@ async function verifyPolygonSmartContractPayment(tagName, domain, token, txHash)
 
     const licenseExtension = computeScLicenseExtension(tagObject.publicData.expiresAt, tokenDecoded.duration);
 
-    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject });
+    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject, txHash: normalizedHash });
 
     const result = {
         tagObject,
@@ -947,7 +1021,7 @@ async function verifyBaseSmartContractPayment(tagName, domain, token, txHash) {
 
     const licenseExtension = computeScLicenseExtension(tagObject.publicData.expiresAt, tokenDecoded.duration);
 
-    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject });
+    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject, txHash: normalizedHash });
 
     const result = {
         tagObject,
@@ -1015,7 +1089,7 @@ async function verifyBlockdagSmartContractPayment(tagName, domain, token, txHash
 
     const licenseExtension = computeScLicenseExtension(tagObject.publicData.expiresAt, tokenDecoded.duration);
 
-    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject });
+    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject, txHash: normalizedHash });
 
     const result = {
         tagObject,

@@ -51,6 +51,8 @@ For a test file that expects another port, export that same `PORT` before starti
 
 - `server.js` controls startup order, JWT handling, and protected vs unprotected route mounting.
 - Route registration lives in `Routes/unprotected-repositories.js` and `Routes/protected-repositories.js`.
+- Wallet RPC proxy (`Repositories/RPC/`) is mounted with the protected routes. `POST /api/protected/rpc/:chainKey` and `POST /api/rpc/:chainKey` both require a session JWT. Bitcoin Blockbook and Stellar Horizon prefixes are under `/api/protected/rpc/btc/` and `/api/protected/rpc/stellar/`. Paid upstreams are env URLs (`EXTENSION_*`, see `.env.example`). Focused check: `npm run test:rpc-proxy`.
+- ZNS token USD price is `TOKEN_PRICE_USD` (default `0.05`). `REWARD_PRICE` is honored only when `TOKEN_PRICE_USD` is unset. `GET /api/presale/info` returns the current price.
 
 ### Tags, search, and lease flows
 
@@ -59,14 +61,16 @@ For a test file that expects another port, export that same `PORT` before starti
 
 ### ZelfID (online, ZelfEncrypt v4)
 
-- `/api/zelf-ids` is owned by `Repositories/ZelfID/` (not a Tags alias). Public host is `https://v4.zelf.world` (for example `GET https://v4.zelf.world/api/zelf-ids/search`). Do not document it on `https://v3.zelf.world`.
+- `/api/zelf-ids` is owned by `Repositories/ZelfID/` (not a Tags alias). Public host is `https://v4.zelf.world` (for example `GET https://v4.zelf.world/api/zelf-ids/search`).
 - Online encrypt/decrypt/preview go to `ZELF_PROOF_V4_URL` (default `https://v4.zelf.world`) + `ZELF_PROOF_V4_PATH_PREFIX` (default `/zelf-v4`).
-- `/api/tags` stays on `ZELF_PROOF_URL` + `/zelf` (ZelfEncrypt 3.1.6 on `https://v3.zelf.world`). Tags offline lease stays `POST /api/tags/lease-offline`. Zelf ID offline lease is `POST /api/zelf-ids/lease-offline` (v4 `previewHumanAuthn`).
+- `/api/tags` stays on `ZELF_PROOF_URL` + `/zelf` (ZelfEncrypt 3.1.6 on `https://v4.zelf.world`). Tags offline lease stays `POST /api/tags/lease-offline`. Zelf ID offline lease is `POST /api/zelf-ids/lease-offline` (v4 `previewHumanAuthn`).
 - Raw encrypt/decrypt/preview: `/api/zelf-proof` → 3.1.6 on v3; `/api/human-authn` → v4 on `https://v4.zelf.world` (`Repositories/HumanAuthn/`).
 - Upgrade 3.1.6 → v4: `POST /api/human-authn/upgrade` (402) and `POST /api/jwt/human-authn/upgrade` (dev JWT). Upstream `https://v4.zelf.world/zelf-v4/upgrade`. Focused check: `npm run test:encrypt-compat`.
-- Development-only JWT mirrors (no ZNS payment): `/api/jwt/zelf-proof` and `/api/jwt/human-authn`. Gated on `config.env === "development"`. Focused check: `npm run test:jwt-dev`. Never enable on `v3.zelf.world`.
+- Development-only JWT mirrors (no ZNS payment): `/api/jwt/zelf-proof` and `/api/jwt/human-authn`. Gated on `config.env === "development"`. Focused check: `npm run test:jwt-dev`. Never enable on `v4.zelf.world`.
 - v4 Face Certificates: `https://v4.zelf.world` has Face PKI (`pki_private_key`) only. Proofs stay unsigned so Android/iOS can encrypt/decrypt offline. Do not embed `ISSUERS_PUBLIC_KEY` on ZNS or Zelf ID APKs. Koa: `/api/face-certificates` (402) and `/api/my-face-certificates` (JWT). Root cert: `GET /api/face-certificates/root-certificate`. Focused check: `npm run test:face-certificates`. 3.1.6 stays unsigned.
 - Focused check: `npm run test:zelf-ids`.
+- Zelf ID plan coupons (Premium / Unlimited percent-off): `npm run test:zelf-id-coupons`. Quote with `GET /api/zelf-ids/payment-options?coupon=`. A 100% coupon confirms on `POST /api/zelf-ids/payment-confirmation` with no `network`. Super-admins manage codes at `/api/zelf-ids/coupons`. Verified owners read `GET /api/zelf-ids/my-plan?zelfName=`.
+- Plan caps for the signed-in Zelf ID (passwords, zOTP, monthly swaps, whether a new non-EVM chain may be activated) are `GET /api/zelf-keys/limits` and the same payload at `GET /api/zelf-ids/limits`. Chain status is `GET /api/zelf-ids/chains`. Activating a chain is `POST /api/zelf-ids/chains/activate` (the only route that blocks a new non-EVM chain on Free). `POST /api/zelf-ids/sync-addresses` and offline lease with `sync: true` always store addresses derived from the owner's seed and record those non-EVM chains as already activated. A successful LI.FI execution is counted on `POST /api/lifi/execute-advanced-step-transaction`. `GET /api/lifi/quote` is a price lookup and is not counted.
 - Cross-platform availability regression: `npm run test:tag-registration` (Node 24; read-only real provider failure, no API server/Mongo required).
 
 ### zSend (encrypt to someone else)
@@ -105,7 +109,7 @@ For a test file that expects another port, export that same `PORT` before starti
 ### Docs work
 
 - Public API docs belong in `zelf-documentation/docs/api/`.
-- Public examples: Tags / v3.6 use `https://v3.zelf.world`. Zelf ID (`/api/zelf-ids`) uses `https://v4.zelf.world`. Do not use localhost in published docs.
+- Public examples use `https://v4.zelf.world` for Tags, v3.6 surfaces, and Zelf ID (`/api/zelf-ids`). Do not use localhost in published docs.
 
 ## Maintenance
 

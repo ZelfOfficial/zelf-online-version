@@ -1,5 +1,6 @@
 const configuration = require("../../../Core/config");
 const { validate, string } = require("../../../Core/JoiUtils");
+const { checkoutSessionIdJoi } = require("../../Stripe/modules/stripe-checkout-session.module");
 
 const availablePlanKeys =
 	Array.isArray(configuration.stripe?.plans) || typeof configuration.stripe?.plans === "object" ? Object.keys(configuration.stripe.plans) : [];
@@ -9,6 +10,9 @@ const schemas = {
 		planId: string()
 			.required()
 			.valid(...availablePlanKeys),
+	},
+	checkSession: {
+		sessionId: checkoutSessionIdJoi(),
 	},
 };
 
@@ -56,7 +60,38 @@ const validateCheckoutRequest = async (ctx, next) => {
 	}
 };
 
+const validateCheckSessionRequest = async (ctx, next) => {
+	const raw = ctx.request.body?.sessionId;
+	const trimmed = typeof raw === "string" ? raw.trim() : raw;
+
+	if (raw === undefined || raw === null || trimmed === "") {
+		ctx.status = 400;
+		ctx.body = {
+			success: false,
+			message: "Checkout session id is required",
+			code: "invalid_session_id",
+		};
+		return;
+	}
+
+	const valid = validate(schemas.checkSession, { sessionId: trimmed });
+
+	if (valid.error) {
+		ctx.status = 400;
+		ctx.body = {
+			success: false,
+			message: "Checkout session id format is invalid",
+			code: "invalid_session_id",
+		};
+		return;
+	}
+
+	ctx.request.body = { ...ctx.request.body, sessionId: trimmed };
+	await next();
+};
+
 module.exports = {
 	validateUserIdentifier,
 	validateCheckoutRequest,
+	validateCheckSessionRequest,
 };

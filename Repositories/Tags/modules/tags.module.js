@@ -11,7 +11,14 @@ const { createStellarWallet } = require("../../Wallet/modules/stellar");
 const { createPolkadotWallet, createKusamaWallet } = require("../../Wallet/modules/polkadot-kusama");
 const { createTonWallet } = require("../../Wallet/modules/ton");
 const { createAptosWallet } = require("../../Wallet/modules/aptos");
-const { decrypt, preview, applyPreviewHasPassword } = require("../../ZelfProof/modules/zelf-proof.module");
+const { decrypt, preview, previewWithLegacyFallback, applyPreviewHasPassword, _formattingError, ZELFPROOF_CLIENT_ERROR_STATUS } = require("../../ZelfProof/modules/zelf-proof.module");
+const {
+    NO_PASSWORD_PLACEHOLDER,
+    effectivePassword,
+    resolveSecurityType,
+    decryptWithPasswordFallback,
+    healDecryptedTagPassword,
+} = require("../../ZelfID/modules/zelf-id-password.module");
 const OfflineProofModule = require("../../../Core/offline-proof");
 const config = require("../../../Core/config");
 const { confirmPayUniqueAddress } = require("../../purchase-zelf/modules/balance-checker.module");
@@ -20,6 +27,7 @@ const { resolveEncryptVersion } = require("./tags-addresses.module");
 
 const { generateHoldDomain } = require("./domain-registry.module");
 const { getDomainConfig } = require("../config/supported-domains");
+const { assertDomainOfferedForNewNames } = require("../../ZelfID/modules/zelf-id-plan.module");
 const TagsRegistrationModule = require("./tags-registration.module");
 const { extractZelfProofFromQR } = require("./qr-zelfproof-extractor.module");
 const SessionModule = require("../../Session/modules/session.module");
@@ -53,6 +61,7 @@ const leaseTag = async (params, authUser) => {
     const domainConfig = getDomainConfig(domain);
 
     if (!domainConfig) throw new Error(`Unsupported domain: ${domain}`);
+    assertDomainOfferedForNewNames(domainConfig);
 
     // Get tag key using the method
     const tagKey = domainConfig.getTagKey() || "tagName";
@@ -67,11 +76,9 @@ const leaseTag = async (params, authUser) => {
 
     if (!face) throw new Error("409:face_not_found");
 
-    if (!password && securityType !== "withoutPassword") throw new Error("409:password_not_found");
-
-    if (password && !securityType) {
-        securityType = /^\d{6}$/.test(password) ? "pin" : "password";
-    }
+    // Derived from the decrypted password only (client securityType is ignored, incl. legacy "securePassword").
+    // No password (or the face-only placeholder) means a face-only proof.
+    securityType = resolveSecurityType(password);
 
     const { eth, btc, solana, sui, stellar, polkadot, kusama, ton, aptos, zkProof, mnemonic, arweave } = await _createWalletsFromPhrase({
         ...params,
@@ -134,6 +141,9 @@ const leaseTag = async (params, authUser) => {
         password
     );
 
+    const SessionModule = require("../../Session/modules/session.module");
+    await SessionModule.markSessionIdentityVerified(authUser, tagName, domain);
+
     return {
         ipfs: [tagObject.ipfs],
         available: false,
@@ -167,7 +177,7 @@ const leaseTag = async (params, authUser) => {
  * @param {Object} authUser
  */
 const searchTag = async (params, authUser) => {
-    const { tagName, domain, key, value, environment, type, domainConfig, duration, includeAllAddressPages } = params;
+    const { tagName, domain, key, value, environment, type, domainConfig, duration, includeAllAddressPages, plan } = params;
 
     try {
         const _domainConfig = domainConfig || getDomainConfig(domain);
@@ -182,6 +192,7 @@ const searchTag = async (params, authUser) => {
                 type: type || "both",
                 domainConfig: _domainConfig,
                 duration: duration || "1",
+                plan,
                 includeAllAddressPages,
             },
             authUser
@@ -202,6 +213,26 @@ const searchTag = async (params, authUser) => {
     }
 };
 
+
+/**
+ * Map a ZelfProof/SenseCrypt failure to a thrown Error with distinct HTTP status + code.
+ * @param {{ code?: string, message?: string }|string} errPayload
+ */
+const throwMappedZelfProofError = (errPayload) => {
+    const raw = typeof errPayload === "string" ? { code: errPayload, message: errPayload } : errPayload || {};
+    const formatted = _formattingError({
+        code: raw.code || raw.message,
+        message: raw.message || raw.code || "decrypt_failed",
+        status: ZELFPROOF_CLIENT_ERROR_STATUS[raw.code],
+    });
+    const error = new Error(formatted.code || formatted.message || "decrypt_failed");
+
+    error.status = formatted.status || 500;
+    error.code = formatted.code || "InternalServerError";
+
+    throw error;
+};
+
 /**
  * decrypt tag
  * @param {Object} params
@@ -220,24 +251,33 @@ const decryptTag = async (params, authUser) => {
 
     if (!tagObject?.zelfProof) throw new Error("404:tag_not_found");
 
-    const { face, password } = await _decryptParams(params, authUser);
+    const { face, password: rawPassword } = await _decryptParams(params, authUser);
 
-    const decryptedZelfProof = await decrypt({
-        addServerPassword: Boolean(params.addServerPassword),
-        faceBase64: face,
-        password,
-        zelfProof: tagObject?.zelfProof,
-        hasPassword: tagObject.publicData.hasPassword,
-        stack: "v4",
-    });
+    // Face-only proofs are decrypted without a password (placeholder accepted); a stale hasPassword never drops a needed password.
+    const { result: decryptedZelfProof, password } = await decryptWithPasswordFallback(
+        decrypt,
+        {
+            addServerPassword: Boolean(params.addServerPassword),
+            faceBase64: face,
+            zelfProof: tagObject?.zelfProof,
+            hasPassword: tagObject.publicData.hasPassword,
+            stack: "v4",
+        },
+        { password: rawPassword, hasPassword: tagObject.publicData?.hasPassword }
+    );
 
     if (decryptedZelfProof.error) {
-        const error = new Error(decryptedZelfProof.error.code);
-
-        error.status = 409;
-
-        throw error;
+        throwMappedZelfProofError(decryptedZelfProof.error);
     }
+
+    const healedHasPassword = healDecryptedTagPassword(tagObject, password);
+
+    const SessionModule = require("../../Session/modules/session.module");
+    await SessionModule.markSessionIdentityVerified(
+        authUser,
+        tagObject.publicData?.tagName || tagObject.publicData?.zelfName || tagName,
+        domain
+    );
 
     const { mnemonic, zkProof, solanaSecretKey } = decryptedZelfProof.metadata;
 
@@ -253,8 +293,15 @@ const decryptTag = async (params, authUser) => {
         zkProof,
         solanaSecretKey,
         arweavePrivateKey: arweave.privateKey,
-        password,
+        password: password || rawPassword,
     });
+
+    if (healedHasPassword) {
+        tagsToAdd.push({ name: "hasPassword", value: "true", new: false });
+        if (tagObject.publicData?.st) {
+            tagsToAdd.push({ name: "st", value: tagObject.publicData.st, new: false });
+        }
+    }
 
     const needsLegacyUpgrade = resolveEncryptVersion(tagObject.publicData) !== 4;
 
@@ -347,7 +394,9 @@ const previewTag = async (params, authUser) => {
 const previewZelfProof = async (params, authUser) => {
     const { zelfProof } = params;
 
-    const previewResult = await preview({
+    // v4 first, legacy stack as fallback: the legacy-only call returned 500 ERR_PARSE_FAILED for
+    // proofs minted by zelf-ids/lease (#175).
+    const previewResult = await previewWithLegacyFallback({
         zelfProof,
         addServerPassword: Boolean(params.addServerPassword),
     });
@@ -532,26 +581,7 @@ const _createWalletsFromPhrase = async (params) => {
  * @param {Object} params
  * @param {Object} authUser
  */
-const _decryptParams = async (params, authUser) => {
-    if (params.removePGP) {
-        return {
-            password: params.password,
-            mnemonic: params.mnemonic,
-            face: params.faceBase64,
-        };
-    }
-
-    // Use session decryption for all parameters consistently
-    const password = params.password ? await SessionModule.sessionDecrypt(params.password, authUser) : null;
-    const mnemonic = params.mnemonic ? await SessionModule.sessionDecrypt(params.mnemonic, authUser) : null;
-    const face = params.faceBase64 ? await SessionModule.sessionDecrypt(params.faceBase64, authUser) : null;
-
-    return {
-        password,
-        mnemonic,
-        face,
-    };
-};
+const _decryptParams = (params, authUser) => TagsPartsModule.decryptParams(params, authUser);
 
 const deleteTag = async (params, authUser) => {
     const { tagName, domain, faceBase64, password } = params;
@@ -567,9 +597,7 @@ const deleteTag = async (params, authUser) => {
     const decryptedZelfProof = await decrypt({ ...decryptPayload, stack: "v4" });
 
     if (decryptedZelfProof.error) {
-        const error = new Error(decryptedZelfProof.error.code);
-        error.status = 409;
-        throw error;
+        throwMappedZelfProofError(decryptedZelfProof.error);
     }
 
     const deletedFiles = [];

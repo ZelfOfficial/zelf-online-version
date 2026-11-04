@@ -197,7 +197,7 @@ The Next.js app under `landing-zelf-nextjs` is already wired for this flow: it r
    NEXT_PUBLIC_API_URL=https://your-api-host
    ```
 
-   If unset, the app defaults to `https://v3.zelf.world` (see `app/api/tags/payment-options/route.ts` and `payment-confirmation` / `smart-contract-payment-confirmation` routes).
+   If unset, the app defaults to `https://v4.zelf.world` (see `app/api/tags/payment-options/route.ts` and `payment-confirmation` / `smart-contract-payment-confirmation` routes).
 
 3. **Run the landing app** (`npm run dev`, port 3009 per project docs). Complete session init as today, search for an **existing** tag (renewal flow), open **AVAX** checkout. You should see the wallet panel plus the legacy QR/address.
 

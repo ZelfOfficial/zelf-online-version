@@ -1,6 +1,6 @@
 const moment = require("moment");
 const { tonApiGet, toTonUpstreamError } = require("./ton-api.client");
-const { assertValidTonAddress } = require("./ton-address.util");
+const { assertValidTonAddress, sameTonAddress } = require("./ton-address.util");
 const { nanotonToTonString, jettonAmountToString } = require("./ton-jetton.util");
 const { getTonUsdPrice, getJettonUsdRates, sumTokenFiatBalances, normalizeTokenKey } = require("./ton-price.util");
 
@@ -51,7 +51,7 @@ const mapEventsToTransactions = (events = [], address) =>
 			const transfer = tonTransfer?.TonTransfer || jettonTransfer?.JettonTransfer;
 			if (!transfer) return null;
 
-			const from = transfer.sender?.address || transfer.recipient?.address || "";
+			const from = transfer.sender?.address || "";
 			const to = transfer.recipient?.address || "";
 			const amountRaw = transfer.amount ?? 0;
 			const amount =
@@ -60,6 +60,13 @@ const mapEventsToTransactions = (events = [], address) =>
 					: jettonAmountToString(amountRaw, jettonTransfer?.JettonTransfer?.jetton?.decimals ?? 9);
 			const asset = tonTransfer != null ? "TON" : jettonTransfer?.JettonTransfer?.jetton?.symbol || "JETTON";
 			const ts = event.timestamp ? event.timestamp * 1000 : Date.now();
+			const traffic = sameTonAddress(from, address) ? "OUT" : "IN";
+
+			// TonAPI flags spam broadcasts and address-poisoning dust (`is_scam`). Incoming ones are
+			// dropped, as the push watcher already does (TxNotifications/adapters/ton.adapter.js): a
+			// 0.00001 TON spam that landed seconds after a send read as "Received" next to it (#556).
+			// The account's own movements are never hidden.
+			if (event.is_scam === true && traffic === "IN") return null;
 
 			return {
 				_amount: amount,
@@ -76,7 +83,7 @@ const mapEventsToTransactions = (events = [], address) =>
 				method: tonTransfer ? "TonTransfer" : "JettonTransfer",
 				timestamp: ts,
 				to,
-				traffic: from === address ? "OUT" : "IN",
+				traffic,
 				txnFee: "0",
 				status: event.in_progress ? "pending" : "success",
 			};
@@ -196,7 +203,7 @@ const getTransaction = async (params) => {
 	try {
 		const event = await tonApiGet(`/events/${encodeURIComponent(eventId)}`);
 		const account = event.account?.address || "";
-		const txs = mapEventsToTransactions([event], address);
+		const txs = mapEventsToTransactions([event], account);
 		if (!txs.length) {
 			const error = new Error("transaction_not_found");
 			error.status = 404;
@@ -212,6 +219,7 @@ const getTransaction = async (params) => {
 };
 
 module.exports = {
+	mapEventsToTransactions,
 	getAddress,
 	getTokens,
 	getTransactions,

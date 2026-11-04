@@ -14,6 +14,7 @@ const csvOrDefault = (value, fallback) => {
     const items = splitCsv(value);
     return items.length ? items : fallback;
 };
+const rpcUpstreams = require("./rpc-upstreams");
 
 const parseWhatsAppExtraApiKeys = () => {
     if (!process.env.WHATSAPP_EXTRA_API_KEYS) return {};
@@ -39,12 +40,96 @@ const ARWEAVE_DEFAULT_GRAPHQL_GATEWAYS = [
     "https://turbo-gateway.com",
     "https://ardrive.net",
 ];
-const ARWEAVE_DEFAULT_ARNS_GATEWAY_HOST = "arweave.net";
+// Zelf Link gateways in order of preference: ar.io reads the Solana name token first (#540).
+const ARWEAVE_DEFAULT_ARNS_GATEWAY_HOSTS = ["ar.io", "arweave.net", "ar-io.dev"];
+const ARWEAVE_DEFAULT_ARNS_GATEWAY_HOST = ARWEAVE_DEFAULT_ARNS_GATEWAY_HOSTS[0];
 
-/** Positive finite float from env; otherwise `fallback` (for USD rates and REWARD_PRICE). */
+/** Positive finite float from env; otherwise `fallback` (for USD rates such as TOKEN_PRICE_USD). */
 const parsePositiveFloat = (value, fallback) => {
     const n = parseFloat(value);
     return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+/** Non-negative integer from env; otherwise `fallback`. */
+const parseNonNegativeInt = (value, fallback) => {
+    if (value === undefined || value === null || String(value).trim() === "") return fallback;
+    const n = Math.floor(Number(value));
+    return Number.isFinite(n) && n >= 0 ? n : fallback;
+};
+
+/**
+ * Non-negative integer, or `null` when the cap is unlimited.
+ * Blank stays on `fallback`. The words `null` and `unlimited` store an unlimited cap.
+ * @param {string|number|null|undefined} value
+ * @param {number|null} fallback
+ * @returns {number|null}
+ */
+const parseNullableLimit = (value, fallback) => {
+    if (value === undefined || value === null || String(value).trim() === "") return fallback;
+    const raw = String(value).trim().toLowerCase();
+    if (raw === "null" || raw === "unlimited") return null;
+    const n = Math.floor(Number(raw));
+    return Number.isFinite(n) && n >= 0 ? n : fallback;
+};
+
+/**
+ * Boolean from env. Blank stays on `fallback`.
+ * @param {string|boolean|number|null|undefined} value
+ * @param {boolean} fallback
+ * @returns {boolean}
+ */
+const parseBool = (value, fallback) => {
+    if (value === undefined || value === null || String(value).trim() === "") return fallback;
+    if (typeof value === "boolean") return value;
+    const raw = String(value).trim().toLowerCase();
+    if (raw === "1" || raw === "true" || raw === "yes") return true;
+    if (raw === "0" || raw === "false" || raw === "no") return false;
+    return fallback;
+};
+
+/**
+ * LI.FI key. Deployments set `LIFI_API_KEY` or, in production, `LIFI_KEY`.
+ * A blank `LIFI_API_KEY` falls through to `LIFI_KEY`.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string|undefined}
+ */
+const resolveLifiApiKey = (env = process.env) => {
+    const primary = env.LIFI_API_KEY;
+    if (primary !== undefined && String(primary).trim() !== "") return String(primary).trim();
+    const alias = env.LIFI_KEY;
+    if (alias !== undefined && String(alias).trim() !== "") return String(alias).trim();
+    return undefined;
+};
+
+/**
+ * USD price of one ZNS token. Presale, rewards, and subscription grants all use this rate.
+ * Default matches the historical hard-coded presale and reward price.
+ */
+const DEFAULT_TOKEN_PRICE_USD = 0.05;
+
+/**
+ * Resolve the single ZNS token USD price from the environment.
+ * TOKEN_PRICE_USD is canonical. REWARD_PRICE is a legacy alias used only when
+ * TOKEN_PRICE_USD is unset or blank, so existing deployments keep their rate.
+ * A non-blank TOKEN_PRICE_USD always wins, including over REWARD_PRICE.
+ * Non-positive or non-numeric values fall back to DEFAULT_TOKEN_PRICE_USD.
+ */
+const resolveTokenPriceUsd = (env = process.env) => {
+    const canonical = env.TOKEN_PRICE_USD;
+    const hasCanonical = canonical !== undefined && String(canonical).trim() !== "";
+    return parsePositiveFloat(hasCanonical ? canonical : env.REWARD_PRICE, DEFAULT_TOKEN_PRICE_USD);
+};
+
+let tokenPriceUsd = resolveTokenPriceUsd();
+
+/**
+ * Positive USD price used to convert dollars into ZNS.
+ * Invalid runtime values use DEFAULT_TOKEN_PRICE_USD so callers do not divide by zero.
+ * Subscription grant payouts still read `token.rewardPrice` directly and skip when it is invalid.
+ */
+const getTokenPriceUsd = () => {
+    const price = Number(tokenPriceUsd);
+    return Number.isFinite(price) && price > 0 ? price : DEFAULT_TOKEN_PRICE_USD;
 };
 
 const configuration = {
@@ -66,7 +151,19 @@ const configuration = {
         mailgun: {
             proxyEmail: process.env.MAILGUN_PROXY_EMAIL || "miguel@zelf.world",
             apiKey: process.env.MAILGUN_API_KEY,
+            domain: process.env.MAILGUN_DOMAIN || "mg.zelf.world",
+            apiBase: (process.env.MAILGUN_API_BASE || "https://api.mailgun.net").replace(/\/$/, ""),
+            webhookSigningKey: process.env.MAILGUN_WEBHOOK_SIGNING_KEY,
         },
+    },
+    jimInbound: {
+        recipients: process.env.JIM_INBOUND_RECIPIENTS || "jim@mg.zelf.world",
+        allowedSenders: process.env.JIM_INBOUND_ALLOWED_SENDERS || "",
+        inboxApiKey: process.env.JIM_INBOX_API_KEY,
+        forwardUrl: process.env.JIM_INBOUND_FORWARD_URL,
+        forwardSecret: process.env.JIM_INBOUND_FORWARD_SECRET,
+        discordWebhookUrl: process.env.JIM_INBOUND_DISCORD_WEBHOOK_URL,
+        maxTimestampSkewSec: Number(process.env.JIM_INBOUND_MAX_SKEW_SEC || 300),
     },
     signedData: {
         key: process.env.SECRET_KEY_PRICI,
@@ -98,7 +195,7 @@ const configuration = {
         serverKey: process.env.ZELF_ENCRYPT_SERVER_KEY,
     },
     zelfProof: {
-        url: process.env.ZELF_PROOF_URL || "https://v3.zelf.world",
+        url: process.env.ZELF_PROOF_URL || "https://v4.zelf.world",
         apiKey: process.env.ZELF_PROOF_API_KEY || "password",
         skipArweave: process.env.SKIP_ARWEAVE || false,
     },
@@ -109,7 +206,20 @@ const configuration = {
         pathPrefix: process.env.ZELF_PROOF_V4_PATH_PREFIX || "/zelf-v4",
     },
     token: {
-        rewardPrice: parsePositiveFloat(process.env.REWARD_PRICE, 0.05),
+        /** Same number as rewardPrice. Canonical name for the ZNS USD price. */
+        get priceUsd() {
+            return tokenPriceUsd;
+        },
+        set priceUsd(value) {
+            tokenPriceUsd = value;
+        },
+        /** Legacy alias of priceUsd. Rewards and subscription grants already read this. */
+        get rewardPrice() {
+            return tokenPriceUsd;
+        },
+        set rewardPrice(value) {
+            tokenPriceUsd = value;
+        },
         whitelist: process.env.WHITELIST || "",
         priceEnv: process.env.PRICE_ENV || "production",
     },
@@ -126,6 +236,44 @@ const configuration = {
             const n = Math.floor(Number(raw));
             return Number.isFinite(n) && n >= 0 ? n : 10;
         })(),
+    },
+    /**
+     * Zelf ID plan caps for the consumer Free, Premium, and Unlimited plans.
+     * `null` means unlimited. Slot USD targets convert to ZNS with `token.priceUsd` (ceil).
+     * A domain license may override a plan via `zelfkeys.planLimits.<plan>`:
+     * `{ passwords, zotp, swapsPerMonth, nonEvmChains }`.
+     * `swapsPerMonth` counts successful LI.FI executions in the UTC month.
+     * `nonEvmChains` is whether the plan may activate a non-EVM chain that is not already on the name.
+     * Public docs do not state a monthly swap cap, so the fallback is unlimited (`null`) on every plan.
+     * Free may not activate a new non-EVM chain. Premium and Unlimited may.
+     * This does not change what Stripe or RevenueCat charges for the plans themselves.
+     */
+    zelfKeysVault: {
+        slotDurationMonths: parseNonNegativeInt(process.env.ZELF_KEYS_SLOT_MONTHS, 12) || 12,
+        slotPriceUsd: {
+            password: parsePositiveFloat(process.env.ZELF_KEYS_PASSWORD_SLOT_USD, 0.5),
+            zotp: parsePositiveFloat(process.env.ZELF_KEYS_ZOTP_SLOT_USD, 1),
+        },
+        plans: {
+            free: {
+                passwords: parseNonNegativeInt(process.env.ZELF_KEYS_FREE_PASSWORD_LIMIT, 5),
+                zotp: parseNonNegativeInt(process.env.ZELF_KEYS_FREE_ZOTP_LIMIT, 3),
+                swapsPerMonth: parseNullableLimit(process.env.ZELF_ID_FREE_SWAPS_PER_MONTH, null),
+                nonEvmChains: parseBool(process.env.ZELF_ID_FREE_NON_EVM_CHAINS, false),
+            },
+            premium: {
+                passwords: parseNonNegativeInt(process.env.ZELF_KEYS_PREMIUM_PASSWORD_LIMIT, 100),
+                zotp: parseNonNegativeInt(process.env.ZELF_KEYS_PREMIUM_ZOTP_LIMIT, 20),
+                swapsPerMonth: parseNullableLimit(process.env.ZELF_ID_PREMIUM_SWAPS_PER_MONTH, null),
+                nonEvmChains: parseBool(process.env.ZELF_ID_PREMIUM_NON_EVM_CHAINS, true),
+            },
+            unlimited: {
+                passwords: null,
+                zotp: null,
+                swapsPerMonth: parseNullableLimit(process.env.ZELF_ID_UNLIMITED_SWAPS_PER_MONTH, null),
+                nonEvmChains: parseBool(process.env.ZELF_ID_UNLIMITED_NON_EVM_CHAINS, true),
+            },
+        },
     },
     landingUrl: process.env.LANDING_URL || (process.env.NODE_ENV === "development" ? "http://localhost:3009" : "https://zelf.world"),
     pgp: {
@@ -162,6 +310,7 @@ const configuration = {
         publicGatewayUrl: process.env.ARWEAVE_PUBLIC_GATEWAY_URL || ARWEAVE_DEFAULT_PUBLIC_GATEWAY_URL,
         graphqlGateways: csvOrDefault(process.env.ARWEAVE_GRAPHQL_GATEWAYS, ARWEAVE_DEFAULT_GRAPHQL_GATEWAYS),
         arnsGatewayHost: process.env.ARWEAVE_ARNS_GATEWAY_HOST || ARWEAVE_DEFAULT_ARNS_GATEWAY_HOST,
+        arnsGatewayHosts: csvOrDefault(process.env.ARWEAVE_ARNS_GATEWAY_HOSTS, ARWEAVE_DEFAULT_ARNS_GATEWAY_HOSTS),
         owner: process.env.ARWEAVE_OWNER,
         n: process.env.ARWAVE_N,
         e: process.env.ARWAVE_E,
@@ -200,8 +349,10 @@ const configuration = {
     },
     arns: {
         processId: process.env.ARNS_PROCESS_ID,
+        solanaMint: process.env.ARNS_SOLANA_MINT || "5mwShV7zD67vCRzSXeJg9Gmvni7akqHTst59iA9PwGwu",
         index_transaction_id: process.env.ARNS_INDEX_TRANSACTION_ID,
-        blockdag_transaction_id: process.env.ARNS_BLOCKDAG_TRANSACTION_ID || "9Kz-HCKRaWmM5fAc9A2q7sJbUIRAGQ5X9GDKdI7l76Q",
+        blockdag_transaction_id: process.env.ARNS_BLOCKDAG_TRANSACTION_ID || "Ogwi27vfS0RZGXG-rFrv9vh8xIbXkvw2s-sl-O4NZKk",
+        socials_transaction_id: process.env.ARNS_SOCIALS_TRANSACTION_ID || "08JtrJB_nf9giHatY2VRGdbu1z4FoSVybGJoOrBFBkY",
     },
     walrus: {
         network: process.env.WALRUS_NETWORK || "testnet",
@@ -221,16 +372,19 @@ const configuration = {
     },
     revenueCat: {
         allowedEmail: process.env.REVENUECAT_ALLOWED_EMAIL,
+        /**
+         * Exact Authorization header value configured in the RevenueCat dashboard webhook.
+         * Falls back to JIM_INBOX_API_KEY so one shared secret can serve both. Both unset = 503.
+         */
+        webhookAuthorization: process.env.REVENUECAT_WEBHOOK_AUTHORIZATION || process.env.JIM_INBOX_API_KEY,
+        /** Credit SANDBOX (TestFlight / internal testing) purchases even when NODE_ENV is production. */
+        allowSandbox: process.env.REVENUECAT_ALLOW_SANDBOX === "true",
     },
     solana: {
-        rpcUrl:
-            process.env.SOLANA_RPC_URL ||
-            process.env.SOLANA_RPC_ENDPOINT ||
-            (process.env.SOLANA_NODE_SECRET
-                ? `https://flashy-ultra-choice.solana-mainnet.quiknode.pro/${process.env.SOLANA_NODE_SECRET}/`
-                : "https://api.mainnet-beta.solana.com"),
+        rpcUrl: process.env.SOLANA_RPC_URL || process.env.SOLANA_RPC_ENDPOINT || "https://api.mainnet-beta.solana.com",
         senderPublicKey: process.env.SOLANA_SENDER_PUBLIC_KEY,
         sender: process.env.SENDER_KEY,
+        /** Retained for older deploy configs. Not interpolated into an RPC URL. */
         nodeSecret: process.env.SOLANA_NODE_SECRET,
         tokenMintAddress: process.env.SOLANA_TOKEN_MINT_ADDRESS,
         devModeTokens: process.env.SOLANA_DEV_MODE_TOKENS,
@@ -309,11 +463,11 @@ const configuration = {
     },
     lifi: {
         url: process.env.LIFI_API_URL || "https://li.quest/v1",
-        apiKey: process.env.LIFI_API_KEY,
+        apiKey: resolveLifiApiKey(),
         integrator: process.env.LIFI_INTEGRATOR,
     },
     fantom: {
-        rpcUrl: process.env.FANTOM_RPC_URL || "https://fragrant-wild-smoke.fantom.quiknode.pro/9f6de2bac71c11f7c08e97e7be74a9d770c62a86",
+        rpcUrl: process.env.FANTOM_RPC_URL || "https://rpc.soniclabs.com",
     },
     stripe: {
         frontendUrl: process.env.FRONTEND_URL || "http://localhost:4200",
@@ -416,7 +570,7 @@ const configuration = {
         demoMode: process.env.CRYPTO_PAYMENTS_DEMO_MODE === "true" || false,
         demoMultiplier: 0.005, // 0.5% of original price for demo mode (max $0.049 for $9.99)
     },
-    /** VaultLegacy demo wills — never enable LEGACY_DEMO_MODE on production v3.zelf.world */
+    /** VaultLegacy demo wills — never enable LEGACY_DEMO_MODE on production v4.zelf.world */
     legacyDemo: {
         enabled: process.env.LEGACY_DEMO_MODE === "true",
         lawyerAddress: (process.env.LEGACY_DEMO_LAWYER_ADDRESS || "").trim().toLowerCase(),
@@ -457,7 +611,6 @@ const configuration = {
             "net_version",
             "web3_clientVersion",
             "eth_sendRawTransaction",
-            "eth_sendTransaction",
             // Solana JSON-RPC (wallet / extension; include if you set RPC_PROXY_ALLOWED_METHODS)
             "getAccountInfo",
             "getBalance",
@@ -474,7 +627,6 @@ const configuration = {
             "getLatestBlockhash",
             "getMinimumBalanceForRentExemption",
             "getMultipleAccounts",
-            "getProgramAccounts",
             "getRecentPrioritizationFees",
             "getSignaturesForAddress",
             "getSignatureStatuses",
@@ -484,7 +636,6 @@ const configuration = {
             "getTransaction",
             "getVersion",
             "isBlockhashValid",
-            "requestAirdrop",
             "sendTransaction",
             "simulateTransaction",
             // Sui JSON-RPC (global allowlist; if you set RPC_PROXY_ALLOWED_METHODS, include these too)
@@ -521,27 +672,29 @@ const configuration = {
             "sui_resolveNameServiceAddress",
             "sui_getAllBalances",
             "sui_getBalance",
+            "suix_getAllBalances",
+            "suix_getBalance",
+            "suix_getCoinMetadata",
+            "suix_getReferenceGasPrice",
+            "suix_queryTransactionBlocks",
             "sui_getCoins",
             "sui_getAllCoins",
             "dryRunTransactionBlock",
             "executeTransactionBlock",
             "devInspectTransactionBlock",
-            "unsafe_transferObject",
-            "unsafe_pay",
-            "unsafe_paySui",
-            "unsafe_payAllSui",
-            "unsafe_mergeCoins",
-            "unsafe_splitCoins",
-            "unsafe_moveCall",
-            "unsafe_batchTransaction",
         ]),
         blockedMethodPrefixes: csvOrDefault(process.env.RPC_PROXY_BLOCKED_PREFIXES, [
             "admin_",
+            "alchemy_",
             "debug_",
             "engine_",
+            "erigon_",
+            "les_",
             "miner_",
             "ots_",
+            "parity_",
             "personal_",
+            "qn_",
             "trace_",
             "txpool_",
         ]),
@@ -552,134 +705,26 @@ const configuration = {
             "eth_newBlockFilter",
             "eth_newFilter",
             "eth_newPendingTransactionFilter",
+            "eth_sendTransaction",
             "eth_subscribe",
             "eth_unsubscribe",
         ]),
-        chains: {
-            ethereum: {
-                chainId: Number(process.env.ETHEREUM_CHAIN_ID) || 1,
-                rpcUrl: process.env.RPC_PROXY_ETHEREUM_URL || process.env.ETHEREUM_RPC_URL || "https://eth.llamarpc.com",
-            },
-            avalanche: {
-                chainId: Number(process.env.AVALANCHE_CHAIN_ID) || 43114,
-                rpcUrl: process.env.RPC_PROXY_AVALANCHE_URL || process.env.AVALANCHE_RPC_URL || "https://api.avax.network/ext/bc/C/rpc",
-            },
-            polygon: {
-                chainId: Number(process.env.POLYGON_CHAIN_ID) || 137,
-                rpcUrl: process.env.RPC_PROXY_POLYGON_URL || process.env.POLYGON_RPC_URL || "https://polygon-rpc.com",
-            },
-            bsc: {
-                chainId: Number(process.env.BSC_CHAIN_ID) || 56,
-                rpcUrl: process.env.RPC_PROXY_BSC_URL || process.env.BSC_RPC_URL || "https://bsc-dataseed.binance.org",
-            },
-            arbitrum: {
-                chainId: Number(process.env.ARBITRUM_CHAIN_ID) || 42161,
-                rpcUrl: process.env.RPC_PROXY_ARBITRUM_URL || process.env.ARBITRUM_RPC_URL || "https://arb1.arbitrum.io/rpc",
-            },
-            optimism: {
-                chainId: Number(process.env.OPTIMISM_CHAIN_ID) || 10,
-                rpcUrl: process.env.RPC_PROXY_OPTIMISM_URL || process.env.OPTIMISM_RPC_URL || "https://mainnet.optimism.io",
-            },
-            base: {
-                chainId: Number(process.env.BASE_CHAIN_ID) || 8453,
-                rpcUrl: process.env.RPC_PROXY_BASE_URL || process.env.BASE_RPC_URL || "https://mainnet.base.org",
-            },
-            blockdag: {
-                chainId: Number(process.env.BLOCKDAG_CHAIN_ID) || 1404,
-                rpcUrl:
-                    process.env.RPC_PROXY_BLOCKDAG_URL ||
-                    process.env.BLOCKDAG_MAIN_RPC_URL ||
-                    process.env.BLOCKDAG_RPC_URL ||
-                    "https://rpc.bdagscan.com",
-            },
-            /** Sui: chainId is a logical Zelf id for /api/rpc/chains (not an EVM chain id). */
-            sui: {
-                chainId: Number(process.env.SUI_CHAIN_ID) || 101,
-                rpcUrl: process.env.RPC_PROXY_SUI_URL || process.env.SUI_RPC_URL || "https://fullnode.mainnet.sui.io:443",
-            },
-        },
+        /**
+         * Snapshot at boot for server-side readers (tx watcher, balance fallbacks).
+         * The HTTP proxy resolves URLs per request via Core/rpc-upstreams.js.
+         * Sui chainId is a logical id. POST /api/rpc/sui translates reads to GraphQL
+         * and does not POST this URL.
+         */
+        chains: rpcUpstreams.legacyChains(),
     },
-    /** JWT-only RPC proxy for the wallet extension (POST /api/protected/rpc/:chainKey). Uses EXTENSION_* URLs with fallback to public chain URLs. */
+    /**
+     * JWT-only RPC proxy for the wallet extension.
+     * Paid chains fail closed until EXTENSION_* (or the documented alias) is set.
+     * Public-chain defaults remain for Arbitrum, Optimism, Base, and BlockDAG.
+     */
     extension: {
         rpc: {
-            chains: {
-                ethereum: {
-                    chainId: Number(process.env.ETHEREUM_CHAIN_ID) || 1,
-                    rpcUrl:
-                        process.env.EXTENSION_ETHEREUM_RPC_URL ||
-                        process.env.RPC_PROXY_ETHEREUM_URL ||
-                        process.env.ETHEREUM_RPC_URL ||
-                        "https://eth.llamarpc.com",
-                },
-                avalanche: {
-                    chainId: Number(process.env.AVALANCHE_CHAIN_ID) || 43114,
-                    rpcUrl:
-                        process.env.EXTENSION_AVALANCHE_RPC_URL ||
-                        process.env.RPC_PROXY_AVALANCHE_URL ||
-                        process.env.AVALANCHE_RPC_URL ||
-                        "https://api.avax.network/ext/bc/C/rpc",
-                },
-                polygon: {
-                    chainId: Number(process.env.POLYGON_CHAIN_ID) || 137,
-                    rpcUrl:
-                        process.env.EXTENSION_POLYGON_RPC_URL ||
-                        process.env.RPC_PROXY_POLYGON_URL ||
-                        process.env.POLYGON_RPC_URL ||
-                        "https://polygon-rpc.com",
-                },
-                bsc: {
-                    chainId: Number(process.env.BSC_CHAIN_ID) || 56,
-                    rpcUrl:
-                        process.env.EXTENSION_BSC_RPC_URL ||
-                        process.env.RPC_PROXY_BSC_URL ||
-                        process.env.BSC_RPC_URL ||
-                        "https://bsc-dataseed.binance.org",
-                },
-                arbitrum: {
-                    chainId: Number(process.env.ARBITRUM_CHAIN_ID) || 42161,
-                    rpcUrl:
-                        process.env.EXTENSION_ARBITRUM_RPC_URL ||
-                        process.env.RPC_PROXY_ARBITRUM_URL ||
-                        process.env.ARBITRUM_RPC_URL ||
-                        "https://arb1.arbitrum.io/rpc",
-                },
-                optimism: {
-                    chainId: Number(process.env.OPTIMISM_CHAIN_ID) || 10,
-                    rpcUrl:
-                        process.env.EXTENSION_OPTIMISM_RPC_URL ||
-                        process.env.RPC_PROXY_OPTIMISM_URL ||
-                        process.env.OPTIMISM_RPC_URL ||
-                        "https://mainnet.optimism.io",
-                },
-                base: {
-                    chainId: Number(process.env.BASE_CHAIN_ID) || 8453,
-                    rpcUrl:
-                        process.env.EXTENSION_BASE_RPC_URL ||
-                        process.env.RPC_PROXY_BASE_URL ||
-                        process.env.BASE_RPC_URL ||
-                        "https://mainnet.base.org",
-                },
-                blockdag: {
-                    chainId: Number(process.env.BLOCKDAG_CHAIN_ID) || 1404,
-                    rpcUrl:
-                        process.env.EXTENSION_BLOCKDAG_RPC_URL ||
-                        process.env.RPC_PROXY_BLOCKDAG_URL ||
-                        process.env.BLOCKDAG_MAIN_RPC_URL ||
-                        process.env.BLOCKDAG_RPC_URL ||
-                        "https://rpc.bdagscan.com",
-                },
-                /** Solana: logical chainId for /api/protected/rpc/chains only (distinct from Sui 101 in public rpc). */
-                solana: {
-                    chainId: Number(process.env.SOLANA_PROXY_CHAIN_ID) || 102,
-                    rpcUrl:
-                        process.env.EXTENSION_SOLANA_RPC_URL ||
-                        process.env.SOLANA_RPC_URL ||
-                        process.env.SOLANA_RPC_ENDPOINT ||
-                        (process.env.SOLANA_NODE_SECRET
-                            ? `https://flashy-ultra-choice.solana-mainnet.quiknode.pro/${process.env.SOLANA_NODE_SECRET}/`
-                            : "https://api.mainnet-beta.solana.com"),
-                },
-            },
+            chains: rpcUpstreams.extensionChains(),
             /**
              * Full `Origin` values allowed for /api/protected/rpc/* (JWT still required).
              * Built from PROTECTED_RPC_ALLOWED_ORIGINS (CSV of full origins) plus
@@ -756,20 +801,96 @@ const configuration = {
         tagPayConfirmations: Math.max(1, Number(process.env.BLOCKDAG_TAG_PAY_CONFIRMATIONS) || 1),
         nowNodesAPIKey: process.env.BLOCKDAG_NOW_NODES_API_KEY,
     },
+    /**
+     * Face anti-abuse: attempt lockout, in-house PoW, capture nonces (#192 / #193).
+     * PoW/nonce enforcement defaults to `log` so older extension builds keep working until clients ship nonces.
+     */
+    faceSecurity: {
+        attemptLimiter: {
+            enabled: process.env.FACE_ATTEMPT_LIMITER_ENABLED !== "false",
+            /** Consecutive failed face/liveness/password attempts per identity before lockout. */
+            identityMaxFailures: Math.max(1, Number(process.env.FACE_ATTEMPT_IDENTITY_MAX_FAILURES) || 5),
+            /** Rolling window (seconds) for counting consecutive failures on an identity. */
+            identityWindowSec: Math.max(60, Number(process.env.FACE_ATTEMPT_IDENTITY_WINDOW_SEC) || 15 * 60),
+            /** Keep lockoutLevel after lockedUntil for escalation (Mongo TTL anchor). Default 24h. */
+            lockoutLevelDecaySec: Math.max(
+                3600,
+                Number(process.env.FACE_ATTEMPT_LOCKOUT_LEVEL_DECAY_SEC) || 86400
+            ),
+            /** Progressive lockout durations in seconds (15m, 1h, 24h). */
+            lockoutStepsSec: (process.env.FACE_ATTEMPT_LOCKOUT_STEPS_SEC || "900,3600,86400")
+                .split(",")
+                .map((s) => Math.max(60, Number(s.trim()) || 900))
+                .filter(Boolean),
+            /** Off by default — shared NAT; enable only for high-abuse environments. */
+            ipLockoutEnabled: process.env.FACE_ATTEMPT_IP_LOCKOUT_ENABLED === "true",
+            /** When IP lockout is enabled, failures/hour before IP block (generous). */
+            ipMaxFailuresPerHour: Math.max(1, Number(process.env.FACE_ATTEMPT_IP_MAX_FAILURES_PER_HOUR) || 100),
+            /** Per session + per identity (tag/record) before device-scoped lockout. */
+            deviceMaxFailures: Math.max(1, Number(process.env.FACE_ATTEMPT_DEVICE_MAX_FAILURES) || 10),
+            /** Start requiring PoW after this many identity failures in the window (inclusive). */
+            powAfterFailures: Math.max(1, Number(process.env.FACE_ATTEMPT_POW_AFTER_FAILURES) || 2),
+        },
+        pow: {
+            /** Generate on server only: openssl rand -hex 32 — never commit a real value. */
+            hmacSecret: process.env.FACE_POW_HMAC_SECRET || "",
+            challengeTtlSec: Math.max(60, Number(process.env.FACE_POW_CHALLENGE_TTL_SEC) || 300),
+            /** Leading zero bits in SHA-256(salt + solution) hex digest (~16 ≈ 1s at ~100k H/s). */
+            baseDifficulty: Math.max(8, Number(process.env.FACE_POW_BASE_DIFFICULTY) || 16),
+            maxDifficulty: Math.max(16, Number(process.env.FACE_POW_MAX_DIFFICULTY) || 19),
+            /** `log` = issue challenges but allow missing/invalid; `require` = enforce 428/409. */
+            enforcement: String(process.env.FACE_POW_ENFORCEMENT || "log").toLowerCase(),
+        },
+        nonce: {
+            ttlSec: Math.max(30, Number(process.env.FACE_NONCE_TTL_SEC) || 90),
+            /** `log` = allow missing nonce (audit log); `require` = reject missing/invalid. */
+            enforcement: String(process.env.FACE_NONCE_ENFORCEMENT || "log").toLowerCase(),
+        },
+        bodyWhitelist: {
+            /** Strip server-only fields (tolerance, removePGP, …). Default on. */
+            enabled: process.env.FACE_BODY_WHITELIST_ENABLED !== "false",
+            /** Full per-action allow-list; default off — logs keys that would be dropped. */
+            strict: process.env.FACE_BODY_STRICT_WHITELIST === "true",
+        },
+        replay: {
+            /** SHA-256 digest of accepted face payloads; TTL for replay detection. */
+            enabled: process.env.FACE_REPLAY_DETECTION_ENABLED !== "false",
+            retentionDays: Math.max(1, Number(process.env.FACE_REPLAY_RETENTION_DAYS) || 7),
+        },
+    },
+    /**
+     * Free-plan monthly ZNS access fee.
+     * Off unless MONTHLY_ZNS_ACCESS_ENABLED=true, so a deploy does not charge until turned on.
+     * The floor defaults to the monthly active-user amount (API_USAGE_ACTIVE_USER_USD, $0.10).
+     */
+    monthlyZnsAccess: {
+        get enabled() {
+            return process.env.MONTHLY_ZNS_ACCESS_ENABLED === "true";
+        },
+        get floorUsd() {
+            const override = process.env.MONTHLY_ZNS_ACCESS_FLOOR_USD;
+            if (override != null && String(override).trim() !== "") {
+                const n = Number(override);
+                if (Number.isFinite(n) && n >= 0) return n;
+            }
+            return configuration.subscriptionPricing.activeUserMonthlyUsd;
+        },
+    },
 };
 
 /**
- * JSON for GET /api/subscription-plans (`pricingMeta`). Token counts use ceil(usd / rewardPrice).
+ * JSON for GET /api/subscription-plans (`pricingMeta`). Token counts use ceil(usd / token price).
+ * `rewardPrice` and `tokenPriceUsd` are the same ZNS USD price.
  */
 const buildSubscriptionPricingMeta = () => {
-    const rp = Number(configuration.token.rewardPrice);
-    const rewardPrice = Number.isFinite(rp) && rp > 0 ? rp : 0.05;
+    const rewardPrice = getTokenPriceUsd();
     const sp = configuration.subscriptionPricing;
     const ceilTok = (usd) => Math.ceil(Number(usd) / rewardPrice);
     const fmt = (n) => (Number.isFinite(Number(n)) ? Number(n).toFixed(2) : String(n));
 
     return {
         rewardPrice,
+        tokenPriceUsd: rewardPrice,
         rewardPriceFormatted: fmt(rewardPrice),
         encryptUsd: sp.encryptUsd,
         encryptUsdFormatted: fmt(sp.encryptUsd),
@@ -789,3 +910,7 @@ const buildSubscriptionPricingMeta = () => {
 
 module.exports = configuration;
 module.exports.buildSubscriptionPricingMeta = buildSubscriptionPricingMeta;
+module.exports.DEFAULT_TOKEN_PRICE_USD = DEFAULT_TOKEN_PRICE_USD;
+module.exports.getTokenPriceUsd = getTokenPriceUsd;
+module.exports.resolveTokenPriceUsd = resolveTokenPriceUsd;
+module.exports.resolveLifiApiKey = resolveLifiApiKey;

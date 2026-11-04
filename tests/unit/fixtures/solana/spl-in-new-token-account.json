@@ -1,0 +1,106 @@
+{
+ "meta": {
+  "fee": 8939,
+  "preBalances": [
+   53068433,
+   0,
+   1488440,
+   10572651977324437,
+   1461600,
+   1,
+   200653906,
+   1009200,
+   1,
+   3388612899
+  ],
+  "postBalances": [
+   51571054,
+   1488440,
+   1488440,
+   10572651977324437,
+   1461600,
+   1,
+   200653906,
+   1009200,
+   1,
+   3388612899
+  ],
+  "preTokenBalances": [
+   {
+    "accountIndex": 2,
+    "mint": "8Yt8jQvS9gdHzBDjB3CvYNhze8vaTuJoPgtmWiUJoUSD",
+    "owner": "8i4Dix4GpAY6jmvzSQ432aWu1rHSRuMcMh8EdnxdkPTP",
+    "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "uiTokenAmount": {
+     "amount": "308000000",
+     "decimals": 6,
+     "uiAmount": 308.0,
+     "uiAmountString": "308"
+    }
+   }
+  ],
+  "postTokenBalances": [
+   {
+    "accountIndex": 1,
+    "mint": "8Yt8jQvS9gdHzBDjB3CvYNhze8vaTuJoPgtmWiUJoUSD",
+    "owner": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "uiTokenAmount": {
+     "amount": "308000000",
+     "decimals": 6,
+     "uiAmount": 308.0,
+     "uiAmountString": "308"
+    }
+   },
+   {
+    "accountIndex": 2,
+    "mint": "8Yt8jQvS9gdHzBDjB3CvYNhze8vaTuJoPgtmWiUJoUSD",
+    "owner": "8i4Dix4GpAY6jmvzSQ432aWu1rHSRuMcMh8EdnxdkPTP",
+    "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "uiTokenAmount": {
+     "amount": "0",
+     "decimals": 6,
+     "uiAmount": null,
+     "uiAmountString": "0"
+    }
+   }
+  ],
+  "err": null
+ },
+ "transaction": {
+  "message": {
+   "accountKeys": [
+    {
+     "pubkey": "8i4Dix4GpAY6jmvzSQ432aWu1rHSRuMcMh8EdnxdkPTP"
+    },
+    {
+     "pubkey": "AYvC2F5EsYmoNZdwA1RHp2RmFuBnE5JSvF6whoKQa93r"
+    },
+    {
+     "pubkey": "Cjqv1zwERTgQifJgVpg39MMGRS2LrBwNnL9Nj3Rvsm76"
+    },
+    {
+     "pubkey": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
+    },
+    {
+     "pubkey": "8Yt8jQvS9gdHzBDjB3CvYNhze8vaTuJoPgtmWiUJoUSD"
+    },
+    {
+     "pubkey": "11111111111111111111111111111111"
+    },
+    {
+     "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+    },
+    {
+     "pubkey": "SysvarRent111111111111111111111111111111111"
+    },
+    {
+     "pubkey": "ComputeBudget111111111111111111111111111111"
+    },
+    {
+     "pubkey": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+    }
+   ]
+  }
+ }
+}

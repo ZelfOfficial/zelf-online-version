@@ -4,7 +4,20 @@
  */
 
 const Module = require("../modules/zelf-key.module.js");
+const ZelfKeyDomainModule = require("../modules/zelf-key-domain.module");
 const { errorHandler } = require("../../../Core/http-handler");
+const { runMonthlyAccess } = require("../../ZelfID/modules/zelf-id-monthly-access.module");
+
+const sendModuleError = (ctx, error) => {
+	const _exception = errorHandler(error, ctx);
+
+	ctx.status = _exception.status;
+	ctx.body = {
+		message: _exception.message,
+		code: _exception.code,
+		...(error?.details && typeof error.details === "object" ? error.details : {}),
+	};
+};
 
 /**
  * Store website password specifically
@@ -22,11 +35,7 @@ const storePassword = async (ctx) => {
 
 		ctx.body = { data };
 	} catch (error) {
-		const _exception = errorHandler(error, ctx);
-
-		ctx.status = _exception.status;
-
-		ctx.body = { message: _exception.message, code: _exception.code };
+		sendModuleError(ctx, error);
 	}
 };
 
@@ -40,11 +49,7 @@ const storePasswordsBulk = async (ctx) => {
 
 		ctx.body = { data };
 	} catch (error) {
-		const _exception = errorHandler(error, ctx);
-
-		ctx.status = _exception.status;
-
-		ctx.body = { message: _exception.message, code: _exception.code };
+		sendModuleError(ctx, error);
 	}
 };
 
@@ -64,11 +69,7 @@ const storeZOTP = async (ctx) => {
 
 		ctx.body = { data };
 	} catch (error) {
-		const _exception = errorHandler(error, ctx);
-
-		ctx.status = _exception.status;
-
-		ctx.body = { message: _exception.message, code: _exception.code };
+		sendModuleError(ctx, error);
 	}
 };
 
@@ -126,9 +127,23 @@ const storeCreditCard = async (ctx) => {
  */
 const retrieveData = async (ctx) => {
 	try {
-		const data = await Module.retrieveData(ctx.request.body, ctx.state.user);
+		await runMonthlyAccess(ctx, "retrieve", () => Module.retrieveData(ctx.request.body, ctx.state.user));
+	} catch (error) {
+		const _exception = errorHandler(error, ctx);
 
-		ctx.body = { data };
+		ctx.status = _exception.status;
+
+		ctx.body = { message: _exception.message, code: _exception.code };
+	}
+};
+
+/**
+ * Open several zOTP records with one face capture ("Show codes")
+ * @param {Object} ctx - Koa context
+ */
+const retrieveZOTPs = async (ctx) => {
+	try {
+		await runMonthlyAccess(ctx, "retrieve", () => Module.retrieveZOTPsBulk(ctx.request.body, ctx.state.user));
 	} catch (error) {
 		const _exception = errorHandler(error, ctx);
 
@@ -160,6 +175,20 @@ const previewData = async (ctx) => {
  * List data by category
  * @param {Object} ctx - Koa context
  */
+const getProof = async (ctx) => {
+	try {
+		const data = await Module.getProof(ctx.request.query, ctx.state.user);
+
+		ctx.body = { data };
+	} catch (error) {
+		const _exception = errorHandler(error, ctx);
+
+		ctx.status = _exception.status;
+
+		ctx.body = { message: _exception.message, code: _exception.code };
+	}
+};
+
 const listData = async (ctx) => {
 	try {
 		const data = await Module.listData(ctx.request.query, ctx.state.user);
@@ -231,6 +260,24 @@ const listAllDataDashboard = async (ctx) => {
 };
 
 /**
+ * Domain-wide ZelfKeys list for license owner / staff (metadata only)
+ * @param {Object} ctx - Koa context
+ */
+const listDomainKeys = async (ctx) => {
+	try {
+		const data = await ZelfKeyDomainModule.listDomainKeys(ctx.request.query, ctx.state.user);
+
+		ctx.body = { data };
+	} catch (error) {
+		const _exception = errorHandler(error, ctx);
+
+		ctx.status = _exception.status;
+
+		ctx.body = { message: _exception.message, code: _exception.code };
+	}
+};
+
+/**
  * Count-only IPFS summary across ZelfKeys categories
  * @param {Object} ctx - Koa context
  */
@@ -249,6 +296,48 @@ const summarizeData = async (ctx) => {
 };
 
 /**
+ * Change master password for all face_password keys
+ * @param {Object} ctx - Koa context
+ */
+const changeMasterPassword = async (ctx) => {
+	try {
+		const data = await Module.changeMasterPassword(ctx.request.body, ctx.state.user);
+
+		ctx.body = { data };
+	} catch (error) {
+		const _exception = errorHandler(error, ctx);
+
+		ctx.status = _exception.status;
+
+		ctx.body = { message: _exception.message, code: _exception.code };
+	}
+};
+
+/**
+ * Plan, usage, extra slots, and token cost for the authenticated Zelf identity.
+ * @param {Object} ctx - Koa context
+ */
+const getVaultLimits = async (ctx) => {
+	try {
+		const data = await Module.getVaultLimits(ctx.state.user);
+
+		ctx.body = { data };
+	} catch (error) {
+		sendModuleError(ctx, error);
+	}
+};
+
+const purchaseExtraSlot = async (ctx) => {
+	try {
+		const data = await Module.purchaseExtraSlot(ctx.request.body, ctx.state.user);
+
+		ctx.body = { data };
+	} catch (error) {
+		sendModuleError(ctx, error);
+	}
+};
+
+/**
  * Delete ZelfKey
  * @param {Object} ctx - Koa context
  */
@@ -258,6 +347,7 @@ const deleteZelfKey = async (ctx) => {
 			{
 				id: ctx.request.params.id,
 				faceBase64: ctx.request.body.faceBase64,
+				password: ctx.request.body.password,
 				masterPassword: ctx.request.body.masterPassword,
 				removePGP: ctx.request.body.removePGP,
 			},
@@ -281,11 +371,17 @@ module.exports = {
 	storeNotes,
 	storeCreditCard,
 	retrieveData,
+	retrieveZOTPs,
 	previewData,
+	getProof,
 	listData,
 	listAllData,
 	listDataDashboard,
 	listAllDataDashboard,
+	listDomainKeys,
 	summarizeData,
+	getVaultLimits,
+	purchaseExtraSlot,
+	changeMasterPassword,
 	deleteZelfKey,
 };

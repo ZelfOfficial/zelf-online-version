@@ -7,7 +7,7 @@ const Koa = require("koa");
 const Router = require("@koa/router");
 const request = require("supertest");
 const Stripe = require("stripe");
-const { createBodyParser, RAW_BODY_PATHS } = require("../../Core/request-body");
+const { BODY_OPTIONS, createBodyParser } = require("../../Core/request-body");
 const { webhookValidation } = require("../../Repositories/Stripe/middlewares/stripe.middleware");
 
 const SECRET = "whsec_unit_test_secret_0123456789";
@@ -61,8 +61,8 @@ const post = (body, signature) => {
 	return call.send(body);
 };
 
-test("the webhook route is the one that keeps the raw body", () => {
-	expect(RAW_BODY_PATHS).toEqual([WEBHOOK_PATH]);
+test("the app's parser keeps the raw body (Stripe, zAI and the RPC proxy verify or read it)", () => {
+	expect(BODY_OPTIONS.includeUnparsed).toBe(true);
 });
 
 test("a genuine Stripe event is verified against the bytes received", async () => {
@@ -107,9 +107,9 @@ test("a refused signature never logs the secret, the header or the payload", asy
 	expect(logged).not.toContain("in_unit_1");
 });
 
-test("other routes are parsed as before, without keeping a raw copy", async () => {
+test("other routes still get the parsed JSON", async () => {
 	const response = await request(app.callback()).post("/api/echo").send({ hello: "world" });
 
 	expect(response.status).toBe(200);
-	expect(response.body).toEqual({ body: { hello: "world" }, hasRaw: false });
+	expect(response.body).toEqual({ body: { hello: "world" }, hasRaw: true });
 });

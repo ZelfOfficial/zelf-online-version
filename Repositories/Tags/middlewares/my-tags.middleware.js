@@ -1,4 +1,4 @@
-const { string, validate, boolean, number, stringEnum } = require("../../../Core/JoiUtils");
+const { string, validate, boolean, number, stringEnum, stringOptionalEmptyAsNull } = require("../../../Core/JoiUtils");
 const Session = require("../../Session/models/session.model");
 const moment = require("moment");
 const { extractDomainAndName, validateDomainAndName } = require("./tags.middleware");
@@ -13,7 +13,11 @@ const schemas = {
         tagName: string().required(),
         domain: string(),
         faceBase64: string().required(),
-        password: string().required(),
+        password: string().allow("", null),
+        newOwnerEmail: string().email().allow("", null),
+        transferMessage: string().allow("", null),
+        os: stringEnum(["DESKTOP", "ANDROID", "IOS"]),
+        captchaToken: stringOptionalEmptyAsNull().optional(),
     },
     paymentConfirmation: {
         tagName: string().required(),

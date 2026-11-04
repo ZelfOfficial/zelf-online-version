@@ -1,6 +1,7 @@
 const config = require("../../../Core/config");
 const Controller = require("../controllers/unprotected-lawyer.controller");
 const Middleware = require("../middlewares/lawyer.middleware");
+const FaceMiddleware = require("../../Face/middlewares/face.middleware");
 
 const base = "/lawyers";
 
@@ -18,8 +19,8 @@ module.exports = (server) => {
 
 	// Invitation flow (no auth)
 	server.get(`${PATH}/validate-invite`, Controller.validateInvitation);
-	server.post(`${PATH}/accept-invite`, Middleware.createFromInvitationValidation, Controller.createFromInvitation);
+	server.post(`${PATH}/accept-invite`, Middleware.createFromInvitationValidation, FaceMiddleware.gate("lawyer-face"), Controller.createFromInvitation);
 
 	// Lawyer auth
-	server.post(`${PATH}/auth`, Middleware.authValidation, Controller.auth);
+	server.post(`${PATH}/auth`, Middleware.authValidation, FaceMiddleware.gate("lawyer-face"), Controller.auth);
 };

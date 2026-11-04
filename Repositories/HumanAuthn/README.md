@@ -5,7 +5,7 @@ Raw ZelfEncrypt **v4** encrypt/decrypt/preview. Same shape as `/api/zelf-proof`,
 | Path | Stack |
 |------|--------|
 | `/api/human-authn/*` | v4 (`https://v4.zelf.world` + `/zelf-v4`) |
-| `/api/zelf-proof/*` | legacy (`https://v3.zelf.world` + `/zelf`) |
+| `/api/zelf-proof/*` | legacy (`https://v4.zelf.world` + `/zelf`) |
 | `/api/human-authn/upgrade` | v4 `POST /zelf-v4/upgrade` → SenseCrypt `/refresh-senseprint-face` (402) |
 | `/api/jwt/human-authn/upgrade` | same upgrade, JWT only, `NODE_ENV=development` |
 
@@ -15,7 +15,7 @@ Registered in `Routes/unprotected-repositories.js`. Onboarding progress is JWT-p
 
 ## Face Certificates (v4)
 
-Face PKI lives only on `https://v4.zelf.world` (`pki_private_key`, `GET /root-certificate`). Proofs on that host stay **unsigned** so Android/iOS can encrypt/decrypt offline. Do not embed `ISSUERS_PUBLIC_KEY` on ZNS or Zelf ID APKs. `https://v3.zelf.world` / ZelfEncrypt 3.1.6 stays unsigned (ZNS).
+Face PKI lives only on `https://v4.zelf.world` (`pki_private_key`, `GET /root-certificate`). Proofs on that host stay **unsigned** so Android/iOS can encrypt/decrypt offline. Do not embed `ISSUERS_PUBLIC_KEY` on ZNS or Zelf ID APKs. ZelfEncrypt 3.1.6 stays unsigned (ZNS) and is reached on `https://v4.zelf.world` at `/zelf`.
 
 Koa should call v4 with `ZELF_PROOF_V4_URL=https://v4.zelf.world` (path prefix `/zelf-v4`). Online encrypt through this API is unchanged.
 

@@ -134,6 +134,18 @@ describe("ton adapter (TonAPI events)", () => {
         expect(dust).toHaveLength(6);
         for (const t of dust) expect(passesValueFilter(t)).toBe(false);
     });
+
+    it("a send is never a push, and the 0.00001 TON spam right after it is neither (#556)", () => {
+        const { response, account } = fixture("ton-events-send-then-spam.json");
+        const [spam, send] = response.events;
+        expect(ton.parseTonEvent(send, account)).toBeNull();
+        expect(ton.parseTonEvent(spam, account)).toBeNull();
+
+        // Even if TonAPI had not flagged it yet when the watcher polled, it is dust for the planner.
+        const unflagged = ton.parseTonEvent({ ...spam, is_scam: false }, account);
+        expect(unflagged).toMatchObject({ network: "ton", hash: spam.event_id, amount: "0.00001", asset: "TON", native: true });
+        expect(passesValueFilter(unflagged)).toBe(false);
+    });
 });
 
 describe("stellar adapter (Horizon payments)", () => {

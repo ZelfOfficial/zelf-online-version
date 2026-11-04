@@ -8,7 +8,7 @@
  *   3. Transaction lands on-chain and is confirmed.
  *
  * Prerequisites:
- *   - .env has SOLANA_NODE_SECRET (or SOLANA_RPC_URL), SENDER_KEY, SOLANA_TOKEN_MINT_ADDRESS.
+ *   - .env has SOLANA_RPC_URL (full endpoint), SENDER_KEY, SOLANA_TOKEN_MINT_ADDRESS.
  *   - SOLANA_DEV_MODE_TOKENS=true (divides amount by 10 so balance is preserved).
  *   - Sender wallet has SOL for fees and some ZNS tokens.
  *

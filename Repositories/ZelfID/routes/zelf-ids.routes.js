@@ -1,8 +1,17 @@
 const config = require("../../../Core/config");
 
 const Controller = require("../controllers/zelf-id.controller");
+const MyPlanController = require("../controllers/zelf-ids-my-plan.controller");
+const MonthlyAccessController = require("../controllers/zelf-id-monthly-access.controller");
 
 const Middleware = require("../middlewares/zelf-id.middleware");
+const MyPlanMiddleware = require("../middlewares/zelf-ids-my-plan.middleware");
+const MonthlyAccessMiddleware = require("../middlewares/zelf-id-monthly-access.middleware");
+const ChainMiddleware = require("../middlewares/zelf-id-chains.middleware");
+const ChainController = require("../controllers/zelf-id-chains.controller");
+const ZelfKeyMiddleware = require("../../ZelfKeys/middlewares/zelf-key.middleware");
+const FaceMiddleware = require("../../Face/middlewares/face.middleware");
+const RbacMiddleware = require("../../Tags/middlewares/rbac.middleware");
 
 const base = "/zelf-ids";
 //v4
@@ -23,9 +32,28 @@ module.exports = (server) => {
 
     server.get(`${PATH}/wallet-balances`, Middleware.walletBalancesValidation, Controller.getWalletBalances);
 
+    server.get(`${PATH}/my-plan`, MyPlanMiddleware.myPlanValidation, MyPlanController.myPlan);
+
+    server.get(`${PATH}/limits`, ZelfKeyMiddleware.limitsValidation, ChainController.limits);
+
+    server.get(`${PATH}/chains`, ChainMiddleware.statusValidation, ChainController.status);
+
+    server.post(`${PATH}/chains/activate`, ChainMiddleware.activateValidation, ChainController.activate);
+
+    server.get(`${PATH}/monthly-access`, MonthlyAccessMiddleware.statusValidation, MonthlyAccessController.status);
+
+    server.get(`${PATH}/monthly-access/quote`, MonthlyAccessMiddleware.quoteValidation, MonthlyAccessController.quote);
+
+    server.post(`${PATH}/monthly-access/confirm`, MonthlyAccessMiddleware.confirmValidation, MonthlyAccessController.confirm);
+
     server.get(`${PATH}/payment-options`, Middleware.paymentOptionsValidation, Middleware.paymentOptionsReducedFeeGate, Controller.paymentOptions);
 
-    server.post(`${PATH}/payment-confirmation`, Middleware.paymentConfirmationValidation, Controller.paymentConfirmation);
+    server.post(
+        `${PATH}/payment-confirmation`,
+        Middleware.paymentConfirmationValidation,
+        FaceMiddleware.gate("payment-confirmation"),
+        Controller.paymentConfirmation
+    );
 
     server.post(
         `${PATH}/smart-contract-payment-confirmation`,
@@ -37,23 +65,36 @@ module.exports = (server) => {
 
     server.get(`${PATH}/stripe-session`, Middleware.stripeSessionValidation, Controller.stripeSession);
 
-    server.post(`${PATH}/lease`, Middleware.leaseValidation, Controller.leaseTag);
+    server.post(`${PATH}/lease`, Middleware.leaseValidation, FaceMiddleware.gate("lease"), Controller.leaseTag);
 
     server.post(`${PATH}/lease-offline`, Middleware.leaseOfflineValidation, Controller.leaseOffline);
 
-    server.post(`${PATH}/lease-recovery`, Middleware.leaseRecoveryValidation, Controller.leaseRecovery);
+    server.post(`${PATH}/sync-addresses`, Middleware.syncAddressesValidation, Controller.syncAddresses);
 
-    server.delete(`${PATH}/delete`, Middleware.deleteTagValidation, Controller.deleteTag);
+    server.post(`${PATH}/lease-recovery`, Middleware.leaseRecoveryValidation, FaceMiddleware.gate("lease-recovery"), Controller.leaseRecovery);
+
+    server.delete(`${PATH}/delete`, Middleware.deleteTagValidation, FaceMiddleware.gate("delete"), Controller.deleteTag);
 
     server.post(`${PATH}/preview-zelfproof`, Middleware.previewZelfProofValidation, Controller.previewZelfProof);
 
     server.post(`${PATH}/preview-zelf-id-qr`, Middleware.previewZelfIdQrValidation, Controller.previewZelfIdQr);
 
-    server.post(`${PATH}/decrypt`, Middleware.decryptValidation, Controller.decryptTag);
+    server.post(`${PATH}/decrypt`, Middleware.decryptValidation, FaceMiddleware.gate("decrypt"), Controller.decryptTag);
 
-    server.post(`${PATH}/revenue-cat`, Middleware.revenueCatWebhookValidation, Controller.revenueCatWebhook);
+    // POST revenue-cat is registered on the unprotected router (static Authorization, no JWT):
+    // see zelf-ids-revenue-cat.routes.js
 
     server.post(`${PATH}/purchase-rewards`, Middleware.referralRewardsValidation, Controller.purchaseRewards);
 
     server.post(`${PATH}/referral-rewards`, Middleware.referralRewardsValidation, Controller.referralRewards);
+
+    server.post(`${PATH}/email-receipt`, Middleware.receiptEmailValidation, Controller.receiptEmail);
+
+    server.post(
+        `${PATH}/custom-extend`,
+        Middleware.extendLicenseForOwnerValidation,
+        FaceMiddleware.gate("my-tags-extend"),
+        RbacMiddleware.requireWrite,
+        Controller.extendLicenseForOwner,
+    );
 };

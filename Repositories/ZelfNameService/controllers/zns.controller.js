@@ -4,6 +4,7 @@ const ZNSTokenModule = require("../modules/zns-token.module");
 const RevenueCatModule = require("../modules/revenue-cat.module");
 const { updateOldZelfNameObject } = require("../modules/my-zns.module");
 const ZNSRecoveryModule = require("../modules/zns-recovery.module");
+const { runMonthlyAccess } = require("../../ZelfID/modules/zelf-id-monthly-access.module");
 
 /**
  * Standard error handler for controllers
@@ -213,15 +214,15 @@ const decryptZelfName = async (ctx) => {
 
 const decryptZelfName_v2 = async (ctx) => {
 	try {
-		const data = await Modulev2.decryptZelfName(
-			{
-				...ctx.request.body,
-				zelfName: `${ctx.request.body.zelfName}`.toLowerCase(),
-			},
-			ctx.state.user
+		await runMonthlyAccess(ctx, "zns-decrypt", () =>
+			Modulev2.decryptZelfName(
+				{
+					...ctx.request.body,
+					zelfName: `${ctx.request.body.zelfName}`.toLowerCase(),
+				},
+				ctx.state.user
+			)
 		);
-
-		ctx.body = { data };
 	} catch (error) {
 		handleError(ctx, error);
 	}

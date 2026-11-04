@@ -1,6 +1,7 @@
 const Stripe = require("stripe");
 
 const configuration = require("../../../Core/config");
+const { retrieveCheckoutSession } = require("../../Stripe/modules/stripe-checkout-session.module");
 const pinata = require("../../../Core/ipfs");
 const SignerData = require("../../../config/0012589021.json");
 const { calculateCryptoAmount } = require("../../../Utilities/crypto-price.module.js");
@@ -926,7 +927,7 @@ async function checkSession(sessionId) {
 		return { success: true, message: "session_already_processed" };
 	}
 
-	const session = await stripe.checkout.sessions.retrieve(sessionId, {
+	const session = await retrieveCheckoutSession(stripe, sessionId, {
 		expand: ["payment_intent", "subscription", "invoice"],
 	});
 

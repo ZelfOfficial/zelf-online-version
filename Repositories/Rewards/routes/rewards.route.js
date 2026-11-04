@@ -2,6 +2,7 @@ const config = require("../../../Core/config");
 
 const Controller = require("../controllers/rewards.controller");
 const Middleware = require("../middlewares/rewards.middleware");
+const FaceMiddleware = require("../../Face/middlewares/face.middleware");
 
 const base = "/rewards";
 
@@ -11,8 +12,8 @@ module.exports = (server) => {
 	// Roulette wheel configuration
 	server.get(`${PATH}/roulette-wheel`, Middleware.rouletteWheelValidation, Controller.getRouletteWheel);
 
-	// Daily rewards
-	server.post(`${PATH}/daily`, Middleware.dailyRewardsValidation, Controller.dailyRewards);
+	// Daily rewards. Face gate matches other owner actions; the module checks the rewarded Zelf ID.
+	server.post(`${PATH}/daily`, Middleware.dailyRewardsValidation, FaceMiddleware.gate("daily-reward"), Controller.dailyRewards);
 
 	server.post(`${PATH}/first-transaction`, Middleware.firstTransactionRewardValidation, Controller.firstTransactionReward);
 

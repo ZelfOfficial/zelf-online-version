@@ -9,6 +9,165 @@ const { normalizeZelfName } = require("../middlewares/rewards.middleware");
 const TagsSearchModule = require("../../Tags/modules/tags-search.module");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const TagsPartsModule = require("../../Tags/modules/tags-parts.module");
+const TagsModule = require("../../Tags/modules/tags.module");
+const ZelfProofModule = require("../../ZelfProof/modules/zelf-proof.module");
+const { isNoPassword } = require("../../ZelfID/modules/zelf-id-password.module");
+
+/** Client codes for daily-reward identity checks. Statuses match Zelf Keys ownership decrypt. */
+const REWARD_IDENTITY_STATUS = {
+    ERR_IDENTITY_VERIFICATION_REQUIRED: 400,
+    ERR_MISSING_PASSWORD: 400,
+    ERR_INVALID_PASSWORD: 401,
+    ERR_PASSWORD_REQUIRED: 409,
+    ERR_VERIFICATION_FAILED: 422,
+};
+
+const throwRewardIdentityError = (code) => {
+    const status = REWARD_IDENTITY_STATUS[code] || 422;
+    const error = new Error(`${status}:${code}`);
+
+    error.status = status;
+    error.code = code;
+
+    throw error;
+};
+
+const isRewardIdentityError = (error) => {
+    const message = typeof error?.message === "string" ? error.message.trim() : "";
+
+    if (/^\d{3}:ERR_[A-Z0-9_]+$/.test(message)) return true;
+
+    return typeof error?.code === "string" && Object.prototype.hasOwnProperty.call(REWARD_IDENTITY_STATUS, error.code);
+};
+
+const safeRewardErrorText = (error) => {
+    const message = typeof error?.message === "string" ? error.message.trim() : "";
+
+    if (/^\d{3}:[A-Za-z0-9_]+$/.test(message)) return message;
+
+    if (typeof error?.code === "string" && /^[A-Za-z0-9_]+$/.test(error.code)) return error.code;
+
+    return "Failed to process daily reward";
+};
+
+/**
+ * Zelf ID password for the rewarded name. Extension sends `masterPassword`;
+ * `password` is the same secret. Blank values and the face-only placeholder are absent.
+ * @param {Object} data
+ * @returns {string|undefined}
+ */
+const resolveRewardMasterPassword = (data) => {
+    const candidates = [data?.masterPassword, data?.password];
+
+    for (const candidate of candidates) {
+        if (typeof candidate !== "string") continue;
+        if (candidate.trim() === "") continue;
+        if (isNoPassword(candidate.trim())) continue;
+
+        return candidate;
+    }
+
+    return undefined;
+};
+
+const hasPasswordFlag = (publicData) => {
+    const flag = publicData?.hasPassword;
+
+    return flag === true || String(flag).toLowerCase() === "true";
+};
+
+/**
+ * Whether this Zelf ID's proof has a password layer.
+ * `passwordLayer` from preview wins over a stale `publicData.hasPassword`.
+ * @param {Object} tagObject
+ * @returns {Promise<boolean>}
+ */
+const proofRequiresPassword = async (tagObject) => {
+    const zelfProof = tagObject?.zelfProof;
+
+    if (typeof zelfProof === "string" && zelfProof) {
+        try {
+            const previewResult = await ZelfProofModule.previewWithLegacyFallback({ zelfProof });
+
+            ZelfProofModule.applyPreviewHasPassword(tagObject, previewResult);
+
+            const fromLayer = ZelfProofModule.passwordLayerRequiresPassword(previewResult?.passwordLayer);
+
+            if (fromLayer === true || fromLayer === false) return fromLayer;
+        } catch (_previewError) {
+            // Preview can be down. The ownership decrypt still enforces the proof's password layer.
+        }
+    }
+
+    return hasPasswordFlag(tagObject?.publicData);
+};
+
+const mapOwnershipDecryptError = (error) => {
+    if (isRewardIdentityError(error) && typeof error?.message === "string" && /^\d{3}:ERR_/.test(error.message.trim())) {
+        throw error;
+    }
+
+    const code = typeof error?.code === "string" ? error.code : "";
+
+    if (REWARD_IDENTITY_STATUS[code]) throwRewardIdentityError(code);
+
+    const normalized = String(error?.message || "").toLowerCase();
+
+    if (normalized.includes("password") && normalized.includes("invalid")) {
+        throwRewardIdentityError("ERR_INVALID_PASSWORD");
+    }
+
+    if (normalized.includes("password") && normalized.includes("required")) {
+        throwRewardIdentityError("ERR_PASSWORD_REQUIRED");
+    }
+
+    if (
+        normalized.includes("liveness") ||
+        normalized.includes("face is not central") ||
+        normalized.includes("no face detected") ||
+        normalized.includes("multiple face") ||
+        normalized.includes("face not recognized") ||
+        normalized.includes("verification failed")
+    ) {
+        throwRewardIdentityError("ERR_VERIFICATION_FAILED");
+    }
+
+    throw error;
+};
+
+/**
+ * Prove the caller controls the Zelf ID being rewarded (`tagName` + `domain`).
+ * Uses the same ownership decrypt as Zelf Keys store/delete. The decrypted payload is discarded.
+ * @param {Object} data
+ * @param {Object} tagObject
+ * @param {Object} authUser
+ */
+const assertDailyRewardIdentity = async (data, tagObject, authUser) => {
+    const faceBase64 = typeof data?.faceBase64 === "string" ? data.faceBase64.trim() : "";
+
+    if (!faceBase64) throwRewardIdentityError("ERR_IDENTITY_VERIFICATION_REQUIRED");
+
+    const masterPassword = resolveRewardMasterPassword(data);
+    const requiresPassword = await proofRequiresPassword(tagObject);
+
+    if (requiresPassword && !masterPassword) {
+        throwRewardIdentityError("ERR_MISSING_PASSWORD");
+    }
+
+    try {
+        await TagsModule.decryptTag(
+            {
+                tagName: data.tagName,
+                domain: data.domain,
+                faceBase64,
+                password: masterPassword,
+            },
+            authUser
+        );
+    } catch (error) {
+        mapOwnershipDecryptError(error);
+    }
+};
 
 /**
  * Get rewards from IPFS
@@ -265,6 +424,8 @@ const dailyRewards = async (data, authUser) => {
 
         const { tagObject, _tagName, domainConfig } = await _getTagObject(tagName, domain, authUser);
 
+        await assertDailyRewardIdentity(data, tagObject, authUser);
+
         // Check if the user's Solana account is active/funded
         const isAccountActive = await ZNSTokenModule.isAccountActive(tagObject.publicData.solanaAddress);
 
@@ -445,7 +606,9 @@ const dailyRewards = async (data, authUser) => {
                 : `Reward claimed but token transfer failed. Please contact support with error: ${tokenTransferError?.error}`,
         };
     } catch (error) {
-        console.error("Error in dailyRewards:", error);
+        if (isRewardIdentityError(error)) throw error;
+
+        console.error("Error in dailyRewards:", safeRewardErrorText(error));
         throw new Error(error.message || "Failed to process daily reward");
     }
 };

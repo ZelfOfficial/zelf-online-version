@@ -18,7 +18,8 @@ This is a Koa backend API with MongoDB, Mongoose, and JWT-protected routes.
 -   Start the API with `npm start`.
 -   `Core/config.js` falls back to port `3000`, but `.env.example` sets `PORT=3003`. Prefer running locally with an explicit `PORT` instead of relying on fallbacks.
 -   Copy `.env.example` to `.env` and provide a working `MONGODB_URI` before running the server.
--   Public API documentation examples: Tags and v3.6 surfaces use `https://v3.zelf.world`. Zelf ID (`/api/zelf-ids`) uses `https://v4.zelf.world`. Localhost URLs are for testing only.
+-   ZNS token USD price is `TOKEN_PRICE_USD` (default `0.05`). `REWARD_PRICE` is a legacy alias used only when `TOKEN_PRICE_USD` is unset. Presale, rewards, and subscription token grants all read that one value (`config.token.priceUsd` / `config.token.rewardPrice`). `GET /api/presale/info` returns it.
+-   Public API documentation examples use `https://v4.zelf.world`, including Tags, v3.6 surfaces, and Zelf ID (`/api/zelf-ids`). Localhost URLs are for testing only.
 
 ## Tests
 
@@ -32,11 +33,12 @@ This is a Koa backend API with MongoDB, Mongoose, and JWT-protected routes.
 
 -   `server.js` loads unprotected routes first, then applies `koa-jwt`, then loads protected routes.
 -   Register new endpoints through `Routes/unprotected-repositories.js` or `Routes/protected-repositories.js`; adding a repository route file alone is not enough.
+-   Wallet RPC is session-JWT only. `POST /api/protected/rpc/:chainKey` is JSON-RPC (ethereum, ethereum-sepolia, polygon, avalanche, bsc, arbitrum, optimism, base, blockdag, solana). Bitcoin Blockbook is `/api/protected/rpc/btc/:network/...`. Stellar Horizon is `/api/protected/rpc/stellar/...`. `POST /api/rpc/:chainKey` is the same JSON-RPC proxy and also requires a JWT. Paid upstream URLs come from env (`EXTENSION_*` and the aliases in `.env.example`). Contract comments live in `Repositories/RPC/routes/protected-rpc.routes.js`. Focused check: `npm run test:rpc-proxy`.
 -   Most backend work follows the repository pattern under `Repositories/<Feature>/`: routes, controllers, modules, middlewares, and models.
--   `/api/zelf-ids` is owned by `Repositories/ZelfID/` and is served on `https://v4.zelf.world` (same host as ZelfEncrypt v4, `ZELF_PROOF_V4_URL`, path `/zelf-v4`). `/api/tags` stays on Tags + ZelfEncrypt 3.1.6 (`https://v3.zelf.world` + `/zelf`).
--   Raw encrypt APIs: `/api/zelf-proof` → 3.1.6 on v3; `/api/human-authn` → v4 on `https://v4.zelf.world`.
+-   `/api/zelf-ids` is owned by `Repositories/ZelfID/` and is served on `https://v4.zelf.world` (same host as ZelfEncrypt v4, `ZELF_PROOF_V4_URL`, path `/zelf-v4`). `/api/tags` stays on Tags + ZelfEncrypt 3.1.6 (`https://v4.zelf.world` + `/zelf`).
+-   Raw encrypt APIs: `/api/zelf-proof` → 3.1.6 at `https://v4.zelf.world/zelf`; `/api/human-authn` → v4 at `https://v4.zelf.world/zelf-v4`.
 -   Upgrade 3.1.6 → v4: `POST /api/human-authn/upgrade` (402) and `POST /api/jwt/human-authn/upgrade` (dev JWT). Koa calls `https://v4.zelf.world/zelf-v4/upgrade` (SenseCrypt `/refresh-senseprint-face`).
--   v4 Face Certificates: `https://v4.zelf.world` has Face PKI (`pki_private_key`) only. Proofs stay unsigned so Android/iOS can encrypt/decrypt offline. Do not embed `ISSUERS_PUBLIC_KEY` on ZNS or Zelf ID APKs. Koa: `/api/face-certificates` (402) and `/api/my-face-certificates` (JWT). Root cert: `GET /api/face-certificates/root-certificate` or `GET https://v4.zelf.world/root-certificate`. `https://v3.zelf.world` / 3.1.6 stays unsigned.
+-   v4 Face Certificates: `https://v4.zelf.world` has Face PKI (`pki_private_key`) only. Proofs stay unsigned so Android/iOS can encrypt/decrypt offline. Do not embed `ISSUERS_PUBLIC_KEY` on ZNS or Zelf ID APKs. Koa: `/api/face-certificates` (402) and `/api/my-face-certificates` (JWT). Root cert: `GET /api/face-certificates/root-certificate` or `GET https://v4.zelf.world/root-certificate`. ZelfEncrypt 3.1.6 stays unsigned.
 -   zSend (`Repositories/ZSend/`) is the encrypt-to-someone-else product on Face Certificates: `/api/zsend` (directory lookup) and `/api/my-zsend` (publish, send, open), both JWT via `Routes/protected-repositories.js`. Purpose ids are `zsend:<tagName>` for files and `zmail:<tagName>` for messages; clients read them from `GET /api/zsend/purpose-id` instead of hardcoding. Certificate PEMs live in Mongo, not tag `publicData` (Pinata caps keyvalues at 9 × 250 chars). Envelopes store only a Face-Certificate-wrapped content key plus an AES-GCM-256 pointer — never plaintext or a raw key. See `Repositories/ZSend/README.md` and `Repositories/ZSend/CLIENT.md`.
 -   Hardhat / Solidity for ERC-8004 lives in `contracts/` (own `package.json`). Install with `npm run contracts:install`. It is not part of the Koa API dependency tree.
 
@@ -50,7 +52,7 @@ This is a Koa backend API with MongoDB, Mongoose, and JWT-protected routes.
 ## Vault Legacy demo mode
 
 -   Demo wills: `LEGACY_DEMO_MODE=true`, per-vault `isDemo` on `VaultLegacy` Mongo records, fixed `LEGACY_DEMO_LAWYER_ADDRESS`.
--   Never enable demo mode on production `v3.zelf.world`.
+-   Never enable demo mode on production `v4.zelf.world`.
 -   Cron: `node Repositories/VaultLegacy/check-vaults.js` (auto-confirms succession for demo vaults after liveness expiry).
 -   Mobile contract: `Repositories/VaultLegacy/DEMO-MOBILE.md`.
 
@@ -58,11 +60,12 @@ This is a Koa backend API with MongoDB, Mongoose, and JWT-protected routes.
 
 -   `POST /api/jwt/zelf-proof/{encrypt,encrypt-qr-code,decrypt,preview}` and `POST /api/jwt/human-authn/{encrypt,encrypt-qr-code,decrypt,preview,upgrade}` reuse the paid controllers but skip the ZNS payment gate.
 -   Registered in `Routes/protected-repositories.js`, so `koa-jwt` requires `Authorization: Bearer <token>`.
--   Each route file returns immediately unless `config.env === "development"`. Never enable these on production `v3.zelf.world`.
+-   Each route file returns immediately unless `config.env === "development"`. Never enable these on production `v4.zelf.world`.
 -   Focused checks: `PORT=3003 npm run test:jwt-dev` and `PORT=3003 npm run test:encrypt-compat` against a live server started with the same `PORT`.
 
 ## Documentation
 
 -   Backend source docs live in this repo (`README.md`, `tests/README.md`, `security/`, feature notes).
 -   Public API docs belong in `zelf-documentation/docs/api/`.
--   Zelf ID v4 plans (6+ chars lease as `free`; `.hold` only for 5 chars or fewer), and payment routes: `zelf-documentation` Changelog (`2026-08-31-zelf-id-migration-v4`) and `docs/api/zelf-ids/unit-tests.md`. Source notes: `Repositories/ZelfID/README.md`.
+-   Zelf ID plan caps for the caller are `GET /api/zelf-keys/limits` (same payload at `GET /api/zelf-ids/limits`). New non-EVM chains go through `POST /api/zelf-ids/chains/activate`.
+-   Zelf ID v4 plans (1–27 chars lease as `free` on mainnet; legacy `.hold` records still honored on payment/search), and payment routes: `zelf-documentation` Changelog (`2026-08-31-zelf-id-migration-v4`) and `docs/api/zelf-ids/unit-tests.md`. Source notes: `Repositories/ZelfID/README.md`.
