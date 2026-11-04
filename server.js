@@ -1,5 +1,5 @@
 const Koa = require("koa");
-const { koaBody } = require("koa-body");
+const { createBodyParser } = require("./Core/request-body");
 const jwt = require("koa-jwt");
 const config = require("./Core/config");
 const secret = config.JWT_SECRET; // Replace with your secret key
@@ -11,20 +11,8 @@ const { loadOfficialLicenses } = require("./Repositories/License/modules/license
 const { getSupportedDomains } = require("./Repositories/Tags/config/supported-domains");
 const app = new Koa();
 app.proxy = true; // Trust the proxy's X-Forwarded-For header
-app.use(
-    koaBody({
-        parsedMethods: ['POST', 'PUT', 'PATCH', 'DELETE'],
-        includeUnparsed: true, // raw body for HMAC checks (zAI callback)
-        multipart: true,
-        formLimit: '6mb',
-        jsonLimit: '10mb',
-        textLimit: '10mb',
-        formidable: {
-            keepExtensions: true,
-            maxFileSize: 6 * 1024 * 1024,
-        },
-    })
-);
+// Shared with the unit tests; keeps the raw body for the Stripe webhook, zAI and the RPC proxy.
+app.use(createBodyParser());
 
 // Enable CORS
 app.use(cors());
