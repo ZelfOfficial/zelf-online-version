@@ -1,8 +1,10 @@
 const Stripe = require("stripe");
 
 const config = require("../../../Core/config");
-const SubscriptionModule = require("../../ZelfKeysSubscription/modules/zelf-keys-subscription.module");
 const StripeModule = require("./stripe.module");
+
+// Loaded only for Zelf Keys app events. Verifik events on the shared Stripe account never reach it.
+const subscriptionModule = () => require("../../ZelfKeysSubscription/modules/zelf-keys-subscription.module");
 
 /**
  * Get Stripe client instance
@@ -75,7 +77,7 @@ const routeWebhook = async (event) => {
 
 	// Extension/app sources route to Subscription module
 	if (source === "extension" || source === "ios" || source === "android") {
-		return await SubscriptionModule.webhookHandler(event);
+		return await subscriptionModule().webhookHandler(event);
 	}
 
 	if (source === "zelf-id-lease") {

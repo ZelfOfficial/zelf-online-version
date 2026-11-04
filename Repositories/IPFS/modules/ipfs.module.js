@@ -7,7 +7,13 @@ const get = async (data) => {
 
 	if (cid) return await IPFS.retrieve(cid, expires);
 
-	const filterOptions = data.limit ? { limit: data.limit } : {};
+	const filterOptions = {};
+
+	if (data.limit) filterOptions.limit = data.limit;
+
+	// Default filter() turns a Pinata failure into []. Callers that must retry (Stripe webhooks)
+	// pass throwOnError so an outage is not reported as "no such record".
+	if (data.throwOnError) filterOptions.throwOnError = true;
 
 	if (zelfName) return await IPFS.filter("name", zelfName, filterOptions);
 

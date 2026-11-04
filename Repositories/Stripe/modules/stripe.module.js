@@ -4,6 +4,10 @@ const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const { saveSubscriptionRecord } = require("../../License/modules/license.module");
 const { tryGrantMonthlyZnsForPaidInvoice } = require("../../SubscriptionPlan/modules/subscription-zns-grant.module");
 
+// Metadata `source` values Zelf writes. The Stripe account is shared with Verifik, so an
+// invoice without one of these is Zelf's only when its customer email matches an account.
+const ZELF_EVENT_SOURCES = new Set(["extension", "ios", "android", "zelf-id-lease", "dashboard"]);
+
 /**
  * Get Stripe client instance
  */
@@ -74,6 +78,29 @@ const handleInvoicePaymentSucceeded = async (invoice, stripe) => {
         });
 
         const customer = await stripe.customers.retrieve(invoice.customer);
+        const source = subscription?.metadata?.source || invoice.metadata?.source || null;
+        const zelfOwned = ZELF_EVENT_SOURCES.has(source);
+
+        // No Zelf source and no Zelf account: this invoice belongs to the other product on the
+        // shared Stripe account. Acknowledge it. A Zelf-sourced invoice, or a failed lookup,
+        // still throws so Stripe retries.
+        if (!customer?.email) {
+            if (zelfOwned) throw new Error("404:account_not_found");
+
+            return { ignored: true, reason: "account_not_found" };
+        }
+
+        const accountsWithSameEmail = await IPFSModule.get({
+            key: "accountEmail",
+            value: customer.email,
+            throwOnError: true,
+        });
+
+        if (!accountsWithSameEmail?.length) {
+            if (zelfOwned) throw new Error("404:account_not_found");
+
+            return { ignored: true, reason: "account_not_found" };
+        }
 
         const paymentData = {
             invoiceId: invoice.id,
@@ -89,11 +116,11 @@ const handleInvoicePaymentSucceeded = async (invoice, stripe) => {
             priceId: subscription.items?.data?.[0]?.price?.id,
         };
 
-        const accountsWithSameEmail = await IPFSModule.get({ key: "accountEmail", value: customer.email });
-
-        if (!accountsWithSameEmail.length) throw new Error("404:account_not_found");
-
-        const licensesWithSameEmail = await IPFSModule.get({ key: "licenseOwner", value: customer.email });
+        const licensesWithSameEmail = await IPFSModule.get({
+            key: "licenseOwner",
+            value: customer.email,
+            throwOnError: true,
+        });
 
         await saveSubscriptionRecord(licensesWithSameEmail[0], paymentData);
 

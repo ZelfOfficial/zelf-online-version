@@ -9,6 +9,31 @@ const stripe = new Stripe(configuration.stripe.secretKey, {
 });
 
 /**
+ * Turn a "this is not a Zelf event" handler result into the Stripe acknowledgement.
+ * Processing failures are thrown and must not be passed here: Stripe should retry those.
+ * @param {object|null|undefined} result
+ * @returns {{ received: true, ignored: true, reason: string }|null}
+ */
+const ignoredAcknowledgement = (result) => {
+    if (!result || typeof result !== "object" || Array.isArray(result)) return null;
+
+    if (result.ignored === true) {
+        return { received: true, ignored: true, reason: String(result.reason || "not_zelf") };
+    }
+
+    // Listed in the router but not implemented, or a type no Zelf handler accepts.
+    if (result.status === "unhandled" || result.not_implemented === true || result.unhandledEvent) {
+        return { received: true, ignored: true, reason: "unhandled_event_type" };
+    }
+
+    if (result.reason === "unhandled_zelf_id_lease_event") {
+        return { received: true, ignored: true, reason: "unhandled_event_type" };
+    }
+
+    return null;
+};
+
+/**
  * Handle Stripe webhook events
  */
 const handleWebhook = async (ctx) => {
@@ -18,6 +43,16 @@ const handleWebhook = async (ctx) => {
 
         // Route webhook to appropriate handler based on source
         const result = await WebhookRouter.routeWebhook(event);
+        const ignored = ignoredAcknowledgement(result);
+
+        if (ignored) {
+            console.warn(`[stripe webhook] ignored ${event?.type || "unknown"} ${event?.id || "unknown"} ${ignored.reason}`);
+
+            ctx.status = 200;
+            ctx.body = ignored;
+
+            return;
+        }
 
         ctx.status = 200;
         ctx.body = { received: true, processed: result };
@@ -625,4 +660,5 @@ const getCommonStyles = () => {
 module.exports = {
     handleWebhook,
     handleStripeResult,
+    ignoredAcknowledgement,
 };
