@@ -41,7 +41,7 @@ const {
 const ETH_MAINNET_CHAIN_ID = 1;
 
 const instance = getCleanInstance(1000);
-const agent = new https.Agent({ rejectUnauthorized: false });
+const agent = new https.Agent({ rejectUnauthorized: true });
 
 /** Etherscan API V2 (V1 /api deprecated as of Aug 2025) */
 const ETHERSCAN_V2_API = process.env.ETHERSCAN_V2_API || "https://api.etherscan.io/v2/api";

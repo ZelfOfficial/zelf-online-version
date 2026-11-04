@@ -3,7 +3,7 @@ const axios = require("axios");
 const https = require("https");
 const formatterClass = require("../../class/data-formatterClass");
 const agent = new https.Agent({
-    rejectUnauthorized: false,
+    rejectUnauthorized: true,
 });
 const config = require("../../../Core/config");
 const { getTickerPrice } = require("../../binance/modules/binance.module");

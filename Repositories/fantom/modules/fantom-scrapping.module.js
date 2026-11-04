@@ -16,10 +16,9 @@ const instance = axios.create({
 	},
 });
 
-// Create https agent that ignores invalid SSL certificates
 const https = require("https");
 const agent = new https.Agent({
-	rejectUnauthorized: false,
+	rejectUnauthorized: true,
 });
 
 // Sonic API endpoints (migrated from Fantom)

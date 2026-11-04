@@ -6,10 +6,9 @@ const cheerio = require("cheerio");
 // Crear instancia axios con timeout
 const instance = axios.create({ timeout: 30000 });
 
-// Crear instancia https que ignora certificados SSL inv?lidos
 const https = require("https");
 
-const agent = new https.Agent({ rejectUnauthorized: false });
+const agent = new https.Agent({ rejectUnauthorized: true });
 
 /**
  * Obtiene el balance de una direcci?n en Avalanche

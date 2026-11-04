@@ -13,7 +13,10 @@
 const mongoose = require("mongoose");
 
 const config = require("../../../Core/config");
+const { warnIfTlsVerificationDisabled } = require("../../../Core/tls-verification");
 const { TxWatcher } = require("./tx-watcher");
+
+warnIfTlsVerificationDisabled();
 
 const args = new Set(process.argv.slice(2));
 const once = args.has("--once");

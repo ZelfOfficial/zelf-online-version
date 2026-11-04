@@ -5,7 +5,7 @@ const API_BALANCE_URL = "https://api.bdagscan.com/v1/api/transaction/getAddressI
 const API_TRANSACTIONS_URL = "https://api.bdagscan.com/v1/api/transaction/getTransactionByAddress";
 
 const agent = new https.Agent({
-    rejectUnauthorized: false,
+    rejectUnauthorized: true,
 });
 
 const instance = axios.create({
