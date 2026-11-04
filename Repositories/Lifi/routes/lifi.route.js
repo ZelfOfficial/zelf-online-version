@@ -17,6 +17,7 @@ module.exports = (server) => {
 	server.get(`${PATH}/tools`, SessionMiddleware.validateJWT, Middleware.getToolsValidation, Controller.getTools);
 
 	// Counts as one swap after LI.FI returns the transaction. GET /quote is a price lookup and is not counted.
+	// POST the quote response `data` object unchanged. It is the LI.FI step.
 	server.post(
 		`${PATH}/execute-advanced-step-transaction`,
 		SessionMiddleware.validateJWT,
