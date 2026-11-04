@@ -5,7 +5,6 @@
  */
 const mongoose = require("mongoose");
 
-const { planForLimits } = require("./zelf-id-plan.module");
 const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
 const { limitsForPlan, planError, resolveEntitlement, upgradePlans } = require("../../ZelfKeys/modules/zelf-key-plan-limits.module");
 const Activation = require("../models/zelf-id-chain-activation.model");
@@ -112,55 +111,55 @@ const nonEvmLimitReached = ({ plan, chain, chains }) =>
         extraSlots: 0,
     });
 
-/**
- * Non-EVM chains present on `after` and absent on `before`.
- * @param {Object} before
- * @param {Object} after
- * @returns {string[]}
- */
-const listNewNonEvmChains = (before, after) =>
-    NON_EVM_CHAINS.filter((spec) => !hasAddress(before, spec) && hasAddress(after, spec)).map((spec) => spec.chain);
-
-const ownerZelfName = (publicData) => {
-    const domain = publicData?.domain || "zelf";
-    const raw = publicData?.zelfName || publicData?.tagName || "";
-    return normalizeZelfName(raw, domain).zelfName;
+const SYNC_NETWORK_TO_CHAIN = {
+    bitcoin: "bitcoin",
+    sui: "sui",
+    stellar: "stellar",
+    kusama: "kusama",
+    polkadot: "polkadot",
+    ton: "ton",
+    aptos: "aptos",
 };
 
-const planFromRecord = async ({ publicData, domainConfig, authUser }) => {
-    if (authUser?.tagName) {
+/**
+ * Remember non-EVM chains a wallet just published from its own seed.
+ * Sync and offline lease always save those addresses. A later explicit
+ * activation sees the chain as already on the name.
+ * A missing store does not fail the sync.
+ * @param {Object} params
+ * @param {Object} params.publicData
+ * @param {string[]} params.networks
+ * @returns {Promise<{ recorded: string[] }>}
+ */
+const recordSyncedNonEvmChains = async ({ publicData, networks }) => {
+    const chains = [...new Set((networks || []).map((network) => SYNC_NETWORK_TO_CHAIN[network]).filter(Boolean))];
+    if (!chains.length) return { recorded: [] };
+
+    if (mongoose.connection.readyState !== 1) {
+        if (process.env.NODE_ENV !== "test") {
+            console.error("Chain activation store is unavailable; synced addresses were saved");
+        }
+        return { recorded: [] };
+    }
+
+    const normalized = normalizeZelfName(publicData?.zelfName || publicData?.tagName, publicData?.domain || "zelf");
+    if (!normalized.zelfName) return { recorded: [] };
+
+    const identity = {
+        zelfName: normalized.zelfName,
+        domain: normalized.domain,
+        tagName: normalized.tagName,
+    };
+    const recorded = [];
+    for (const chain of chains) {
         try {
-            const entitlement = await resolveEntitlement(authUser, {
-                tagPublicData: publicData,
-                domainConfig,
-                skipTagLookup: true,
-            });
-            if (entitlement?.plan) return entitlement.plan;
-        } catch (_error) {
-            // The name's own plan still applies when the session has no Zelf identity.
+            await recordActivation({ identity, chain });
+            recorded.push(chain);
+        } catch (error) {
+            console.error("Synced chain was not recorded:", chain, error?.message || error);
         }
     }
-    return planForLimits(publicData, domainConfig);
-};
-
-/**
- * Refuse a sync that would publish a non-EVM address the name does not already have
- * when the plan cannot activate new non-EVM chains. Updating an address that is
- * already on the name is allowed.
- */
-const assertCanIntroduceNonEvmChains = async ({ before, after, domainConfig, authUser }) => {
-    const introduced = listNewNonEvmChains(before, after);
-    if (!introduced.length) return { introduced };
-
-    const plan = await planFromRecord({ publicData: before, domainConfig, authUser });
-    const limits = limitsForPlan(plan, domainConfig);
-    if (limits.nonEvmChains) return { introduced, plan };
-
-    const activated = await loadActivatedChains(ownerZelfName(before));
-    const blocked = introduced.filter((chain) => !activated.has(chain));
-    if (!blocked.length) return { introduced, plan };
-
-    throw nonEvmLimitReached({ plan, chain: blocked[0], chains: blocked });
+    return { recorded };
 };
 
 const presentChain = (spec, { publicData, activated, limits }) => {
@@ -278,11 +277,10 @@ module.exports = {
     EVM_CHAINS,
     NON_EVM_CHAINS,
     activateChain,
-    assertCanIntroduceNonEvmChains,
     chainStatus,
     ensureIndexes,
     hasAddress,
-    listNewNonEvmChains,
     lookupChain,
+    recordSyncedNonEvmChains,
     requireChain,
 };

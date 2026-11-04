@@ -254,37 +254,19 @@ describe("non-EVM chain activation", () => {
         });
     });
 
-    test("sync of a new non-EVM address follows the same grant", async () => {
-        const before = { tagName: "alice.zelf", domain: "zelf", type: "mainnet", plan: "free", ethAddress: "0xabc" };
-        await expect(
-            Chains.assertCanIntroduceNonEvmChains({
-                before,
-                after: { ...before, suiAddress: "0xsui" },
-                domainConfig: null,
-                authUser: {},
-            }),
-        ).rejects.toMatchObject({
+    test("chains published by address sync count as already activated on Free", async () => {
+        const publicData = { tagName: "alice.zelf", domain: "zelf", type: "mainnet", plan: "free", origin: "offline" };
+        const recorded = await Chains.recordSyncedNonEvmChains({ publicData, networks: ["sui", "stellar", "ton"] });
+        expect(recorded.recorded.sort()).toEqual(["stellar", "sui", "ton"]);
+
+        const sui = await Chains.activateChain(alice, "sui", chainOptions());
+        expect(sui).toMatchObject({ chain: "sui", activated: true, alreadyActive: true, plan: "free" });
+        const ton = await Chains.activateChain(alice, "ton", chainOptions());
+        expect(ton.alreadyActive).toBe(true);
+
+        await expect(Chains.activateChain(alice, "aptos", chainOptions())).rejects.toMatchObject({
             clientCode: "ERR_PLAN_LIMIT_REACHED",
-            details: { kind: "nonEvmChain", chain: "sui" },
+            details: { kind: "nonEvmChain", chain: "aptos", plan: "free" },
         });
-
-        await expect(
-            Chains.assertCanIntroduceNonEvmChains({
-                before: { ...before, suiAddress: "0xold" },
-                after: { ...before, suiAddress: "0xnew" },
-                domainConfig: null,
-                authUser: {},
-            }),
-        ).resolves.toMatchObject({ introduced: [] });
-
-        await Chains.activateChain(alice, "sui", chainOptions({ plan: "premium" }));
-        await expect(
-            Chains.assertCanIntroduceNonEvmChains({
-                before,
-                after: { ...before, suiAddress: "0xsui" },
-                domainConfig: null,
-                authUser: {},
-            }),
-        ).resolves.toMatchObject({ introduced: ["sui"] });
     });
 });

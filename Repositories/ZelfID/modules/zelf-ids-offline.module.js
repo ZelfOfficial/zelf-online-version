@@ -172,7 +172,6 @@ const leaseOffline = async (params, authUser) => {
             syncPublicData,
             zelfProofQRCode,
             domain,
-            authUser,
         });
 
         return {
