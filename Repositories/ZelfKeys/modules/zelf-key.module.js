@@ -578,6 +578,13 @@ const storeData = async (data, authToken) => {
         };
     } catch (error) {
         console.error("Error in storeData:", error);
+
+        try {
+            remapZelfKeyCaughtError(error);
+        } catch (mapped) {
+            throw mapped;
+        }
+
         throw error;
     }
 };
@@ -1282,12 +1289,129 @@ const _assertKeyRecordBelongsToCaller = async (id, authToken) => {
     return item;
 };
 
+const _isPasswordMismatchOrRequiredError = (error) => {
+    const code = typeof error?.code === "string" ? error.code : "";
+    const message = typeof error?.message === "string" ? error.message.toLowerCase() : "";
+
+    if (code === "ERR_INVALID_PASSWORD" || code === "ERR_PASSWORD_REQUIRED") {
+        return true;
+    }
+
+    return (
+        message.includes("err_invalid_password") ||
+        message.includes("err_password_required") ||
+        (message.includes("password") && (message.includes("invalid") || message.includes("required")))
+    );
+};
+
+const _verifyKeyItemOwnership = async (item, data, authToken) => {
+    const { zelfProof } = await _extractZelfProofFromItem(item);
+    const storedProtection = await resolveRetrieveProtection({
+        ...data,
+        zelfProof,
+        publicData: item?.publicData || data?.publicData,
+        protection: item?.publicData?.protection || data?.protection,
+        v: item?.publicData?.v ?? data?.v,
+    });
+
+    const rawKeyPassword = resolveKeyPasswordInput(data);
+    if (protectionRequiresKeyPassword(storedProtection) && isBlankKeyPassword(rawKeyPassword)) {
+        throwZelfKeyClientError("ERR_MISSING_PASSWORD");
+    }
+
+    const decryptedParams = await decryptKeyCredentials(
+        {
+            ...data,
+            password: rawKeyPassword,
+        },
+        authToken,
+    );
+
+    if (protectionRequiresKeyPassword(storedProtection) && isBlankKeyPassword(decryptedParams.password)) {
+        throwZelfKeyClientError("ERR_MISSING_PASSWORD");
+    }
+
+    const keyPassword = protectionRequiresKeyPassword(storedProtection) ? decryptedParams.password : undefined;
+    const version = resolveEncryptVersion({
+        v: item?.publicData?.v ?? data?.v,
+        zelfEncryptVersion: item?.publicData?.zelfEncryptVersion ?? data?.zelfEncryptVersion,
+        encryptVersion: item?.publicData?.encryptVersion ?? data?.encryptVersion,
+        ...(item?.publicData && typeof item.publicData === "object" ? item.publicData : {}),
+    });
+
+    const decryptedKey = await ZelfProofModule.decrypt({
+        zelfProof,
+        faceBase64: decryptedParams.face,
+        password: keyPassword,
+        os: "DESKTOP",
+        ...(version === 4 ? { stack: "v4" } : {}),
+    });
+
+    if (decryptedKey?.error) {
+        remapZelfKeyCaughtError(decryptedKey.error);
+    }
+
+    return decryptedKey;
+};
+
+const _tryVerifyOwnershipViaOwnedKey = async (faceBase64, zelfIdPassword, authToken, extraParams = {}) => {
+    if (extraParams?.skipKeyFallback) return null;
+
+    let ownedItems;
+    try {
+        ownedItems = await _listOwnedKeyItems(authToken);
+    } catch (_error) {
+        return null;
+    }
+
+    if (!Array.isArray(ownedItems) || !ownedItems.length) return null;
+
+    const hasKeyPassword = !isBlankKeyPassword(zelfIdPassword);
+    const targetProtection = hasKeyPassword ? PROTECTION_FACE_PASSWORD : PROTECTION_FACE;
+    const candidate = ownedItems.find(
+        (item) =>
+            Boolean(item?.url || item?.zelfProof || item?.publicData?.zelfProof) &&
+            resolveProtection(item?.publicData?.protection) === targetProtection,
+    );
+
+    if (!candidate) return null;
+
+    return _verifyKeyItemOwnership(
+        candidate,
+        {
+            ...extraParams,
+            faceBase64,
+            masterPassword: zelfIdPassword,
+            password: zelfIdPassword,
+        },
+        authToken,
+    );
+};
+
 const deleteZelfKey = async (data, authToken) => {
     try {
         const { id, faceBase64 } = data;
 
-        await _assertKeyRecordBelongsToCaller(id, authToken);
-        await _validateOwnership(faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
+        const item = await _assertKeyRecordBelongsToCaller(id, authToken);
+        const itemHasProof = Boolean(item?.url || item?.zelfProof || item?.publicData?.zelfProof);
+        const itemIsFacePassword = resolveProtection(item?.publicData?.protection) === PROTECTION_FACE_PASSWORD;
+
+        if (itemHasProof && itemIsFacePassword && !data.zelfIdPassword) {
+            await _verifyKeyItemOwnership(item, data, authToken);
+        } else {
+            try {
+                await _validateOwnership(faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, {
+                    ...data,
+                    skipKeyFallback: true,
+                });
+            } catch (ownershipError) {
+                if (itemHasProof && !data.zelfIdPassword && _isPasswordMismatchOrRequiredError(ownershipError)) {
+                    await _verifyKeyItemOwnership(item, data, authToken);
+                } else {
+                    throw ownershipError;
+                }
+            }
+        }
 
         const result = await IPFS.deleteFiles([id]);
 
@@ -1307,7 +1431,7 @@ const deleteZelfKey = async (data, authToken) => {
     }
 };
 
-const _validateOwnership = async (faceBase64, zelfIdPassword, authToken, extraParams) => {
+const _validateOwnership = async (faceBase64, zelfIdPassword, authToken, extraParams = {}) => {
     const owner = ownerParts(authToken);
     const sessionParams = {
         domain: owner.domain,
@@ -1317,8 +1441,17 @@ const _validateOwnership = async (faceBase64, zelfIdPassword, authToken, extraPa
         removePGP: extraParams.removePGP || false,
     };
 
-    // this will throw an error if the tag is not found or the password is incorrect or the face is incorrect
-    return TagsModule.decryptTag(sessionParams, authToken);
+    try {
+        // this will throw an error if the tag is not found or the password is incorrect or the face is incorrect
+        return await TagsModule.decryptTag(sessionParams, authToken);
+    } catch (error) {
+        if (!extraParams?.zelfIdPassword && _isPasswordMismatchOrRequiredError(error)) {
+            const verifiedViaKey = await _tryVerifyOwnershipViaOwnedKey(faceBase64, zelfIdPassword, authToken, extraParams);
+            if (verifiedViaKey) return verifiedViaKey;
+        }
+
+        remapZelfKeyCaughtError(error);
+    }
 };
 
 /**
@@ -1442,15 +1575,29 @@ const _listOwnedKeyItems = async (authToken) => {
 };
 
 const _extractZelfProofFromItem = async (item) => {
-    if (!item?.url) throw new Error("404:ZelfKey not found");
+    const directProof =
+        (typeof item?.zelfProof === "string" && item.zelfProof.trim()) ||
+        (typeof item?.publicData?.zelfProof === "string" && item.publicData.zelfProof.trim()) ||
+        "";
+
+    if (!item?.url) {
+        if (directProof) return { zelfProof: directProof, zelfProofQRCode: item?.zelfProofQRCode || null };
+        throw new Error("404:ZelfKey not found");
+    }
 
     const zelfProofQRCode = await TagsPartsModule.urlToBase64(item.url);
 
-    if (!zelfProofQRCode) throw new Error("400:Failed to read ZelfKey QR");
+    if (!zelfProofQRCode) {
+        if (directProof) return { zelfProof: directProof, zelfProofQRCode: item?.zelfProofQRCode || null };
+        throw new Error("400:Failed to read ZelfKey QR");
+    }
 
     const zelfProof = await QRZelfProofExtractor.extractZelfProofFromQR(zelfProofQRCode);
 
-    if (!zelfProof) throw new Error("400:Failed to extract ZelfProof");
+    if (!zelfProof) {
+        if (directProof) return { zelfProof: directProof, zelfProofQRCode };
+        throw new Error("400:Failed to extract ZelfProof");
+    }
 
     return { zelfProof, zelfProofQRCode };
 };
@@ -1465,6 +1612,10 @@ const _prepareKeyReencrypt = async (item, faceBase64, oldPassword, newPassword) 
         zelfProof,
         stack: "v4",
     });
+
+    if (decrypted?.error) {
+        remapZelfKeyCaughtError(decrypted.error);
+    }
 
     const publicData = stampV4PublicData({
         ...(decrypted.publicData || item.publicData || {}),
@@ -1538,12 +1689,21 @@ const changeMasterPassword = async (data, authToken) => {
         throw new Error("409:new_master_password_must_differ");
     }
 
-    await _validateOwnership(faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
-
     const ownedItems = await _listOwnedKeyItems(authToken);
     const targets = ownedItems.filter(
         (item) => resolveProtection(item.publicData?.protection) === PROTECTION_FACE_PASSWORD,
     );
+
+    try {
+        await _validateOwnership(faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, {
+            ...data,
+            skipKeyFallback: targets.length > 0,
+        });
+    } catch (ownershipError) {
+        if (!targets.length || data.zelfIdPassword || !_isPasswordMismatchOrRequiredError(ownershipError)) {
+            throw ownershipError;
+        }
+    }
 
     if (!targets.length) {
         return {
@@ -1568,6 +1728,15 @@ const changeMasterPassword = async (data, authToken) => {
             prepared.push({ item, payload });
         } catch (error) {
             console.error("changeMasterPassword prepare failed", { id: item.id, error });
+
+            try {
+                remapZelfKeyCaughtError(error);
+            } catch (mapped) {
+                if (typeof mapped?.message === "string" && /^\d{3}:ERR_/.test(mapped.message)) {
+                    throw mapped;
+                }
+            }
+
             throw new Error("409:failed_to_prepare_master_password_change");
         }
     }

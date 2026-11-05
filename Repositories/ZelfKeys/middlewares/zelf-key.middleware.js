@@ -107,6 +107,7 @@ const schemas = {
 		notes: string().optional().allow(""),
 		faceBase64: string().required(),
 		masterPassword: string().optional().allow(""),
+		zelfIdPassword: string().optional().allow(""),
 		protection: protectionField,
 		id: string().optional().allow(""),
 		cid: string().optional().allow(""),
@@ -115,6 +116,7 @@ const schemas = {
 	bulkPasswords: {
 		faceBase64: string().required(),
 		masterPassword: string().optional().allow(""),
+		zelfIdPassword: string().optional().allow(""),
 		removePGP: boolean().optional(),
 		protection: protectionField,
 		// Rows are validated one by one in the module, so a bad row comes back in
@@ -132,6 +134,7 @@ const schemas = {
 		insideFolder: boolean().optional().allow(false),
 		faceBase64: string().required(),
 		masterPassword: string().optional().allow(""),
+		zelfIdPassword: string().optional().allow(""),
 		protection: protectionField,
 		id: string().optional().allow(""),
 		cid: string().optional().allow(""),
@@ -144,6 +147,7 @@ const schemas = {
 		folder: string().optional().allow(""),
 		insideFolder: boolean().optional().allow(false),
 		masterPassword: string().optional().allow(""),
+		zelfIdPassword: string().optional().allow(""),
 		protection: protectionField,
 	},
 	creditCard: {
@@ -160,6 +164,7 @@ const schemas = {
 		folder: string().optional().allow(""),
 		insideFolder: boolean().optional().allow(false),
 		masterPassword: string().optional().allow(""),
+		zelfIdPassword: string().optional().allow(""),
 		protection: protectionField,
 	},
 	changeMasterPassword: {
@@ -167,6 +172,7 @@ const schemas = {
 		oldMasterPassword: string().required(),
 		newMasterPassword: string().required(),
 		password: string().optional().allow(""),
+		zelfIdPassword: string().optional().allow(""),
 		removePGP: boolean().optional(),
 	},
 	retrieve: {
@@ -234,12 +240,14 @@ const schemas = {
 		faceBase64: string().required(),
 		password: string().optional().allow(""),
 		masterPassword: string().optional().allow(""),
+		zelfIdPassword: string().optional().allow(""),
 	},
 	delete: {
 		id: string().required(),
 		faceBase64: string().required(),
 		password: string().optional().allow(""),
 		masterPassword: string().optional().allow(""),
+		zelfIdPassword: string().optional().allow(""),
 	},
 };
 
@@ -710,6 +718,7 @@ const deleteZelfKeyValidation = async (ctx, next) => {
 		faceBase64: ctx.request.body.faceBase64 || "",
 		password: ctx.request.body.password || "",
 		masterPassword: ctx.request.body.masterPassword || "",
+		zelfIdPassword: ctx.request.body.zelfIdPassword || "",
 	});
 
 	if (valid.error) {

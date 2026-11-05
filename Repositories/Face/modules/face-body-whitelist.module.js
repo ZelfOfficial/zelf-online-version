@@ -25,6 +25,7 @@ const COMMON = [
     "securePassword",
     "os",
     "masterPassword",
+    "zelfIdPassword",
     "captchaToken",
 ];
 
@@ -109,8 +110,30 @@ const ALLOWED_BY_ACTION = {
     "change-master-password": withCommon("oldMasterPassword", "newMasterPassword"),
     "daily-reward": withCommon("tagName", "domain"),
     "payment-confirmation": withCommon("tagName", "domain", "network", "token"),
-    "wallet-decrypt": withCommon(),
-    "wallet-export": withCommon("zelfProof", "identifier", "addServerPassword", "zelfName", "domain", "skipQRCode"),
+    "wallet-decrypt": withCommon(
+        "zelfProof",
+        "identifier",
+        "addServerPassword",
+        "zelfName",
+        "domain",
+        "skipQRCode",
+        "publicData",
+        "v",
+        "encryptVersion",
+        "stack"
+    ),
+    "wallet-export": withCommon(
+        "zelfProof",
+        "identifier",
+        "addServerPassword",
+        "zelfName",
+        "domain",
+        "skipQRCode",
+        "publicData",
+        "v",
+        "encryptVersion",
+        "stack"
+    ),
     "wallet-create": withCommon(),
     "wallet-import": withCommon("mnemonic"),
     "wallet-preview": withCommon("zelfProof", "tagName", "domain"),

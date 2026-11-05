@@ -8,6 +8,8 @@ const { createBTCWallet } = require("./btc");
 const sessionModule = require("../../Session/modules/session.module");
 const OfflineProofModule = require("../../../Core/offline-proof");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
+const { decryptWithPasswordFallback } = require("../../ZelfID/modules/zelf-id-password.module");
+const { _formattingError, ZELFPROOF_CLIENT_ERROR_STATUS } = require("../../ZelfProof/modules/zelf-proof.module");
 const moment = require("moment");
 const populates = [];
 
@@ -197,7 +199,7 @@ const insert = async (params, authUser = {}) => {
  * @param {Object} params
  */
 const decryptWallet = async (params, authUser) => {
-	const { face, password } = await _decryptParams(params, authUser);
+	const { face, password: rawPassword } = await _decryptParams(params, authUser);
 
 	let zelfProof = params.zelfProof;
 
@@ -213,20 +215,33 @@ const decryptWallet = async (params, authUser) => {
 		throw error;
 	}
 
-	const decryptedWallet = await decrypt({
-		zelfProof,
-		faceBase64: face,
-		password,
-		addServerPassword: Boolean(params.addServerPassword),
-		publicData: params.publicData,
-		v: params.v,
-		encryptVersion: params.encryptVersion,
-		stack: params.stack,
-	});
+	const { result: decryptedWallet, password } = await decryptWithPasswordFallback(
+		decrypt,
+		{
+			zelfProof,
+			faceBase64: face,
+			addServerPassword: Boolean(params.addServerPassword),
+			publicData: params.publicData,
+			v: params.v,
+			encryptVersion: params.encryptVersion,
+			stack: params.stack,
+		},
+		{
+			password: rawPassword,
+			hasPassword: params.hasPassword ?? params.publicData?.hasPassword,
+		}
+	);
 
-	if (decryptedWallet.error) {
-		const error = new Error(decryptedWallet.error.code);
-		error.status = 409;
+	if (decryptedWallet?.error) {
+		const raw = decryptedWallet.error;
+		const formatted = _formattingError({
+			code: raw.code || raw.message,
+			message: raw.message || raw.code || "decrypt_failed",
+			status: ZELFPROOF_CLIENT_ERROR_STATUS[raw.code],
+		});
+		const error = new Error(formatted.code || formatted.message);
+		error.code = formatted.code || raw.code;
+		error.status = formatted.status || 409;
 		throw error;
 	}
 

@@ -36,6 +36,8 @@ jest.mock("../../Repositories/ZelfProof/modules/zelf-proof.module", () => ({
 }));
 
 const TagsModule = require("../../Repositories/Tags/modules/tags.module");
+const TagsPartsModule = require("../../Repositories/Tags/modules/tags-parts.module");
+const ZelfProofModule = require("../../Repositories/ZelfProof/modules/zelf-proof.module");
 const IPFS = require("../../Core/ipfs");
 
 const { errorHandler } = require("../../Core/http-handler");
@@ -44,6 +46,7 @@ const {
     resolveZelfIdPasswordForOwnership,
     remapZelfKeyCaughtError,
     deleteZelfKey,
+    storeData,
     listDataForDashboard,
     _ownsZelfKey,
 } = require("../../Repositories/ZelfKeys/modules/zelf-key.module");
@@ -196,6 +199,160 @@ describe("deleteZelfKey ownership (_validateOwnership / decryptTag)", () => {
             "422:ERR_VERIFICATION_FAILED",
         );
         expect(IPFS.deleteFiles).not.toHaveBeenCalled();
+    });
+
+    it("deletes a face_password key by verifying its own ZelfProof when the key masterPassword differs from the Zelf ID password", async () => {
+        IPFS.getFileById.mockResolvedValueOnce({
+            id: "pin-face-password",
+            zelfProof: "key-own-proof",
+            publicData: {
+                keyOwner: "leaseuser.zelf",
+                category: "leaseuser.zelf_password",
+                protection: "face_password",
+                v: "4",
+            },
+        });
+        ZelfProofModule.preview.mockResolvedValueOnce({
+            publicData: { protection: "face_password", v: "4" },
+            passwordLayer: "WithPassword",
+        });
+        TagsPartsModule.decryptParams.mockResolvedValueOnce({
+            face: "decrypted-face",
+            password: "rotated-key-master-password",
+        });
+        ZelfProofModule.decrypt.mockResolvedValueOnce({
+            metadata: { password: "site-secret" },
+            publicData: { protection: "face_password", v: "4" },
+        });
+
+        const result = await deleteZelfKey(
+            {
+                id: "pin-face-password",
+                faceBase64: "face-data",
+                masterPassword: "rotated-key-master-password",
+            },
+            authToken,
+        );
+
+        expect(TagsModule.decryptTag).not.toHaveBeenCalled();
+        expect(ZelfProofModule.decrypt).toHaveBeenCalledWith(
+            expect.objectContaining({
+                zelfProof: "key-own-proof",
+                faceBase64: "decrypted-face",
+                password: "rotated-key-master-password",
+                stack: "v4",
+            }),
+        );
+        expect(IPFS.deleteFiles).toHaveBeenCalledWith(["pin-face-password"]);
+        expect(result.success).toBe(true);
+    });
+
+    it("deletes a face-only key on a password-protected Zelf ID by falling back to the key's own ZelfProof", async () => {
+        IPFS.getFileById.mockResolvedValueOnce({
+            id: "pin-face-only",
+            zelfProof: "face-only-key-proof",
+            publicData: {
+                keyOwner: "leaseuser.zelf",
+                category: "leaseuser.zelf_zotp",
+                protection: "face",
+                v: "4",
+            },
+        });
+        const passwordReqErr = new Error("ERR_PASSWORD_REQUIRED");
+        passwordReqErr.code = "ERR_PASSWORD_REQUIRED";
+        passwordReqErr.status = 409;
+        TagsModule.decryptTag.mockRejectedValueOnce(passwordReqErr);
+
+        ZelfProofModule.preview.mockResolvedValueOnce({
+            publicData: { protection: "face", v: "4" },
+            passwordLayer: "WithoutPassword",
+        });
+        TagsPartsModule.decryptParams.mockResolvedValueOnce({
+            face: "decrypted-face",
+            password: undefined,
+        });
+        ZelfProofModule.decrypt.mockResolvedValueOnce({
+            metadata: { setupKey: "JBSWY3DPEHPK3PXP" },
+            publicData: { protection: "face", v: "4" },
+        });
+
+        const result = await deleteZelfKey({ id: "pin-face-only", faceBase64: "face-data" }, authToken);
+
+        expect(ZelfProofModule.decrypt).toHaveBeenCalledWith(
+            expect.objectContaining({
+                zelfProof: "face-only-key-proof",
+                faceBase64: "decrypted-face",
+                password: undefined,
+            }),
+        );
+        expect(IPFS.deleteFiles).toHaveBeenCalledWith(["pin-face-only"]);
+        expect(result.success).toBe(true);
+    });
+
+    it("rejects delete of a face_password key when the key password is wrong (401:ERR_INVALID_PASSWORD)", async () => {
+        IPFS.getFileById.mockResolvedValueOnce({
+            id: "pin-face-password",
+            zelfProof: "key-own-proof",
+            publicData: {
+                keyOwner: "leaseuser.zelf",
+                category: "leaseuser.zelf_password",
+                protection: "face_password",
+                v: "4",
+            },
+        });
+        ZelfProofModule.preview.mockResolvedValueOnce({
+            publicData: { protection: "face_password", v: "4" },
+            passwordLayer: "WithPassword",
+        });
+        TagsPartsModule.decryptParams.mockResolvedValueOnce({
+            face: "decrypted-face",
+            password: "wrong-key-password",
+        });
+        const badPassErr = new Error("ERR_INVALID_PASSWORD");
+        badPassErr.code = "ERR_INVALID_PASSWORD";
+        badPassErr.status = 401;
+        ZelfProofModule.decrypt.mockRejectedValueOnce(badPassErr);
+
+        await expect(
+            deleteZelfKey(
+                {
+                    id: "pin-face-password",
+                    faceBase64: "face-data",
+                    masterPassword: "wrong-key-password",
+                },
+                authToken,
+            ),
+        ).rejects.toThrow("401:ERR_INVALID_PASSWORD");
+        expect(IPFS.deleteFiles).not.toHaveBeenCalled();
+    });
+
+    it("preserves 401:ERR_INVALID_PASSWORD in storeData when ownership check fails", async () => {
+        TagsPartsModule.decryptParams.mockResolvedValueOnce({
+            face: "decrypted-face",
+            password: "wrong-password",
+        });
+        TagsPartsModule.decryptNotesParams.mockResolvedValueOnce({
+            keyValuePairs: { note: "secret" },
+        });
+        const invalidPassErr = new Error("ERR_INVALID_PASSWORD");
+        invalidPassErr.code = "ERR_INVALID_PASSWORD";
+        invalidPassErr.status = 401;
+        TagsModule.decryptTag.mockRejectedValueOnce(invalidPassErr);
+        IPFS.filter.mockResolvedValue([]);
+
+        await expect(
+            storeData(
+                {
+                    type: "notes",
+                    title: "My Note",
+                    keyValuePairs: { note: "secret" },
+                    faceBase64: "face-data",
+                    masterPassword: "wrong-password",
+                    protection: "face_password",
+                },
+                authToken,
+            ),
+        ).rejects.toThrow("401:ERR_INVALID_PASSWORD");
     });
 
     it("rejects listDataForDashboard when a non-privileged token has no tagName or mismatches the target", async () => {

@@ -1,11 +1,26 @@
 const ZelfIdModule = require("./zelf-id.module");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
-const { decrypt } = require("../../ZelfProof/modules/zelf-proof.module");
+const { decrypt, _formattingError, ZELFPROOF_CLIENT_ERROR_STATUS } = require("../../ZelfProof/modules/zelf-proof.module");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
-const { effectivePassword, resolveSecurityType } = require("./zelf-id-password.module");
+const { decryptWithPasswordFallback, resolveSecurityType } = require("./zelf-id-password.module");
 const { parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 
 const withV4 = (data) => ({ ...data, stack: "v4" });
+
+const throwMappedRecoveryDecryptError = (errPayload) => {
+    const raw = typeof errPayload === "string" ? { code: errPayload, message: errPayload } : errPayload || {};
+    const formatted = _formattingError({
+        code: raw.code || raw.message,
+        message: raw.message || raw.code || "decrypt_failed",
+        status: ZELFPROOF_CLIENT_ERROR_STATUS[raw.code],
+    });
+    const error = new Error(formatted.code || formatted.message || "decrypt_failed");
+
+    error.status = formatted.status || 500;
+    error.code = formatted.code || "InternalServerError";
+
+    throw error;
+};
 
 /**
  * Re-lease from an existing proof (import onto a name). Always v4.
@@ -34,18 +49,21 @@ const leaseRecovery = async (payload, authUser) => {
 
     const { face, password: rawPassword } = await ZelfIdPartsModule.decryptParams(payload, authUser);
 
-    // Face-only: no password (placeholder accepted for older clients).
-    const password = effectivePassword({ password: rawPassword });
-
-    const decryptedZelfProof = await decrypt(
-        withV4({
+    // Face-only: no password (placeholder accepted for older clients); retries with real password if proof requires one.
+    const { result: decryptedZelfProof, password } = await decryptWithPasswordFallback(
+        (args) => decrypt(withV4(args)),
+        {
             addServerPassword: Boolean(addServerPassword),
             faceBase64: face,
-            password,
             zelfProof,
             os: os || "DESKTOP",
-        })
+        },
+        { password: rawPassword, hasPassword: payload.hasPassword ?? payload.publicData?.hasPassword }
     );
+
+    if (decryptedZelfProof?.error) {
+        throwMappedRecoveryDecryptError(decryptedZelfProof.error);
+    }
 
     const referralTagObject = await ZelfIdModule._validateReferral(referralTagName, authUser, domainConfig);
 

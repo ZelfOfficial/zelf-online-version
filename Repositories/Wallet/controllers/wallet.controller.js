@@ -82,7 +82,10 @@ const decryptWallet = async (ctx) => {
 
 		await SessionModule.deleteSession(ctx.state.user);
 
-		ctx.body = { error: error.message };
+		ctx.body = {
+			error: error.message,
+			...(error.code ? { code: error.code } : {}),
+		};
 	}
 };
 
@@ -101,7 +104,10 @@ const exportWallet = async (ctx) => {
 
 		await SessionModule.deleteSession(ctx.state.user);
 
-		ctx.body = { error: error.message };
+		ctx.body = {
+			error: error.message,
+			...(error.code ? { code: error.code } : {}),
+		};
 	}
 };
 

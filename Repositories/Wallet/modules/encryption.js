@@ -118,7 +118,12 @@ const decrypt = async (data) => {
     try {
         return await callWithStackFallback(data, (attempt) => ZelfProofModule.decrypt(attempt));
     } catch (exception) {
-        const code = exception.code;
+        const formatted = ZelfProofModule._formattingError({
+            code: exception.code,
+            message: exception.message,
+            status: exception.status || ZelfProofModule.ZELFPROOF_CLIENT_ERROR_STATUS?.[exception.code],
+        });
+        const code = formatted.code || exception.code;
         let error = new Error(code || exception.message);
 
         error.code = code;
@@ -138,8 +143,8 @@ const decrypt = async (data) => {
 
                 break;
             default:
-                error.status = exception.status || 500;
-                error.message = exception.message;
+                error.status = formatted.status || exception.status || 500;
+                error.message = code || exception.message;
 
                 break;
         }

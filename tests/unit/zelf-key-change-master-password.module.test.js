@@ -184,4 +184,50 @@ describe("ZelfKeys changeMasterPassword", () => {
             ),
         ).rejects.toThrow(/new_master_password_must_differ/);
     });
+
+    it("succeeds on a second rotation when oldMasterPassword differs from the Zelf ID password", async () => {
+        const invalidZelfIdPass = new Error("ERR_INVALID_PASSWORD");
+        invalidZelfIdPass.code = "ERR_INVALID_PASSWORD";
+        invalidZelfIdPass.status = 401;
+        TagsModule.decryptTag.mockRejectedValueOnce(invalidZelfIdPass);
+
+        const result = await ZelfKeyModule.changeMasterPassword(
+            {
+                faceBase64: "face",
+                oldMasterPassword: "old-secret",
+                newMasterPassword: "new-secret",
+                removePGP: true,
+            },
+            authToken,
+        );
+
+        expect(ZelfProofModule.decrypt).toHaveBeenCalledWith(
+            expect.objectContaining({
+                password: "old-secret",
+                zelfProof: "existing-proof",
+            }),
+        );
+        expect(result.updatedCount).toBe(1);
+    });
+
+    it("propagates 401:ERR_INVALID_PASSWORD when oldMasterPassword fails to decrypt face_password keys", async () => {
+        const wrongKeyPass = new Error("ERR_INVALID_PASSWORD");
+        wrongKeyPass.code = "ERR_INVALID_PASSWORD";
+        wrongKeyPass.status = 401;
+        ZelfProofModule.decrypt.mockRejectedValueOnce(wrongKeyPass);
+
+        await expect(
+            ZelfKeyModule.changeMasterPassword(
+                {
+                    faceBase64: "face",
+                    oldMasterPassword: "old-secret",
+                    newMasterPassword: "new-secret",
+                    removePGP: true,
+                },
+                authToken,
+            ),
+        ).rejects.toThrow("401:ERR_INVALID_PASSWORD");
+
+        expect(IPFS.pinFile).not.toHaveBeenCalled();
+    });
 });
