@@ -5,6 +5,7 @@ const { extractDomainAndName, validateDomainAndName } = require("./tags.middlewa
 const jwt = require("jsonwebtoken");
 const config = require("../../../Core/config");
 const TagsPaymentModule = require("../modules/tags-payment.module");
+const { rejectDeprecatedRequest } = require("../../../Core/deprecated-networks");
 
 const TAG_PAY_REDUCED_FEE_HEADER = "x-zelf-tag-pay-reduced-fee";
 
@@ -22,13 +23,13 @@ const schemas = {
     paymentConfirmation: {
         tagName: string().required(),
         domain: string(),
-        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE", "BDAG"]).required(),
+        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE"]).required(),
         token: string().required(),
     },
     smartContractPaymentConfirmation: {
         tagName: string().required(),
         domain: string(),
-        network: stringEnum(["AVAX_SC", "BSC_SC", "ETH_SC", "POLYGON_SC", "BASE_SC", "BLOCKDAG_SC"]).required(),
+        network: stringEnum(["AVAX_SC", "BSC_SC", "ETH_SC", "POLYGON_SC", "BASE_SC"]).required(),
         token: string().required(),
         txHash: string().required(),
     },
@@ -40,7 +41,7 @@ const schemas = {
     receiptEmail: {
         tagName: string().required(),
         domain: string(),
-        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE", "BDAG"]).required(),
+        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE"]).required(),
         email: string().email().required(),
         token: string().required(),
     },
@@ -104,6 +105,8 @@ const transferValidation = async (ctx, next) => {
  * @param {*} next - Next middleware
  */
 const paymentOptionsValidation = async (ctx, next) => {
+    if (rejectDeprecatedRequest(ctx, ctx.request.query || {})) return;
+
     const valid = validate(schemas.paymentOptions, ctx.request.query);
 
     if (valid.error) {
@@ -154,6 +157,8 @@ const paymentOptionsReducedFeeGate = async (ctx, next) => {
  * @param {*} next - Next middleware
  */
 const paymentConfirmationValidation = async (ctx, next) => {
+    if (rejectDeprecatedRequest(ctx, ctx.request.body || {})) return;
+
     const valid = validate(schemas.paymentConfirmation, ctx.request.body);
 
     if (valid.error) {
@@ -210,6 +215,8 @@ const paymentConfirmationValidation = async (ctx, next) => {
 };
 
 const smartContractPaymentConfirmationValidation = async (ctx, next) => {
+    if (rejectDeprecatedRequest(ctx, ctx.request.body || {})) return;
+
     const valid = validate(schemas.smartContractPaymentConfirmation, ctx.request.body);
 
     if (valid.error) {
@@ -490,6 +497,8 @@ const smartContractPaymentConfirmationValidation = async (ctx, next) => {
 };
 
 const receiptEmailValidation = async (ctx, next) => {
+    if (rejectDeprecatedRequest(ctx, ctx.request.body || {})) return;
+
     const { network, token } = ctx.request.body;
 
     const valid = validate(schemas.receiptEmail, ctx.request.body);
@@ -556,6 +565,8 @@ const claimReferralValidation = async (ctx, next) => {
  * @param {*} next - Next middleware
  */
 const extendLicenseForOwnerValidation = async (ctx, next) => {
+    if (rejectDeprecatedRequest(ctx, ctx.request.body || {})) return;
+
     // If duration comes as a number, convert it to string to avoid Joi validation errors
     if (typeof ctx.request.body?.duration === "number") {
         ctx.request.body.duration = String(ctx.request.body.duration);

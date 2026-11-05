@@ -508,6 +508,9 @@ const previewZelfIdQr = async (params, authUser) => {
  */
 const leaseConfirmation = async (params) => {
     const { tagName, domain, coin, network } = params;
+    const { assertDomainAcceptsNewUse, assertPaymentNetworkAccepted } = require("../../../Core/deprecated-networks");
+    assertDomainAcceptsNewUse(domain);
+    assertPaymentNetworkAccepted(network);
     const domainConfig = getDomainConfig(domain);
 
     const confirmation = await confirmPayUniqueAddress({

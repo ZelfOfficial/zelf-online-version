@@ -6,6 +6,7 @@ const jwt = require("jsonwebtoken");
 const { keccak256, solidityPacked, parseUnits, getAddress } = require("ethers");
 const config = require("../../../Core/config");
 const { codedError, identifiedError } = require("../../../Core/http-handler");
+const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { buildSearchablePinPages, fitExtraParamsForPin, resolveEncryptVersion, stampExtraParamsVersion } = require("../../Tags/modules/tags-addresses.module");
 const { formatLeaseDate, parseLeaseDate } = require("../../Tags/modules/lease-date.util");
@@ -113,7 +114,6 @@ const avaxExpectedWeiFromUsd = (usdPrice, avaxUsdPerTokenStr) => expectedWeiFrom
 const bnbExpectedWeiFromUsd = (usdPrice, bnbUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, bnbUsdPerTokenStr, "BNB_USD_PRICE_ZERO");
 const ethExpectedWeiFromUsd = (usdPrice, ethUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, ethUsdPerTokenStr, "ETH_USD_PRICE_ZERO");
 const polExpectedWeiFromUsd = (usdPrice, polUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, polUsdPerTokenStr, "POL_USD_PRICE_ZERO");
-const bdagExpectedWeiFromUsd = (usdPrice, bdagUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, bdagUsdPerTokenStr, "BDAG_USD_PRICE_ZERO");
 
 const POL_NATIVE_DISPLAY_DECIMALS = 7;
 const POL_WEI_PER_TOKEN = 10n ** 18n;
@@ -634,6 +634,7 @@ const resolveCheckoutReferral = async ({ tagName, domain, domainConfig, publicDa
 };
 
 const getPaymentOptions = async (tagName, domain, duration, authUser, requestOptions = {}) => {
+    assertDomainAcceptsNewUse(domain);
     const ZelfIdModule = require("./zelf-id.module");
     const domainConfig = getDomainConfig(domain);
     const tagData = await ZelfIdModule.searchTag({ tagName, domain, domainConfig }, authUser);
@@ -844,9 +845,7 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         prices.BASE = await calculateCryptoValue("ETH", billableUsdPrice);
     }
 
-    if (networks?.blockdag?.enabled && networks?.blockdag?.nativeCurrency?.enabled && networks?.blockdag?.nativeCurrency?.code === "BDAG") {
-        prices.BDAG = await calculateCryptoValue("BDAG", billableUsdPrice);
-    }
+    // BDAG checkout is closed. prices.BDAG stays null and ZelfBlockDagPay is not attached.
 
     if (
         oldCurrencies?.includes("TON") ||
@@ -1053,21 +1052,6 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         stableHumanDigits: 6,
         usdcPriceKey: "BASE_USDC",
         usdtPriceKey: "BASE_USDT",
-        billableUsdPrice,
-        devAmountFraction,
-        deleteEthAddress: true,
-    });
-
-    attachEvmPayQuote({
-        returnData,
-        prices,
-        nativePrice: prices.BDAG,
-        configBlock: config.blockdag,
-        versionPrefix: "ZELF_BLOCKDAG_PAY_v1",
-        expectedWeiFn: bdagExpectedWeiFromUsd,
-        weiError: "EXPECTED_WEI_BDAG_NON_POSITIVE",
-        contractKey: "smartContractBDAG",
-        chainId: config.blockdag.chainId,
         billableUsdPrice,
         devAmountFraction,
         deleteEthAddress: true,

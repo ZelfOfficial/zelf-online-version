@@ -238,6 +238,7 @@ describe("non-EVM chain activation", () => {
         expect(byName.solana).toMatchObject({ nonEvm: true, active: true, allowed: true, addressPresent: true });
         expect(byName.sui).toMatchObject({ nonEvm: true, active: false, allowed: false, addressPresent: false });
         expect(byName.ethereum).toMatchObject({ family: "evm", nonEvm: false, allowed: true, active: true });
+        expect(byName.blockdag).toMatchObject({ family: "evm", deprecated: true, allowed: false, active: true, addressPresent: true });
     });
 
     test("Premium can activate Sui once and a second call is the same grant", async () => {

@@ -6,6 +6,7 @@ const config = require("../../../Core/config");
 const TagsMiddleware = require("../../Tags/middlewares/tags.middleware");
 const TagsMyMiddleware = require("../../Tags/middlewares/my-tags.middleware");
 const ZelfIdsPaymentModule = require("../modules/zelf-ids-payment.module");
+const { rejectDeprecatedRequest } = require("../../../Core/deprecated-networks");
 
 const TAG_PAY_REDUCED_FEE_HEADER = "x-zelf-tag-pay-reduced-fee";
 
@@ -85,6 +86,7 @@ const leaseOfflineValidation = async (ctx, next) => {
     }
 
     const { domain: extractedDomain, name } = TagsMiddleware.extractDomainAndName(tagName, domain);
+    if (!sync && rejectDeprecatedRequest(ctx, { domain: extractedDomain, tagName })) return;
     const domainValidation = await TagsMiddleware.validateDomainAndName(extractedDomain, name);
 
     if (!domainValidation.valid) {
@@ -103,7 +105,7 @@ const paymentSchemas = {
     paymentConfirmation: {
         tagName: string().required(),
         domain: string(),
-        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE", "BDAG", "FREE"]),
+        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE", "FREE"]),
         token: string().required(),
     },
     paymentOptions: {
@@ -216,6 +218,8 @@ const licensePlanDurationError = (tagName, domain, plan, duration) => {
 };
 
 const paymentOptionsValidation = async (ctx, next) => {
+    if (rejectDeprecatedRequest(ctx, ctx.request.query || {})) return;
+
     const duration = `${ctx.request.query.duration ?? ""}`.trim();
     if (duration === "999") {
         ctx.request.query = { ...ctx.request.query, duration: "lifetime" };
@@ -259,6 +263,8 @@ const paymentOptionsReducedFeeGate = async (ctx, next) => {
 };
 
 const stripeCheckoutValidation = async (ctx, next) => {
+    if (rejectDeprecatedRequest(ctx, ctx.request.body || {})) return;
+
     const duration = `${ctx.request.body?.duration ?? ""}`.trim();
     if (duration === "999") {
         ctx.request.body = { ...ctx.request.body, duration: "lifetime" };
@@ -314,6 +320,8 @@ const stripeSessionValidation = async (ctx, next) => {
 };
 
 const paymentConfirmationValidation = async (ctx, next) => {
+    if (rejectDeprecatedRequest(ctx, ctx.request.body || {})) return;
+
     const valid = validate(paymentSchemas.paymentConfirmation, ctx.request.body);
 
     if (valid.error) {
@@ -352,7 +360,7 @@ const paymentConfirmationValidation = async (ctx, next) => {
 
     // Crypto confirms can arrive after the quote TTL when the transfer itself was sent in time.
     // Free quotes have no chain timestamp, so an expired one stops here.
-    const cryptoConfirm = ["ETH", "SOL", "BTC", "AVAX", "BDAG", "BNB", "POL", "BASE"].includes(String(network || "").toUpperCase());
+    const cryptoConfirm = ["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE"].includes(String(network || "").toUpperCase());
     if (tokenDecoded.ttl < moment().unix() && !cryptoConfirm) {
         ctx.status = 409;
         ctx.body = { validationError: "TOKEN_EXPIRED" };

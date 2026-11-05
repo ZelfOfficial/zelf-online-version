@@ -255,6 +255,11 @@ const errorHandler = (exception, ctx = null, optionalMessage) => {
 			message = optionalMessage || "Record conflicts with existing records in place.";
 			code = resolveErrorCode("Conflict", optionalMessage);
 			break;
+		case "410":
+			status = 410;
+			message = optionalMessage || "Gone";
+			code = resolveErrorCode("Gone", optionalMessage);
+			break;
 		case "429":
 			status = 429;
 			message = optionalMessage || "Too many requests. Please try again later.";

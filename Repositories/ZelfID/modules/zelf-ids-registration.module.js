@@ -6,6 +6,7 @@ const TagsArweaveModule = require("../../Tags/modules/tags-arweave.module");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { cleanExtraParamsForPinata, resolveEncryptVersion, stampExtraParamsVersion } = require("../../Tags/modules/tags-addresses.module");
 const { freeTermYearsForName, getBareName, getReservationPinName, getReservationExpiresAt } = require("./zelf-id-plan.module");
+const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
 const { formatLeaseDate } = require("../../Tags/modules/lease-date.util");
 
 const attachReferral = (metadata, referralTagObject, storageKey) => {
@@ -32,7 +33,8 @@ const attachReferral = (metadata, referralTagObject, storageKey) => {
  */
 const confirmZelfId = async (tagObject, referralTagObject, domainConfig, securityType, authUser, options = {}) => {
     const storageKey = domainConfig.getTagKey() || "tagName";
-    const domain = tagObject.domain || "zelf";
+    const domain = tagObject.domain || domainConfig?.name || "zelf";
+    assertDomainAcceptsNewUse(domain);
     const tagName = `${getBareName(tagObject[storageKey] || tagObject.tagName || tagObject.zelfName)}.${domain}`;
 
     const plan = options.plan || "free";

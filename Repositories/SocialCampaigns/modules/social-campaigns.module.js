@@ -7,6 +7,11 @@ const TagsSearchModule = require("../../Tags/modules/tags-search.module");
 const domain = "mg.zelf.world";
 const MyTagsModule = require("../../Tags/modules/my-tags.module");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
+const { deprecatedUseError } = require("../../../Core/deprecated-networks");
+
+const assertCampaignOpen = () => {
+	throw deprecatedUseError({ campaign: "blockdag" });
+};
 
 /**
  * Generate a 6-digit OTP code
@@ -99,6 +104,7 @@ const sendOTPEmail = async (email, otp, language = "en") => {
  * @returns {Promise<Object>} Response with success status
  */
 const provideEmail = async (email, tagName, domain, authUser) => {
+	assertCampaignOpen();
 	// Check if there's an existing record for this email, tagName, and domain
 	const existingSocialRecord = await Model.findOne({
 		email,
@@ -264,6 +270,7 @@ const validateOTP = async (email, otp, tagName, domain, authUser) => {
  * @returns {Promise<Object>} Response with validation result
  */
 const validateX = async (email, tagName, domain, screenshot, xUsername, authUser) => {
+	assertCampaignOpen();
 	const socialAccountsConfig = require("../config/social-accounts.config");
 
 	const GeminiAI = require("./gemini-ai.module");
@@ -363,6 +370,7 @@ const validateX = async (email, tagName, domain, screenshot, xUsername, authUser
  * @returns {Promise<Object>} Response with validation result
  */
 const validateLinkedIn = async (email, tagName, domain, screenshot, linkedInUsername, authUser) => {
+	assertCampaignOpen();
 	const socialAccountsConfig = require("../config/social-accounts.config");
 
 	const GeminiAI = require("./gemini-ai.module");
@@ -488,6 +496,7 @@ const getRecord = async (tagName, domain, authUser) => {
  * @returns {Promise<Object>} Reward
  */
 const getReward = async (tagName, domain, authUser) => {
+	assertCampaignOpen();
 	const socialRecord = await Model.findOne({
 		tagName,
 		domain,

@@ -2,8 +2,9 @@
  * Networks the app may register for received-transfer push (Zelf #566).
  *
  * Keys are the exact lowercase keys of the registration contract. `watched`
- * networks have a watcher adapter; `polkadot` and `kusama` are accepted and
- * validated but not watched yet (phase 2).
+ * networks have a watcher adapter. `polkadot` and `kusama` are accepted and
+ * validated but not watched yet. `blockdag` stays in the registration contract
+ * so older apps can still submit the address, and the watcher does not poll it.
  */
 
 const EVM_NETWORKS = Object.freeze(["ethereum", "polygon", "bsc", "avalanche", "blockdag"]);
@@ -13,7 +14,7 @@ const NETWORKS = Object.freeze({
     polygon: { displayName: "Polygon", family: "evm", nativeSymbol: "POL", nativeDecimals: 18, watched: true },
     bsc: { displayName: "BNB Smart Chain", family: "evm", nativeSymbol: "BNB", nativeDecimals: 18, watched: true },
     avalanche: { displayName: "Avalanche", family: "evm", nativeSymbol: "AVAX", nativeDecimals: 18, watched: true },
-    blockdag: { displayName: "BlockDAG", family: "evm", nativeSymbol: "BDAG", nativeDecimals: 18, watched: true },
+    blockdag: { displayName: "BlockDAG", family: "evm", nativeSymbol: "BDAG", nativeDecimals: 18, watched: false },
     solana: { displayName: "Solana", family: "solana", nativeSymbol: "SOL", nativeDecimals: 9, watched: true },
     bitcoin: { displayName: "Bitcoin", family: "bitcoin", nativeSymbol: "BTC", nativeDecimals: 8, watched: true },
     ton: { displayName: "TON", family: "ton", nativeSymbol: "TON", nativeDecimals: 9, watched: true },

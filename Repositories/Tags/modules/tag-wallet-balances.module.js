@@ -42,6 +42,9 @@ const parseWeiToEthString = (wei) => {
 
 const SKIPPED = Object.freeze({ __balanceSkipped: true });
 
+/** Cap BDAG so a dead node cannot hold the combined balance response. */
+const BDAG_BALANCE_TIMEOUT_MS = 2500;
+
 const rejectAfterMs = (ms, label) =>
     new Promise((_, rej) => {
         setTimeout(() => {
@@ -92,6 +95,12 @@ const getTagWalletBalances = async (params, options = {}) => {
         typeof options.networkTimeoutMs === "number" && options.networkTimeoutMs > 0
             ? options.networkTimeoutMs
             : 0;
+    const bdagTimeoutMs =
+        typeof options.bdagTimeoutMs === "number" && options.bdagTimeoutMs > 0
+            ? options.bdagTimeoutMs
+            : networkTimeoutMs > 0
+              ? Math.min(networkTimeoutMs, BDAG_BALANCE_TIMEOUT_MS)
+              : BDAG_BALANCE_TIMEOUT_MS;
 
     const settled = await Promise.allSettled([
         evm
@@ -117,7 +126,7 @@ const getTagWalletBalances = async (params, options = {}) => {
         evm
             ? skip.has("bdag")
                 ? Promise.resolve(SKIPPED)
-                : withOptionalTimeout(blockdagModule.fetchBdagBalance(evm), networkTimeoutMs, "bdag")
+                : withOptionalTimeout(blockdagModule.fetchBdagBalance(evm), bdagTimeoutMs, "bdag")
             : Promise.resolve(null),
         ton
             ? skip.has("ton")

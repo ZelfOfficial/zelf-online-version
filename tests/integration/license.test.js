@@ -407,7 +407,7 @@ describe("License API Integration Tests - Real Server", () => {
 					customRules: ["no-numbers-at-start"],
 					payment: {
 						methods: ["crypto", "stripe"],
-						currencies: ["BTC", "ETH", "SOL", "USDT", "BDAG"],
+						currencies: ["BTC", "ETH", "SOL", "USDT"],
 						discounts: {
 							yearly: 0.15, // Changed from 0.1
 							lifetime: 0.25, // Changed from 0.2
@@ -506,7 +506,8 @@ describe("License API Integration Tests - Real Server", () => {
 			expect(response.body.data.tags.payment).toHaveProperty("methods");
 			expect(response.body.data.tags.payment.methods).toContain("crypto");
 			expect(response.body.data.tags.payment.methods).toContain("stripe");
-			expect(response.body.data.tags.payment.currencies).toContain("BDAG");
+			expect(response.body.data.tags.payment.currencies).toContain("USDT");
+			expect(response.body.data.tags.payment.currencies).not.toContain("BDAG");
 			expect(response.body.data.tags.payment.pricingTable[1][1]).toBe(200);
 
 			expect(response.body.data).toHaveProperty("metadata");

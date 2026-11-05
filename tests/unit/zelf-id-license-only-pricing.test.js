@@ -148,7 +148,7 @@ describe("domains without plan prices are not offered", () => {
             bdag: live(),
             avax: new Domain({ name: "avax", status: "active", tags: { payment: { planPricing: {}, pricingTable: { "6-15": { 1: 0.05 } } } } }),
         });
-        expect(Object.keys(offered).sort()).toEqual(["bdag", "zelf"]);
+        expect(Object.keys(offered).sort()).toEqual(["zelf"]);
     });
 });
 

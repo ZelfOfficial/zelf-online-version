@@ -15,6 +15,7 @@ const moment = require("moment");
 const { codedError } = require("../../../Core/http-handler");
 const { formatLeaseDate, parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 const { domainOffersPlanPricing } = require("../../Tags/modules/domain.class");
+const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
 
 /** Unpaid short-name hold window. Override via `ZELF_ID_RESERVATION_AMOUNT` / `ZELF_ID_RESERVATION_UNIT` (e.g. `5` + `hour` to revert). */
 const ZELF_ID_RESERVATION_DURATION = {
@@ -435,6 +436,8 @@ const licensePlansForName = (domainConfig, tagName) => {
  */
 const applyAvailableNameOffer = (result, { tagName, duration, domainConfig, plan } = {}) => {
     if (!result?.available || !domainConfig) return result;
+    // Occupied names never reach here. A free name on a closed domain is not an offer.
+    assertDomainAcceptsNewUse(domainConfig.name);
     if (!domainOffersPlanPricing(domainConfig)) throw codedError("409:DOMAIN_NOT_OFFERED");
 
     const length = getBareNameLength(tagName);
@@ -505,6 +508,7 @@ const applyAvailableNameOffer = (result, { tagName, duration, domainConfig, plan
  * @param {Object} [domainConfig]
  */
 const assertDomainOfferedForNewNames = (domainConfig) => {
+    assertDomainAcceptsNewUse(domainConfig?.name);
     if (!domainOffersPlanPricing(domainConfig)) throw codedError("409:DOMAIN_NOT_OFFERED");
 };
 

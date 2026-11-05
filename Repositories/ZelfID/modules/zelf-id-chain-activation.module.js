@@ -8,6 +8,7 @@ const mongoose = require("mongoose");
 const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
 const { limitsForPlan, planError, resolveEntitlement, upgradePlans } = require("../../ZelfKeys/modules/zelf-key-plan-limits.module");
 const Activation = require("../models/zelf-id-chain-activation.model");
+const { deprecatedUseError, isDeprecatedChain } = require("../../../Core/deprecated-networks");
 
 const EVM_CHAINS = [
     { chain: "ethereum", aliases: ["eth", "evm"] },
@@ -166,13 +167,15 @@ const presentChain = (spec, { publicData, activated, limits }) => {
     const addressPresent = hasAddress(publicData, spec);
     const recorded = activated.has(spec.chain);
     const active = addressPresent || recorded;
+    const deprecated = isDeprecatedChain(spec.chain);
     return {
         chain: spec.chain,
         family: spec.family,
         nonEvm: spec.nonEvm,
         addressPresent,
         active,
-        allowed: !spec.nonEvm || limits.nonEvmChains || active,
+        deprecated,
+        allowed: !deprecated && (!spec.nonEvm || limits.nonEvmChains || active),
     };
 };
 
@@ -223,6 +226,7 @@ const recordActivation = async ({ identity, chain, now }) => {
  */
 const activateChain = async (authUser, chain, options = {}) => {
     const spec = requireChain(chain);
+    if (isDeprecatedChain(spec.chain)) throw deprecatedUseError({ chain: spec.chain });
     const entitlement = await resolveEntitlement(authUser, options);
     const limits = limitsForPlan(entitlement.plan, entitlement.domainConfig);
     const addressPresent = hasAddress(entitlement.publicData, spec);
