@@ -497,8 +497,17 @@ const listAllValidation = async (ctx, next) => {
 	await next();
 };
 
+// Staff and lawyer tokens are signed by the server at login with their account type.
+const DASHBOARD_PRIVILEGED_ACCOUNTS = new Set(["staff", "staff_account", "lawyer", "lawyer_account"]);
+
+const isDashboardPrivileged = (authUser = {}) =>
+	DASHBOARD_PRIVILEGED_ACCOUNTS.has(authUser.accountType || authUser.publicData?.accountType || "");
+
 /**
- * Dashboard list validation - requires identifier (user.domain format)
+ * Dashboard list validation - requires identifier (user.domain format).
+ * Anyone who is not staff/lawyer needs a face-verified session for the requested identifier:
+ * the session tagName is client-supplied, so without this a session claiming another name
+ * (or a verified wallet querying another wallet's identifier) could read that wallet's metadata.
  */
 const listDashboardValidation = async (ctx, next) => {
 	const valid = validate(schemas.listDashboard, ctx.request.query);
@@ -506,6 +515,13 @@ const listDashboardValidation = async (ctx, next) => {
 	if (valid.error) {
 		ctx.status = 409;
 		ctx.body = { validationError: valid.error.message };
+		return;
+	}
+
+	if (
+		!isDashboardPrivileged(ctx.state.user) &&
+		!(await requireVerifiedWallet(ctx, { requestedIdentifier: ctx.request.query?.identifier }))
+	) {
 		return;
 	}
 
@@ -521,6 +537,13 @@ const listAllDashboardValidation = async (ctx, next) => {
 	if (valid.error) {
 		ctx.status = 409;
 		ctx.body = { validationError: valid.error.message };
+		return;
+	}
+
+	if (
+		!isDashboardPrivileged(ctx.state.user) &&
+		!(await requireVerifiedWallet(ctx, { requestedIdentifier: ctx.request.query?.identifier }))
+	) {
 		return;
 	}
 
@@ -585,10 +608,11 @@ const requireZelfIdentity = (ctx) => {
 };
 
 /**
- * The session must carry a current server stamp for the same normalized wallet as the token.
+ * The session must carry a current server stamp for the same normalized wallet as the token
+ * (and, when `options.requestedIdentifier` is provided, for the queried `user.domain`).
  * Used by /limits, /summary, and by reads that return item metadata (website, username, type).
  */
-const requireVerifiedWallet = async (ctx) => {
+const requireVerifiedWallet = async (ctx, options = {}) => {
 	const authUser = ctx.state.user;
 	if (!authUser?.session) {
 		ctx.status = 401;
@@ -621,6 +645,15 @@ const requireVerifiedWallet = async (ctx) => {
 		ctx.status = 403;
 		ctx.body = { message: "Session is not the owner of this wallet", code: "ERR_SESSION_OWNER_MISMATCH" };
 		return false;
+	}
+
+	if (options.requestedIdentifier) {
+		const requested = normalizeZelfName(options.requestedIdentifier, verified.domain);
+		if (!requested.zelfName || requested.zelfName !== verified.zelfName) {
+			ctx.status = 403;
+			ctx.body = { message: "Session is not the owner of this wallet", code: "ERR_SESSION_OWNER_MISMATCH" };
+			return false;
+		}
 	}
 
 	ctx.state.user = {

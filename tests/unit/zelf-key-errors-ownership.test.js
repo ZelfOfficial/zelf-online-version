@@ -44,6 +44,7 @@ const {
     resolveZelfIdPasswordForOwnership,
     remapZelfKeyCaughtError,
     deleteZelfKey,
+    listDataForDashboard,
     _ownsZelfKey,
 } = require("../../Repositories/ZelfKeys/modules/zelf-key.module");
 
@@ -195,5 +196,15 @@ describe("deleteZelfKey ownership (_validateOwnership / decryptTag)", () => {
             "422:ERR_VERIFICATION_FAILED",
         );
         expect(IPFS.deleteFiles).not.toHaveBeenCalled();
+    });
+
+    it("rejects listDataForDashboard when a non-privileged token has no tagName or mismatches the target", async () => {
+        await expect(
+            listDataForDashboard("alice.zelf", "password", { accountType: "client_account", email: "owner@example.com" }),
+        ).rejects.toThrow("403:Not authorized to query ZelfKeys for this identifier");
+
+        await expect(
+            listDataForDashboard("alice.zelf", "password", { tagName: "bob", domain: "zelf" }),
+        ).rejects.toThrow("403:Not authorized to query ZelfKeys for this identifier");
     });
 });
