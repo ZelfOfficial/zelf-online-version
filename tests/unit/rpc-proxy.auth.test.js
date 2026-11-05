@@ -142,4 +142,22 @@ describe("RPC proxy auth", () => {
         expect(ctx.body.error).toBe("forbidden_origin");
         config.extension.rpc.allowedRequestOrigins = [];
     });
+
+    it("allows authenticated GET requests without an Origin header when allowedRequestOrigins is configured (Chrome MV3 host_permissions GET)", async () => {
+        config.extension.rpc.allowedRequestOrigins = ["chrome-extension://extensionidexample"];
+        try {
+            const stellar = await request(app.callback())
+                .get("/api/protected/rpc/stellar/fee_stats")
+                .set("Authorization", `Bearer ${token}`);
+            expect(stellar.status).toBe(200);
+
+            const disallowedGet = await request(app.callback())
+                .get("/api/protected/rpc/stellar/fee_stats")
+                .set("Authorization", `Bearer ${token}`)
+                .set("Origin", "https://evil.example");
+            expect(disallowedGet.status).toBe(403);
+        } finally {
+            config.extension.rpc.allowedRequestOrigins = [];
+        }
+    });
 });
