@@ -43,7 +43,7 @@ const _normalizeAddress = (value, errorCode = "400:invalid_address") => {
 };
 
 const _getBlockDagProvider = () => {
-    const rpcUrl = config.blockdag?.rpcUrl || "https://rpc.bdagscan.com";
+    const rpcUrl = config.blockdag?.rpcUrl || "https://rpc.east.bdag-us.org";
     return new ethers.JsonRpcProvider(rpcUrl);
 };
 
@@ -427,7 +427,7 @@ const deleteItem = async (id, authdUser) => {
 
     if (hasMintedContext) {
         try {
-            const rpcUrl = config.blockdag?.rpcUrl || "https://rpc.bdagscan.com";
+            const rpcUrl = config.blockdag?.rpcUrl || "https://rpc.east.bdag-us.org";
             const provider = new ethers.JsonRpcProvider(rpcUrl);
             const contract = new ethers.Contract(collectionAddr, ERC721_ABI, provider);
             const chainOwner = await contract.ownerOf(BigInt(rawTokenId));

@@ -7,7 +7,7 @@ const config = require("../Core/config");
 const OWNABLE_ABI = ["function owner() view returns (address)"];
 const ERC721_ABI = ["function ownerOf(uint256 tokenId) view returns (address)"];
 
-const provider = new ethers.JsonRpcProvider(config.blockdag?.rpcUrl || "https://rpc.bdagscan.com");
+const provider = new ethers.JsonRpcProvider(config.blockdag?.rpcUrl || "https://rpc.east.bdag-us.org");
 const defaultCollectionAddress =
     config.blockdag?.defaultCollectionAddress && ethers.isAddress(config.blockdag.defaultCollectionAddress)
         ? ethers.getAddress(config.blockdag.defaultCollectionAddress)

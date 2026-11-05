@@ -793,9 +793,9 @@ const configuration = {
     blockdag: {
         defaultCollectionAddress: process.env.BLOCKDAG_DEFAULT_COLLECTION_ADDRESS || null,
         factoryAddress: process.env.BLOCKDAG_FACTORY_ADDRESS || "0x7c6a168455C94092f8d51aBC515B73f4Ed9813a6",
-        // Public RPC only — dapps-rpc.bdagscan.com is blocked/unreachable from prod and local.
-        mainRpcUrl: process.env.BLOCKDAG_MAIN_RPC_URL || process.env.BLOCKDAG_RPC_URL || "https://rpc.bdagscan.com",
-        rpcUrl: process.env.BLOCKDAG_RPC_URL || "https://rpc.bdagscan.com",
+        // rpc.bdagscan.com does not respond. Chain 1404 public RPC; env vars override.
+        mainRpcUrl: process.env.BLOCKDAG_MAIN_RPC_URL || process.env.BLOCKDAG_RPC_URL || "https://rpc.east.bdag-us.org",
+        rpcUrl: process.env.BLOCKDAG_RPC_URL || "https://rpc.east.bdag-us.org",
         chainId: Number(process.env.BLOCKDAG_CHAIN_ID) || 1404,
         tagPayContractAddress: (process.env.BLOCKDAG_TAG_PAY_CONTRACT_ADDRESS || "").trim(),
         tagPayConfirmations: Math.max(1, Number(process.env.BLOCKDAG_TAG_PAY_CONFIRMATIONS) || 1),

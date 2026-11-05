@@ -210,7 +210,7 @@ const CHAIN_SPECS = [
         kind: "evm",
         paid: () =>
             envUrl("EXTENSION_BLOCKDAG_RPC_URL", "RPC_PROXY_BLOCKDAG_URL", "BLOCKDAG_MAIN_RPC_URL", "BLOCKDAG_RPC_URL"),
-        publicUrl: "https://rpc.bdagscan.com",
+        publicUrl: "https://rpc.east.bdag-us.org",
         legacy: true,
         extension: true,
     },

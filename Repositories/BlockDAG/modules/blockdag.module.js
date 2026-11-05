@@ -78,9 +78,9 @@ const withDeadline = (promise, ms, label) => {
     return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
 };
 
-// BlockDAG JSON-RPC — public endpoint only (dapps-rpc.bdagscan.com is broken / blocked).
-// Optional BLOCKDAG_MAIN_RPC_URL may still override; if it differs from rpcUrl we try it once then fall back.
-const BLOCKDAG_PUBLIC_RPC = "https://rpc.bdagscan.com";
+// BlockDAG JSON-RPC. rpc.bdagscan.com does not respond. Chain 1404 is served by rpc.east.bdag-us.org.
+// BLOCKDAG_MAIN_RPC_URL / BLOCKDAG_RPC_URL override the config defaults; if mainRpcUrl differs from rpcUrl we try it once then fall back.
+const BLOCKDAG_PUBLIC_RPC = "https://rpc.east.bdag-us.org";
 const BLOCKDAG_MAIN_RPC = config.blockdag?.mainRpcUrl || BLOCKDAG_PUBLIC_RPC;
 const BLOCKDAG_RPC = config.blockdag?.rpcUrl || BLOCKDAG_PUBLIC_RPC;
 const NOWNODES_BLOCKDAG_RPC = "https://bdag.nownodes.io";
@@ -119,8 +119,8 @@ const apiForAddressTransactions = "https://api.bdagscan.com/v1/api/transaction/g
 // rpc.bdagscan.com and api.bdagscan.com stop answering from the API host (timeout / Cloudflare).
 // These public endpoints stay in sync with chain 1404 and expose Blockscout address history.
 const DEFAULT_BLOCKDAG_RPC_FALLBACKS = [
-    "https://rpc.west.bdag-us.org",
     "https://rpc.east.bdag-us.org",
+    "https://rpc.west.bdag-us.org",
     "https://rpc.brazil.bdag-us.org",
     "https://rpc.blockdag.solutions",
 ];
@@ -298,6 +298,7 @@ const getTransactionFromAPI = async (txnHash) => {
             async () => {
                 const response = await instance.get(`${apiForTransactionDetails}${txnHash}`, {
                     headers: explorerApiHeaders(),
+                    timeout: EXPLORER_STEP_TIMEOUT_MS,
                 });
 
                 if (response.data && response.data.status === 200 && response.data.data) {
@@ -305,7 +306,7 @@ const getTransactionFromAPI = async (txnHash) => {
                 }
                 return null;
             },
-            { label: "BlockDAG API tx detail", attempts: 2 }
+            { label: "BlockDAG API tx detail", attempts: 1 }
         );
     } catch (error) {
         console.error("BlockDAG API transaction detail fetch failed:", error.message);
@@ -1045,14 +1046,21 @@ const getTransactionStatus = async (params) => {
             };
         }
 
-        // Fallback to RPC
+        // Explorer is down or has no row. Resolve pending / confirmed / failed from JSON-RPC.
         console.log("Transaction not found in API, falling back to RPC...");
 
-        // Get transaction details via RPC
-        const data = await requestRPC("eth_getTransactionByHash", [id]);
+        const txResponse = await requestRPC("eth_getTransactionByHash", [id]);
 
-        // If transaction not found, it might be dropped or never existed
-        if (!data.result || data.result === null) {
+        if (txResponse?.error && txResponse.result == null) {
+            return {
+                error: "TRANSACTION_STATUS_UNAVAILABLE",
+                status: "error",
+                hash: id,
+            };
+        }
+
+        // A null result (and no RPC error) means the node does not know this hash.
+        if (txResponse?.result == null) {
             return {
                 error: "Transaction not found",
                 status: "dropped",
@@ -1060,13 +1068,12 @@ const getTransactionStatus = async (params) => {
             };
         }
 
-        const tx = response.data.result;
+        const tx = txResponse.result;
 
-        // Get transaction receipt for status
         let receipt = null;
         try {
-            const data = await requestRPC("eth_getTransactionReceipt", [id]);
-            receipt = data.result;
+            const receiptResponse = await requestRPC("eth_getTransactionReceipt", [id]);
+            receipt = receiptResponse?.result || null;
         } catch (receiptError) {
             console.log("Receipt fetch failed:", receiptError.message);
         }
