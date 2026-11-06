@@ -1,5 +1,6 @@
 const { getDomainConfig } = require("../config/supported-domains");
 const { assertDomainOfferedForNewNames } = require("../../ZelfID/modules/zelf-id-plan.module");
+const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
 const { assertTagAvailable } = require("./tag-availability");
 const { _findDuplicatedTag, _validateReferral, previewZelfProof, searchTag } = require("./tags.module");
 const TagsPartsModule = require("./tags-parts.module");
@@ -226,7 +227,10 @@ const leaseOfflineTag = async (params, authUser) => {
 
     const tagKey = domainConfig.getTagKey();
 
-    sync ? "do nothing" : await _findDuplicatedTag(tagName, domain, domainConfig);
+    if (!sync) {
+        await _findDuplicatedTag(tagName, domain, domainConfig);
+        assertDomainAcceptsNewUse(domain);
+    }
 
     const referralTagObject = await _validateReferral(referralTagName, authUser, domainConfig);
 

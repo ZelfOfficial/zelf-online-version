@@ -238,6 +238,36 @@ describe("non-EVM chain activation", () => {
         expect(byName.solana).toMatchObject({ nonEvm: true, active: true, allowed: true, addressPresent: true });
         expect(byName.sui).toMatchObject({ nonEvm: true, active: false, allowed: false, addressPresent: false });
         expect(byName.ethereum).toMatchObject({ family: "evm", nonEvm: false, allowed: true, active: true });
+        expect(byName.blockdag).toMatchObject({ family: "evm", deprecated: true, allowed: true, active: true, addressPresent: true });
+    });
+
+    test("a new BlockDAG activation is refused and an already active one stays", async () => {
+        const fresh = chainOptions({
+            tagPublicData: { plan: "free", type: "mainnet", zelfName: "alice.zelf", tagName: "alice" },
+        });
+        await expect(Chains.activateChain(alice, "blockdag", fresh)).rejects.toMatchObject({
+            clientCode: "BDAG_DEPRECATED",
+            status: 410,
+            details: { chain: "blockdag" },
+        });
+        await expect(Chains.activateChain(alice, "bdag", fresh)).rejects.toMatchObject({
+            details: { chain: "blockdag" },
+        });
+
+        const held = await Chains.activateChain(alice, "blockdag", chainOptions());
+        expect(held).toMatchObject({ chain: "blockdag", family: "evm", activated: true, alreadyActive: true, plan: "free" });
+
+        await Activation.create({
+            zelfName: "bob.zelf",
+            domain: "zelf",
+            tagName: "bob",
+            chain: "blockdag",
+            activatedAt: new Date("2026-01-01T00:00:00.000Z"),
+        });
+        const recorded = await Chains.activateChain({ tagName: "bob", domain: "zelf" }, "blockdag", chainOptions({
+            tagPublicData: { plan: "free", type: "mainnet", zelfName: "bob.zelf", tagName: "bob" },
+        }));
+        expect(recorded).toMatchObject({ chain: "blockdag", activated: true, alreadyActive: false });
     });
 
     test("Premium can activate Sui once and a second call is the same grant", async () => {

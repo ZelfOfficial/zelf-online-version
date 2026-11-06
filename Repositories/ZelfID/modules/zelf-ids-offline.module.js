@@ -8,6 +8,7 @@ const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const ZelfIdModule = require("./zelf-id.module");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
 const { getBareName, assertDomainOfferedForNewNames } = require("./zelf-id-plan.module");
+const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
 const { expandStoredExtraParams } = require("../../Tags/modules/tags-addresses.module");
 const {
     normalizeTagName,
@@ -183,6 +184,7 @@ const leaseOffline = async (params, authUser) => {
     }
 
     await ZelfIdModule._findDuplicatedTag(tagName, domain, domainConfig);
+    assertDomainAcceptsNewUse(domain);
 
     const referralTagObject = await ZelfIdModule._validateReferral(referralTagName, authUser, domainConfig);
     const decrypted = await ZelfIdPartsModule.decryptParams({ password: params.password, removePGP: params.removePGP }, authUser);

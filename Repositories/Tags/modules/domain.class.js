@@ -680,8 +680,10 @@ const domainOffersPlanPricing = (domainConfig) => {
  */
 const filterOfferedDomains = (domains) => {
     if (!domains || typeof domains !== "object") return domains;
+    const { isDeprecatedDomain } = require("../../../Core/deprecated-networks");
     const offered = {};
     for (const [name, config] of Object.entries(domains)) {
+        if (isDeprecatedDomain(name) || isDeprecatedDomain(config?.name)) continue;
         if (domainOffersPlanPricing(config)) offered[name] = config;
     }
     return offered;

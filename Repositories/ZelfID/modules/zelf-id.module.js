@@ -47,6 +47,7 @@ const {
     applyAvailableNameOffer,
     assertDomainOfferedForNewNames,
 } = require("./zelf-id-plan.module");
+const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
 
 /**
  * Force the shared ZelfProof client onto `/zelf-v4`.
@@ -120,6 +121,7 @@ const leaseTag = async (params, authUser) => {
     const tagKey = domainConfig.getTagKey() || "tagName";
 
     await _findDuplicatedTag(tagName, domain, domainConfig);
+    assertDomainAcceptsNewUse(domain);
 
     const referralTagObject = await _validateReferral(referralTagName, authUser, domainConfig);
 
