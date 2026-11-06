@@ -17,6 +17,7 @@ const bitcoinModule = require("../../bitcoin/modules/bitcoin-scrapping.module");
 const ETHModule = require("../../etherscan/modules/etherscan-scrapping.module");
 const solanaModule = require("../../Solana/modules/solana-scrapping.module");
 const AvalancheModule = require("../../Avalanche/modules/avalanche-scrapping.module");
+const BlockDAGModule = require("../../BlockDAG/modules/blockdag.module");
 const { sendCustomEmail } = require("../../../Core/mailgun");
 const { buildMetadata, ensureZelfProofQRCode, storeInIPFS, storeInWalrus, storeInArweave } = require("./tags-payment.module");
 const { parseLeaseDate } = require("./lease-date.util");
@@ -29,7 +30,6 @@ const RewardTransfer = require("./referral-reward-transfer");
 const IPFS = require("../../../Core/ipfs");
 const TagsArweaveModule = require("./tags-arweave.module");
 const LicenseModule = require("../../License/modules/license.module");
-const { assertDomainAcceptsNewUse, assertPaymentNetworkAccepted, deprecatedUseError } = require("../../../Core/deprecated-networks");
 
 /**
  * Renew my tag
@@ -39,8 +39,6 @@ const { assertDomainAcceptsNewUse, assertPaymentNetworkAccepted, deprecatedUseEr
  * @param {string} token
  */
 const verifyPaymentConfirmation = async (tagName, domain, network, token) => {
-    assertDomainAcceptsNewUse(domain);
-    assertPaymentNetworkAccepted(network);
     const tokenDecoded = jwt.verify(token, config.JWT_SECRET);
 
     const domainConfig = getDomainConfig(domain);
@@ -267,9 +265,56 @@ const isAvalanchePaymentConfirmed = async (address, amountToPay, initiatedAtUnix
     return false;
 };
 
-/** Native BDAG checkout is closed. The address balance route is unchanged. */
-const isBlockDAGPaymentConfirmed = async () => {
-    throw deprecatedUseError({ network: "BDAG" });
+/**
+ * Check if BlockDAG payment is confirmed
+ * @param {string} address
+ * @param {number} amountToPay
+ * @returns {Promise<Object>}
+ */
+const isBlockDAGPaymentConfirmed = async (address, amountToPay, initiatedAtUnix) => {
+    const amountNum = parseTagPayAmount(amountToPay);
+    if (amountNum == null) {
+        return {
+            confirmed: false,
+            amountReceived: 0,
+            amountToPay,
+            checkedFactor: "invalid_amount",
+        };
+    }
+    try {
+        const response = await BlockDAGModule.getAddress({ address });
+
+        if (response?.error) return false;
+
+        const numericBalance = Number(response?.balance ?? 0);
+
+        if (!Number.isNaN(numericBalance) && numericBalance <= amountNum) {
+            return {
+                confirmed: false,
+                amountReceived: 0,
+                amountToPay: amountNum,
+                transactions: response?.transactions,
+                balance: response?.balance,
+                checkedFactor: "balance",
+            };
+        }
+
+        const sessionTxs = filterSessionInboundTransactions(response?.transactions, initiatedAtUnix);
+        const amountReceived = sessionTxs.reduce((sum, tx) => sum + Number(tx.amount), 0);
+
+        return {
+            confirmed: amountReceived >= amountNum,
+            amountReceived,
+            amountToPay: amountNum,
+            transactions: response?.transactions,
+            balance: response?.balance,
+            checkedFactor: "transactions",
+        };
+    } catch (error) {
+        console.error(error);
+    }
+
+    return false;
 };
 
 /**
@@ -367,7 +412,6 @@ const updateOldTagObject = async (tagObject, domain = "zelf") => {
  */
 const addDurationToTag = async (params, tagObject) => {
     const { tagName, domain, duration, price } = params;
-    assertDomainAcceptsNewUse(domain || params.domainConfig?.name || tagObject?.publicData?.domain);
 
     const domainConfig = params.domainConfig || getDomainConfig(domain || "zelf");
 
@@ -1231,7 +1275,6 @@ const extendTagDurationFree = async (tagName, domain, durationYears) => {
  * @returns {Object} - Updated tag object
  */
 const extendLicenseForOwner = async (tagName, domain, duration, ownershipCredentials, authUser) => {
-    assertDomainAcceptsNewUse(domain);
     // 1. Verify that the user is the domain/license owner
     const { faceBase64, password } = ownershipCredentials;
 

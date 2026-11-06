@@ -4,7 +4,6 @@ const { decrypt, _formattingError, ZELFPROOF_CLIENT_ERROR_STATUS } = require("..
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { decryptWithPasswordFallback, resolveSecurityType } = require("./zelf-id-password.module");
 const { parseLeaseDate } = require("../../Tags/modules/lease-date.util");
-const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
 
 const withV4 = (data) => ({ ...data, stack: "v4" });
 
@@ -35,7 +34,6 @@ const throwMappedRecoveryDecryptError = (errPayload) => {
  */
 const leaseRecovery = async (payload, authUser) => {
     const { zelfProof, tagName, domain, type, os, addServerPassword, referralTagName } = payload;
-    assertDomainAcceptsNewUse(domain);
 
     const duration = payload.duration || 1;
 

@@ -28,6 +28,7 @@ const { resolveEncryptVersion } = require("./tags-addresses.module");
 const { generateHoldDomain } = require("./domain-registry.module");
 const { getDomainConfig } = require("../config/supported-domains");
 const { assertDomainOfferedForNewNames } = require("../../ZelfID/modules/zelf-id-plan.module");
+const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
 const TagsRegistrationModule = require("./tags-registration.module");
 const { extractZelfProofFromQR } = require("./qr-zelfproof-extractor.module");
 const SessionModule = require("../../Session/modules/session.module");
@@ -67,6 +68,7 @@ const leaseTag = async (params, authUser) => {
     const tagKey = domainConfig.getTagKey() || "tagName";
 
     await _findDuplicatedTag(tagName, domain, domainConfig);
+    assertDomainAcceptsNewUse(domain);
 
     const referralTagObject = await _validateReferral(referralTagName, authUser, domainConfig);
 
@@ -442,9 +444,6 @@ const previewZelfIdQr = async (params, authUser) => {
  */
 const leaseConfirmation = async (params, authUser) => {
     const { tagName, domain, coin, network } = params;
-    const { assertDomainAcceptsNewUse, assertPaymentNetworkAccepted } = require("../../../Core/deprecated-networks");
-    assertDomainAcceptsNewUse(domain);
-    assertPaymentNetworkAccepted(network);
     const domainConfig = getDomainConfig(domain);
 
     const confirmation = await confirmPayUniqueAddress({

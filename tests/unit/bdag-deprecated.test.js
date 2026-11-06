@@ -7,158 +7,133 @@ jest.mock("../../Repositories/Wallet/modules/sui", () => ({ generateSuiWalletFro
 jest.mock("../../Repositories/Wallet/modules/ton", () => ({ createTonWallet: jest.fn() }));
 jest.mock("../../Repositories/Wallet/modules/aptos", () => ({ createAptosWallet: jest.fn() }));
 jest.mock("../../Repositories/Wallet/modules/solana", () => ({ createSolanaWallet: jest.fn() }));
-
 const { errorHandler } = require("../../Core/http-handler");
-const {
-    CODE,
-    MESSAGE,
-    STATUS,
-    assertDomainAcceptsNewUse,
-    deprecatedUseError,
-    isDeprecatedChain,
-    isDeprecatedDomain,
-    isDeprecatedPaymentNetwork,
-    rejectDeprecatedRequest,
-} = require("../../Core/deprecated-networks");
-const { activateChain } = require("../../Repositories/ZelfID/modules/zelf-id-chain-activation.module");
+const { CODE, MESSAGE, STATUS, assertDomainAcceptsNewUse, deprecatedUseError } = require("../../Core/deprecated-networks");
+const { activateChain, chainStatus } = require("../../Repositories/ZelfID/modules/zelf-id-chain-activation.module");
 const { applyAvailableNameOffer, assertDomainOfferedForNewNames } = require("../../Repositories/ZelfID/modules/zelf-id-plan.module");
 const { Domain, filterOfferedDomains } = require("../../Repositories/Tags/modules/domain.class");
-const { WATCHED_NETWORKS, isSupportedNetwork, isWatchedNetwork } = require("../../Repositories/TxNotifications/modules/networks");
-const Social = require("../../Repositories/SocialCampaigns/modules/social-campaigns.module");
-const { verifySmartContractPayment } = require("../../Repositories/Tags/modules/tag-smart-contract-payment.module");
-const { paymentConfirmationValidation } = require("../../Repositories/Tags/middlewares/my-tags.middleware");
+const { WATCHED_NETWORKS, isWatchedNetwork } = require("../../Repositories/TxNotifications/modules/networks");
+const { paymentConfirmationValidation, smartContractPaymentConfirmationValidation } = require("../../Repositories/Tags/middlewares/my-tags.middleware");
+const { verifyPaymentConfirmation } = require("../../Repositories/Tags/modules/my-tags.module");
 
 const priced = (name) =>
     new Domain({
         name,
         status: "active",
-        tags: { payment: { planPricing: { premium: { "6-15": { 1: 12 } } } } },
+        tags: {
+            payment: { planPricing: { premium: { "6-15": { 1: 12 } } } },
+            storage: { keyPrefix: "tagName" },
+        },
     });
 
-describe("BDAG deprecation contract", () => {
-    test("410 BDAG_DEPRECATED with the holder message", () => {
-        const handled = errorHandler(deprecatedUseError({ chain: "blockdag" }));
-        expect(handled).toEqual({ status: STATUS, code: CODE, message: MESSAGE });
-        expect(CODE).toBe("BDAG_DEPRECATED");
-        expect(STATUS).toBe(410);
-    });
-
-    test("domain, chain, and payment aliases", () => {
-        expect(isDeprecatedDomain("bdag")).toBe(true);
-        expect(isDeprecatedDomain(".bdag")).toBe(true);
-        expect(isDeprecatedDomain("alice.bdag")).toBe(true);
-        expect(isDeprecatedDomain("alice.bdag.hold")).toBe(true);
-        expect(isDeprecatedDomain("zelf")).toBe(false);
-        expect(isDeprecatedChain("blockdag")).toBe(true);
-        expect(isDeprecatedChain("BDAG")).toBe(true);
-        expect(isDeprecatedChain("ethereum")).toBe(false);
-        expect(isDeprecatedPaymentNetwork("bdag")).toBe(true);
-        expect(isDeprecatedPaymentNetwork("BLOCKDAG_SC")).toBe(true);
-        expect(isDeprecatedPaymentNetwork("ETH")).toBe(false);
-    });
-
-    test("middleware answers 410 before a generic validation error", async () => {
-        const ctx = { request: { body: { tagName: "alice", domain: "zelf", network: "BDAG", token: "x" } } };
-        let continued = false;
-        await paymentConfirmationValidation(ctx, async () => {
-            continued = true;
-        });
-        expect(continued).toBe(false);
-        expect(ctx.status).toBe(410);
-        expect(ctx.body).toEqual({ code: "BDAG_DEPRECATED", message: MESSAGE });
-    });
-
-    test("a .bdag renewal quote is rejected and a zelf quote is not", () => {
-        const bdag = { request: { body: { tagName: "alice.bdag", network: "ETH" } }, status: 200 };
-        expect(rejectDeprecatedRequest(bdag, bdag.request.body)).toBe(true);
-        expect(bdag.status).toBe(410);
-        const zelf = { request: { body: { tagName: "alice", domain: "zelf", network: "ETH" } } };
-        expect(rejectDeprecatedRequest(zelf, zelf.request.body)).toBe(false);
-    });
+const holderOptions = (publicData) => ({
+    plan: "free",
+    domainConfig: null,
+    skipTagLookup: true,
+    skipSubscriptionLookup: true,
+    tagPublicData: {
+        plan: "free",
+        type: "mainnet",
+        zelfName: "alice.zelf",
+        tagName: "alice",
+        ethAddress: "0xabc",
+        ...publicData,
+    },
 });
 
-describe("BDAG chain activation", () => {
-    test("activate refuses blockdag and its alias", async () => {
-        await expect(activateChain({ tagName: "alice", domain: "zelf" }, "blockdag")).rejects.toMatchObject({
+describe("BDAG new-use blocks", () => {
+    test("410 BDAG_DEPRECATED keeps the holder message and chain field", () => {
+        const error = deprecatedUseError({ chain: "blockdag" });
+        const handled = errorHandler(error);
+        expect(handled).toEqual({ status: STATUS, code: CODE, message: MESSAGE });
+        expect({ message: handled.message, code: handled.code, ...error.details }).toEqual({
+            code: "BDAG_DEPRECATED",
+            message: MESSAGE,
+            chain: "blockdag",
+        });
+    });
+
+    test("a first BlockDAG activation is refused and an address already on the name is not", async () => {
+        const alice = { tagName: "alice", domain: "zelf" };
+        await expect(activateChain(alice, "blockdag", holderOptions({ ethAddress: "" }))).rejects.toMatchObject({
             clientCode: "BDAG_DEPRECATED",
             status: 410,
             details: { chain: "blockdag" },
         });
-        await expect(activateChain({ tagName: "alice", domain: "zelf" }, "bdag")).rejects.toMatchObject({
-            clientCode: "BDAG_DEPRECATED",
-        });
-    });
-});
 
-describe("BDAG names", () => {
-    test("new leases and available-name offers are closed; an occupied name still resolves", () => {
-        expect(() => assertDomainOfferedForNewNames(priced("bdag"))).toThrow(/410:BDAG_DEPRECATED/);
-        expect(() => assertDomainAcceptsNewUse("zelf")).not.toThrow();
+        const held = await activateChain(alice, "bdag", holderOptions());
+        expect(held).toMatchObject({ chain: "blockdag", activated: true, alreadyActive: true });
+
+        const status = await chainStatus(alice, holderOptions());
+        const blockdag = status.chains.find((row) => row.chain === "blockdag");
+        expect(blockdag).toMatchObject({ active: true, allowed: true, deprecated: true, addressPresent: true });
+    });
+
+    test("an unregistered .bdag name is not offered and is omitted from the public domain list", () => {
         expect(() => applyAvailableNameOffer({ available: true }, { tagName: "newname", domainConfig: priced("bdag"), duration: "1" })).toThrow(
             /410:BDAG_DEPRECATED/
         );
-
         const occupied = { available: false, tagObject: { publicData: { tagName: "alice.bdag" } } };
         expect(applyAvailableNameOffer(occupied, { tagName: "alice", domainConfig: priced("bdag") })).toBe(occupied);
-    });
 
-    test("the public domain list omits bdag even when the license still has plan prices", () => {
-        const offered = filterOfferedDomains({
-            zelf: priced("zelf"),
-            bdag: priced("bdag"),
-        });
+        const offered = filterOfferedDomains({ zelf: priced("zelf"), bdag: priced("bdag") });
         expect(Object.keys(offered)).toEqual(["zelf"]);
     });
 });
 
-describe("BDAG payments and campaigns", () => {
-    test("ZelfBlockDagPay confirmation is refused for the network and for a .bdag name", async () => {
-        await expect(verifySmartContractPayment("alice", "zelf", "token", "0xabc", "BLOCKDAG_SC")).rejects.toMatchObject({
-            clientCode: "BDAG_DEPRECATED",
-            details: { network: "BLOCKDAG_SC" },
+describe("existing BDAG use stays on v4 behaviour", () => {
+    test("a priced bdag license still passes the plan gate; the new-name guard is separate", () => {
+        expect(() => assertDomainOfferedForNewNames(priced("bdag"))).not.toThrow();
+        expect(() => assertDomainAcceptsNewUse("bdag")).toThrow(/410:BDAG_DEPRECATED/);
+        expect(() => assertDomainAcceptsNewUse("zelf")).not.toThrow();
+    });
+
+    test("BDAG and BLOCKDAG_SC remain payable", async () => {
+        const native = {
+            request: { body: { tagName: "alice", domain: "zelf", network: "BDAG", token: "not-a-jwt" } },
+            status: 200,
+            body: null,
+        };
+        await paymentConfirmationValidation(native, async () => {
+            throw new Error("should not confirm");
         });
-        await expect(verifySmartContractPayment("alice", "bdag", "token", "0xabc", "ETH_SC")).rejects.toMatchObject({
-            clientCode: "BDAG_DEPRECATED",
-            details: { domain: "bdag" },
+        expect(native.status).toBe(409);
+        expect(native.body.code).not.toBe("BDAG_DEPRECATED");
+        expect(String(native.body.validationError)).not.toMatch(/must be one of/i);
+
+        const contract = {
+            request: {
+                body: {
+                    tagName: "alice",
+                    domain: "zelf",
+                    network: "BLOCKDAG_SC",
+                    token: "not-a-jwt",
+                    txHash: `0x${"ab".repeat(32)}`,
+                },
+            },
+            status: 200,
+            body: null,
+        };
+        await smartContractPaymentConfirmationValidation(contract, async () => {
+            throw new Error("should not confirm");
         });
+        expect(contract.status).toBe(409);
+        expect(contract.body.code).not.toBe("BDAG_DEPRECATED");
+        expect(String(contract.body.validationError)).not.toMatch(/must be one of/i);
     });
 
-    test("new social-campaign claims are closed", async () => {
-        await expect(Social.getReward("alice", "bdag", {})).rejects.toMatchObject({ clientCode: "BDAG_DEPRECATED" });
-        await expect(Social.provideEmail("a@example.com", "alice", "bdag", {})).rejects.toMatchObject({ clientCode: "BDAG_DEPRECATED" });
-    });
-});
-
-describe("BDAG watcher and balances", () => {
-    test("blockdag stays a known network and is not watched", () => {
-        expect(isSupportedNetwork("blockdag")).toBe(true);
-        expect(isWatchedNetwork("blockdag")).toBe(false);
-        expect(WATCHED_NETWORKS).not.toContain("blockdag");
-        expect(WATCHED_NETWORKS).toContain("ethereum");
-    });
-
-    test("a hung BDAG node becomes an empty slot and does not fail the other balances", async () => {
-        const blockdag = require("../../Repositories/BlockDAG/modules/blockdag.module");
-        const etherscan = require("../../Repositories/etherscan/modules/etherscan.module");
-        const avalanche = require("../../Repositories/Avalanche/modules/avalanche-scrapping.module");
-        const { getTagWalletBalances } = require("../../Repositories/Tags/modules/tag-wallet-balances.module");
-
-        const balance = jest.spyOn(blockdag, "fetchBdagBalance").mockImplementation(() => new Promise(() => {}));
-        const eth = jest.spyOn(etherscan, "getBalance").mockResolvedValue({ balance: "1000000000000000000" });
-        const avax = jest.spyOn(avalanche, "getBalance").mockResolvedValue({ balance: "2" });
-
+    test("a .bdag renewal confirmation is not closed before the payment token is checked", async () => {
         try {
-            const result = await getTagWalletBalances(
-                { ethAddress: "0x787389C8ec43D94362648310316F4348A4dE8C83" },
-                { bdagTimeoutMs: 30 }
-            );
-            expect(result.eth.value).toBe("1");
-            expect(result.avax.value).toBe("2");
-            expect(result.bdag).toMatchObject({ unit: "BDAG", value: null, error: "network_timeout" });
-        } finally {
-            balance.mockRestore();
-            eth.mockRestore();
-            avax.mockRestore();
+            await verifyPaymentConfirmation("alice", "bdag", "BDAG", "not-a-jwt");
+            throw new Error("expected the token check to fail");
+        } catch (error) {
+            expect(error.clientCode).not.toBe("BDAG_DEPRECATED");
+            expect(String(error.message)).not.toContain("BDAG_DEPRECATED");
         }
+    });
+
+    test("the tx watcher still watches blockdag", () => {
+        expect(isWatchedNetwork("blockdag")).toBe(true);
+        expect(WATCHED_NETWORKS).toContain("blockdag");
     });
 });

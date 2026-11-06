@@ -8,7 +8,6 @@ const Lease = require("../models/tx-watcher-lease.model");
 const PushLog = require("../models/tx-push-log.model");
 const OneSignal = require("../modules/onesignal.client");
 const { concurrencyFor, getAdapter } = require("../adapters");
-const { isWatchedNetwork, WATCHED_NETWORKS } = require("../modules/networks");
 const { mapWithConcurrency } = require("../adapters/http.util");
 const { minTimestampFor, planDeliveries } = require("../modules/delivery-planner");
 const { buildSummaryPayload, buildTransferPayload, summaryDigest } = require("../modules/push-message.util");
@@ -127,10 +126,7 @@ class TxWatcher {
             await this.maybeReconcile(started);
             stats.retried = await this.retryFailedPushes();
 
-            const due = await Cursor.find({
-                nextCheckAt: { $lte: new Date(started) },
-                network: { $in: WATCHED_NETWORKS },
-            })
+            const due = await Cursor.find({ nextCheckAt: { $lte: new Date(started) } })
                 .sort({ nextCheckAt: 1 })
                 .limit(settings().maxCursorsPerTick)
                 .lean();
@@ -196,10 +192,7 @@ class TxWatcher {
         const keys = await Device.distinct("watchKeys", { enabled: true });
         if (!keys.length) return;
         const existing = new Set(await Cursor.distinct("key", { key: { $in: keys } }));
-        const missing = keys.filter((key) => {
-            const network = key.slice(0, key.indexOf(":"));
-            return isWatchedNetwork(network) && !existing.has(key);
-        });
+        const missing = keys.filter((key) => !existing.has(key));
         if (!missing.length) return;
 
         await Cursor.bulkWrite(
@@ -241,7 +234,6 @@ class TxWatcher {
 
         await Promise.all(
             [...byNetwork.entries()].map(async ([network, list]) => {
-                if (!isWatchedNetwork(network)) return;
                 const adapter = getAdapter(network);
                 let consecutiveFailures = 0;
 

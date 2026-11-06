@@ -4,7 +4,6 @@ const TagsArweaveModule = require("./tags-arweave.module");
 const { getDomainConfig } = require("../config/supported-domains");
 const { formatLeaseDate } = require("./lease-date.util");
 const { cleanExtraParamsForPinata, resolveEncryptVersion, stampExtraParamsVersion } = require("./tags-addresses.module");
-const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
 
 /**
  * Confirm free tag (for recovery)
@@ -18,8 +17,7 @@ const confirmFreeTag = async (tagObject, referralTagObject, domainConfig, securi
 
     const tagName = tagObject[storageKey] || tagObject.tagName || tagObject.zelfName;
 
-    const domain = tagObject.domain || domainConfig?.name || "zelf";
-    assertDomainAcceptsNewUse(domain);
+    const domain = tagObject.domain || "zelf";
 
     const metadata = {
         [storageKey]: tagName,

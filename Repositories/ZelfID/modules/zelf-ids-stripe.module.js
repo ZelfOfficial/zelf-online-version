@@ -176,8 +176,6 @@ const pricingPathPrefix = (locale) => {
 };
 
 const createStripeCheckout = async ({ tagName, domain, duration, plan, token, locale, email }) => {
-    const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
-    assertDomainAcceptsNewUse(domain);
     if (!config.stripe?.secretKey) {
         throw codedError("500:STRIPE_NOT_CONFIGURED");
     }
@@ -380,8 +378,6 @@ const confirmPaidStripeSession = async (session) => {
     }
 
     const { tagName, domain, duration, plan, amountUsd } = inspected.metadata;
-    const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
-    assertDomainAcceptsNewUse(domain);
     const domainConfig = getDomainConfig(domain);
     const { throwPaymentConfirmationTagNotFound } = require("../../Tags/modules/tag-smart-contract-payment.module");
     const ZelfIdModule = require("./zelf-id.module");

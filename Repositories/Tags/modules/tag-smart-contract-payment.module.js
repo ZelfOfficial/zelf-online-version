@@ -12,7 +12,6 @@ const { verifyEthZelfTagPayTx } = require("./eth-tag-pay-verify.module");
 const { verifyPolygonZelfTagPayTx } = require("./polygon-tag-pay-verify.module");
 const { verifyBaseZelfTagPayTx } = require("./base-tag-pay-verify.module");
 const { verifyBlockdagZelfTagPayTx } = require("./blockdag-tag-pay-verify.module");
-const { assertDomainAcceptsNewUse, assertPaymentNetworkAccepted } = require("../../../Core/deprecated-networks");
 
 const scPayTxCache = new NodeCache({ stdTTL: 172800, maxKeys: 50000, useClones: false });
 
@@ -1109,8 +1108,6 @@ async function verifyBlockdagSmartContractPayment(tagName, domain, token, txHash
  * @param {string} [network] - `AVAX_SC` | `BSC_SC` | `ETH_SC` | `POLYGON_SC` | `BASE_SC` | `BLOCKDAG_SC`
  */
 const verifySmartContractPayment = async (tagName, domain, token, txHash, network = "AVAX_SC") => {
-    assertDomainAcceptsNewUse(domain);
-    assertPaymentNetworkAccepted(network);
     if (network === "BLOCKDAG_SC") {
         return verifyBlockdagSmartContractPayment(tagName, domain, token, txHash);
     }

@@ -167,16 +167,16 @@ const presentChain = (spec, { publicData, activated, limits }) => {
     const addressPresent = hasAddress(publicData, spec);
     const recorded = activated.has(spec.chain);
     const active = addressPresent || recorded;
-    const deprecated = isDeprecatedChain(spec.chain);
-    return {
+    const row = {
         chain: spec.chain,
         family: spec.family,
         nonEvm: spec.nonEvm,
         addressPresent,
         active,
-        deprecated,
-        allowed: !deprecated && (!spec.nonEvm || limits.nonEvmChains || active),
+        allowed: !spec.nonEvm || limits.nonEvmChains || active,
     };
+    if (isDeprecatedChain(spec.chain)) row.deprecated = true;
+    return row;
 };
 
 const chainStatus = async (authUser, options = {}) => {
@@ -218,18 +218,25 @@ const recordActivation = async ({ identity, chain, now }) => {
 };
 
 /**
- * Allow EVM activation always. Allow a non-EVM chain when the plan permits it,
- * or when that chain is already on the name or was activated earlier.
+ * Allow EVM activation, except a first activation of a closed chain.
+ * Allow a non-EVM chain when the plan permits it, or when that chain is already
+ * on the name or was activated earlier.
  * @param {Object} authUser
  * @param {string} chain
  * @param {Object} [options]
  */
 const activateChain = async (authUser, chain, options = {}) => {
     const spec = requireChain(chain);
-    if (isDeprecatedChain(spec.chain)) throw deprecatedUseError({ chain: spec.chain });
     const entitlement = await resolveEntitlement(authUser, options);
     const limits = limitsForPlan(entitlement.plan, entitlement.domainConfig);
     const addressPresent = hasAddress(entitlement.publicData, spec);
+
+    // A first activation of a closed chain is refused. An address already on the
+    // name, or a chain recorded earlier, keeps the previous success response.
+    if (isDeprecatedChain(spec.chain) && !addressPresent) {
+        const activated = await loadActivatedChains(entitlement.identity.zelfName);
+        if (!activated.has(spec.chain)) throw deprecatedUseError({ chain: spec.chain });
+    }
 
     if (!spec.nonEvm || addressPresent) {
         return {

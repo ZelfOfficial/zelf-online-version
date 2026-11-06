@@ -2,7 +2,6 @@ const { string, validate, boolean, number, stringEnum, stringOptionalEmptyAsNull
 const captchaService = require("../../../Core/captcha");
 const Session = require("../../Session/models/session.model");
 const { validateDomainName, isDomainActive } = require("../modules/domain-registry.module");
-const { rejectDeprecatedRequest } = require("../../../Core/deprecated-networks");
 
 const schemas = {
     search: {
@@ -336,7 +335,6 @@ const leaseValidation = async (ctx, next) => {
 
     // Validate domain and tag name
     const { domain: extractedDomain, name } = extractDomainAndName(tagName, domain);
-    if (rejectDeprecatedRequest(ctx, { domain: extractedDomain, tagName })) return;
     const domainValidation = await validateDomainAndName(extractedDomain, name);
 
     if (!domainValidation.valid) {
@@ -399,7 +397,6 @@ const leaseRecoveryValidation = async (ctx, next) => {
 
     // Validate domain and tag name
     const { domain: extractedDomain, name } = extractDomainAndName(tagName, domain);
-    if (rejectDeprecatedRequest(ctx, { domain: extractedDomain, tagName })) return;
     const domainValidation = await validateDomainAndName(extractedDomain, name);
 
     if (!domainValidation.valid) {
@@ -452,7 +449,6 @@ const leaseOfflineValidation = async (ctx, next) => {
 
     // Validate domain and tag name
     const { domain: extractedDomain, name } = extractDomainAndName(tagName, domain);
-    if (!ctx.request.body?.sync && rejectDeprecatedRequest(ctx, { domain: extractedDomain, tagName })) return;
 
     const domainValidation = await validateDomainAndName(extractedDomain, name);
 
@@ -504,7 +500,6 @@ const leaseConfirmationValidation = async (ctx, next) => {
     const payload = Object.assign(ctx.request.query, ctx.request.body);
 
     const { tagName, domain, coin, network } = payload;
-    if (rejectDeprecatedRequest(ctx, { domain, tagName, network })) return;
 
     const valid = validate(schemas.leaseConfirmation, {
         tagName,

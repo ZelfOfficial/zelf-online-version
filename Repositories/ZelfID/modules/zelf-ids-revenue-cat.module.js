@@ -263,8 +263,6 @@ const inspectRevenueCatEvent = (event = {}, { allowSandbox = false } = {}) => {
  */
 const validatePurchase = (inspected) => {
     const { tagName, domain, product, attributes, ethAddress } = inspected;
-    const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
-    assertDomainAcceptsNewUse(domain);
 
     if (!tagName) return { ok: false, reason: "ZELF_NAME_MISSING" };
 
@@ -645,8 +643,6 @@ const webhookHandler = async (event, { allowSandbox = false } = {}) => {
 
 const applyInspectedEvent = async (claimed) => {
     const inspected = await resolveNameByTransaction(claimed);
-    const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
-    if (inspected.action !== "expire") assertDomainAcceptsNewUse(inspected.domain);
 
     if (inspected.action === "expire") return applyRevenueCatExpiration(inspected);
     if (inspected.action === "change_plan") return applyRevenueCatProductChange(inspected);

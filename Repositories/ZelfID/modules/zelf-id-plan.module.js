@@ -508,7 +508,6 @@ const applyAvailableNameOffer = (result, { tagName, duration, domainConfig, plan
  * @param {Object} [domainConfig]
  */
 const assertDomainOfferedForNewNames = (domainConfig) => {
-    assertDomainAcceptsNewUse(domainConfig?.name);
     if (!domainOffersPlanPricing(domainConfig)) throw codedError("409:DOMAIN_NOT_OFFERED");
 };
 

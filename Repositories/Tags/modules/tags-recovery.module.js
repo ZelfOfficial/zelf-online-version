@@ -5,7 +5,6 @@ const { decrypt } = require("../../ZelfProof/modules/zelf-proof.module");
 const { effectivePassword } = require("../../ZelfID/modules/zelf-id-password.module");
 const { getDomainConfig } = require("../config/supported-domains");
 const TagsRegistrationModule = require("./tags-registration.module");
-const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
 
 /**
  * Lease recovery for Tags
@@ -15,7 +14,6 @@ const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks
  */
 const leaseRecovery = async (payload, authUser) => {
 	const { zelfProof, tagName, domain, type, os, addServerPassword, referralTagName } = payload;
-	assertDomainAcceptsNewUse(domain);
 
 	const duration = payload.duration || 1;
 

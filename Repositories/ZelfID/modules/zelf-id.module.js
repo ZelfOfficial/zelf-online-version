@@ -47,6 +47,7 @@ const {
     applyAvailableNameOffer,
     assertDomainOfferedForNewNames,
 } = require("./zelf-id-plan.module");
+const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
 
 /**
  * Force the shared ZelfProof client onto `/zelf-v4`.
@@ -120,6 +121,7 @@ const leaseTag = async (params, authUser) => {
     const tagKey = domainConfig.getTagKey() || "tagName";
 
     await _findDuplicatedTag(tagName, domain, domainConfig);
+    assertDomainAcceptsNewUse(domain);
 
     const referralTagObject = await _validateReferral(referralTagName, authUser, domainConfig);
 
@@ -508,9 +510,6 @@ const previewZelfIdQr = async (params, authUser) => {
  */
 const leaseConfirmation = async (params) => {
     const { tagName, domain, coin, network } = params;
-    const { assertDomainAcceptsNewUse, assertPaymentNetworkAccepted } = require("../../../Core/deprecated-networks");
-    assertDomainAcceptsNewUse(domain);
-    assertPaymentNetworkAccepted(network);
     const domainConfig = getDomainConfig(domain);
 
     const confirmation = await confirmPayUniqueAddress({

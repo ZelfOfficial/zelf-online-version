@@ -5,7 +5,6 @@ const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const config = require("../../../Core/config");
 const { codedError } = require("../../../Core/http-handler");
-const { assertDomainAcceptsNewUse, assertPaymentNetworkAccepted } = require("../../../Core/deprecated-networks");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { coerceInitiatedAtUnix } = require("../../Tags/modules/tag-pay-session-tx.util");
 const {
@@ -240,8 +239,6 @@ const confirmCouponFreeCheckout = async (tagName, domain, tokenDecoded, domainCo
 };
 
 const verifyPaymentConfirmation = async (tagName, domain, network, token, identity = {}) => {
-    assertDomainAcceptsNewUse(domain);
-    assertPaymentNetworkAccepted(network);
     const tokenDecoded = jwt.verify(token, config.JWT_SECRET);
     const domainConfig = getDomainConfig(domain);
 
@@ -740,7 +737,6 @@ const persistZelfIdMetadata = async (params, tagObject, domainConfig, metadata, 
 
 const addDurationToTag = async (params, tagObject) => {
     const { domain } = params;
-    assertDomainAcceptsNewUse(domain || params.domainConfig?.name || tagObject?.publicData?.domain);
     const domainConfig = params.domainConfig || getDomainConfig(domain || "zelf");
     const tagKey = domainConfig.getTagKey();
     const bareName =
