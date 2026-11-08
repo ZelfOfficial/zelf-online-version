@@ -234,7 +234,11 @@ class StandardizedChainFormatter {
 	calculateFiatAmount(tx) {
 		const amount = parseFloat(tx.amount || tx.value || 0);
 		const price = parseFloat(tx.price || tx.assetPrice || 0);
-		return amount * price;
+		if (price > 0 && Number.isFinite(amount)) {
+			return amount * price;
+		}
+		const existingFiat = parseFloat(tx.fiatAmount ?? tx.fiatValue ?? 0);
+		return Number.isFinite(existingFiat) ? existingFiat : 0;
 	}
 
 	/**

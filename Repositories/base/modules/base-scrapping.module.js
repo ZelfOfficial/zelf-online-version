@@ -6,6 +6,17 @@ const StandardizedChainFormatter = require("../../class/standardized-chain-forma
 const { getTickerPrice } = require("../../binance/modules/binance.module");
 const { getTokenPrice } = require("../utils/token-pricing");
 const commonTokens = require("../data/common-tokens.json");
+const {
+	normalizePage,
+	formatDecimalString,
+	mapEtherscanV2Transaction,
+	buildListResponse,
+	fetchTransactionsFromEtherscanV2,
+	DEFAULT_TX_TIMEOUT_MS,
+	formatUtcIsoDate,
+} = require("../../etherscan/modules/evm-transaction-list.util");
+
+const BASE_CHAIN_ID = 8453;
 
 // Initialize Base formatter
 const baseFormatter = new StandardizedChainFormatter("Base", "ETH", "https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png");
@@ -148,24 +159,7 @@ const getAddress = async (query) => {
 				const transactionsData = await Promise.race([transactionDataPromise, transactionTimeoutPromise]);
 				transactions = transactionsData.transactions || [];
 			} catch (error) {
-				// Add error message as a transaction entry
-				transactions = [
-					{
-						hash: "0x" + "0".repeat(64),
-						method: "Error",
-						block: "N/A",
-						age: "N/A",
-						date: "N/A",
-						from: address,
-						traffic: "ERROR",
-						to: address,
-						fiatAmount: "0.00",
-						amount: "0",
-						asset: "ETH",
-						txnFee: "0",
-						note: `Transaction fetch failed: ${error.message}`,
-					},
-				];
+				transactions = [];
 			}
 
 			// Calculate total portfolio value (ETH + all tokens)
@@ -338,19 +332,6 @@ const getTransactionsList = async (query) => {
 			}
 		}
 
-		// Try RPC fallback for transaction count
-		if (!response) {
-			try {
-				const rpcResponse = await getRPCTransactionCount(address, price);
-				if (rpcResponse) {
-					response = rpcResponse;
-					source = "rpc";
-				}
-			} catch (rpcError) {
-				console.error("RPC fallback failed:", rpcError.message);
-			}
-		}
-
 		// Add source to response if response exists
 		if (response) {
 			response.source = source;
@@ -358,8 +339,7 @@ const getTransactionsList = async (query) => {
 		}
 
 		// If no transactions found from external APIs, return empty result
-		console.error("No transactions found from external APIs");
-		return { pagination: { records: "0", pages: "0", page: "0" }, transactions: [] };
+		return { pagination: { records: "0", pages: "0", page: String(page) }, transactions: [] };
 	} catch (error) {
 		console.error("Error getting Base transactions:", error.message || "Unknown error");
 		return { pagination: { records: "0", pages: "0", page: "0" }, transactions: [] };
@@ -570,61 +550,21 @@ const getPortfolioSummary = async (params) => {
  * @param {string} price - ETH price
  * @returns {Object} Transaction data
  */
-const getBaseScanTransactions = async (address, page, show, price) => {
+const getBaseScanTransactions = async (address, page, show, price, timeout = DEFAULT_TX_TIMEOUT_MS) => {
 	try {
-		// Try BaseScan API without API key (public endpoint)
-		const url = `https://api.basescan.org/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=${page}&offset=${show}&sort=desc`;
-
-		const { data } = await axios.get(url, {
-			timeout: 10000,
-			validateStatus: function (status) {
-				return status < 500;
-			},
-			headers: {
-				"User-Agent": generateRandomUserAgent(),
-				Accept: "application/json",
-			},
+		const etherscanPage = normalizePage(page === "0" ? 1 : page);
+		const items = await fetchTransactionsFromEtherscanV2((url, options) => instance.get(url, options), {
+			chainId: BASE_CHAIN_ID,
+			address,
+			page: etherscanPage,
+			offset: parseInt(show, 10) || 25,
+			timeout,
 		});
 
-		if (data.status === "1" && data.result && data.result.length > 0) {
-			const rawTransactions = data.result.map((tx) => {
-				const value = parseFloat(tx.value) / Math.pow(10, 18);
-				const fiatValue = value * parseFloat(price);
-				const traffic = tx.from.toLowerCase() === address.toLowerCase() ? "OUT" : "IN";
+		const rawTransactions = items.map((tx) => mapEtherscanV2Transaction(tx, address, { asset: "ETH", price }));
+		const transactions = baseFormatter.formatTransactions(rawTransactions);
 
-				return {
-					hash: tx.hash,
-					block: tx.blockNumber,
-					from: tx.from,
-					to: tx.to,
-					value: value.toString(),
-					fiatValue: fiatValue.toFixed(2),
-					gas: tx.gasUsed || "0",
-					gasPrice: tx.gasPrice || "0",
-					nonce: tx.nonce || "0",
-					input: tx.input || "0x",
-					blocktime: parseInt(tx.timeStamp),
-					traffic: traffic,
-					method: tx.methodId ? "Contract Interaction" : "ETH transfer",
-					status: tx.isError === "0" ? "Success" : "Failed",
-					image: "https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png",
-					date: moment(parseInt(tx.timeStamp) * 1000).format("YYYY-MM-DD HH:mm:ss"),
-					age: moment(parseInt(tx.timeStamp) * 1000).fromNow(),
-					txnFee: tx.gasUsed && tx.gasPrice ? ((parseFloat(tx.gasUsed) * parseFloat(tx.gasPrice)) / Math.pow(10, 18)).toFixed(8) : "0",
-					confirmations: "1",
-				};
-			});
-
-			// Use standardized formatter for transactions
-			const transactions = baseFormatter.formatTransactions(rawTransactions);
-
-			return {
-				pagination: { records: transactions.length.toString(), pages: "1", page: page },
-				transactions: transactions,
-			};
-		}
-
-		return null;
+		return { ...buildListResponse(transactions, { page: etherscanPage, show: parseInt(show, 10) || 25 }), source: "etherscan_v2" };
 	} catch (error) {
 		console.error("BaseScan transactions failed:", error.message);
 		return null;
@@ -639,7 +579,7 @@ const getBaseScanTransactions = async (address, page, show, price) => {
  * @param {string} price - ETH price
  * @returns {Object} Transaction data
  */
-const getOKLinkTransactions = async (address, page, show, price) => {
+const getOKLinkTransactions = async (address, page, show, price, timeout = DEFAULT_TX_TIMEOUT_MS) => {
 	try {
 		const t = Date.now();
 
@@ -648,7 +588,7 @@ const getOKLinkTransactions = async (address, page, show, price) => {
 
 		const { data } = await axios.get(url, {
 			httpsAgent: agent,
-			timeout: 10000,
+			timeout,
 			validateStatus: function (status) {
 				return status < 500;
 			},
@@ -660,44 +600,51 @@ const getOKLinkTransactions = async (address, page, show, price) => {
 
 		// Check if we got a successful response
 		if ((data.code === "0" || data.code === 0) && data.data && data.data.hits) {
-			console.log(`✅ OKLink API success! Found ${data.data.hits.length} transactions out of ${data.data.total} total`);
-
 			const rawTransactions = data.data.hits.map((tx) => {
-				const value = parseFloat(tx.value);
-				const fiatValue = value * parseFloat(price);
+				const value = formatDecimalString(tx.value);
+				const priceNum = parseFloat(price) || 0;
+				const fiatValue = Number(value) * priceNum;
 				const traffic = tx.from.toLowerCase() === address.toLowerCase() ? "OUT" : "IN";
+				const ts = Number(tx.blocktime) || 0;
 
 				return {
 					hash: tx.hash,
-					block: tx.blockHeight.toString(),
+					block: tx.blockHeight ? tx.blockHeight.toString() : "N/A",
 					from: tx.from,
 					to: tx.to,
-					value: value.toString(),
+					value,
+					amount: value,
+					price: priceNum,
+					assetPrice: priceNum,
 					fiatValue: fiatValue.toFixed(2),
-					gas: "0", // OKLink doesn't provide gas info in this endpoint
+					fiatAmount: fiatValue.toFixed(2),
+					gas: "0",
 					gasPrice: "0",
 					nonce: "0",
 					input: "0x",
-					blocktime: tx.blocktime,
-					timestamp: tx.blocktime, // Add timestamp field for formatter
+					blocktime: ts,
+					timestamp: ts,
 					traffic: traffic,
 					method: tx.method || "ETH transfer",
 					status: tx.status === "0x1" ? "Success" : "Failed",
 					image: "https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png",
-					age: tx.blocktime ? moment(tx.blocktime * 1000).fromNow() : "N/A",
-					txnFee: tx.fee ? parseFloat(tx.fee).toFixed(8) : "0",
+					age: ts ? moment(ts * 1000).fromNow() : "N/A",
+					date: formatUtcIsoDate(ts),
+					txnFee: tx.fee ? formatDecimalString(tx.fee, 8) : "0",
+					asset: "ETH",
 					confirmations: "1",
 				};
 			});
 
-			// Return raw transactions (will be formatted by getAddress)
+			const transactions = baseFormatter.formatTransactions(rawTransactions);
+
 			return {
 				pagination: {
 					records: data.data.total.toString(),
 					pages: Math.ceil(data.data.total / parseInt(show)).toString(),
 					page: page,
 				},
-				transactions: rawTransactions,
+				transactions,
 			};
 		} else if (data.code === "5005") {
 			// API_DECODE_ERROR - this might mean the endpoint exists but has issues
