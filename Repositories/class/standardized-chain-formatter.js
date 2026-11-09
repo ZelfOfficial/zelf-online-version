@@ -11,6 +11,11 @@
  * - Proper error handling and data validation
  */
 
+const stripTrailingZerosWhenDecimal = (value) => {
+	if (!value.includes(".")) return value;
+	return value.replace(/0+$/, "").replace(/\.$/, "") || "0";
+};
+
 class StandardizedChainFormatter {
 	constructor(chainName, chainSymbol, chainLogo) {
 		this.chainName = chainName;
@@ -283,14 +288,15 @@ class StandardizedChainFormatter {
 		if (amount === null || amount === undefined) return "0";
 		const raw = typeof amount === "string" ? amount.trim() : String(amount);
 		if (!raw) return "0";
+		// Trailing zeros are padding only after a decimal point. On a whole number,
+		// `/\.?0+$/` also deletes significant digits ("250" -> "25", "6000000" -> "6").
 		if (/^[-+]?\d+(\.\d+)?$/.test(raw) && !raw.includes("e") && !raw.includes("E")) {
-			return raw.replace(/\.?0+$/, "").replace(/\.$/, "") || "0";
+			return stripTrailingZerosWhenDecimal(raw);
 		}
 		const num = Number(raw);
 		if (!Number.isFinite(num)) return "0";
 		if (num === 0) return "0";
-		const fixed = num.toFixed(18);
-		return fixed.replace(/\.?0+$/, "") || "0";
+		return stripTrailingZerosWhenDecimal(num.toFixed(18));
 	}
 
 	/**
