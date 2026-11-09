@@ -5,50 +5,179 @@ const moment = require("moment");
 const { getTickerPrice } = require("../../binance/modules/binance.module");
 
 const HORIZON_URL = "https://horizon.stellar.org";
-const STROOPS_TO_XLM = 1 / 10_000_000;
+const STROOPS_PER_XLM = 10_000_000;
+const USD_STABLECOIN_SYMBOLS = new Set(["USDC", "USDT", "DAI", "PYUSD", "USDP", "FDUSD"]);
 
 /**
- * Extract to/amount from operation (payment or asset_balance_changes)
+ * Format stroops integer to XLM decimal string without floating-point drift
+ * @param {number|string} stroops
+ * @returns {string}
  */
-const extractPaymentInfo = (op) => {
-	if (!op) return { to: null, amount: null, asset: "XLM" };
-	// Payment type
-	if (op.type === "payment" && op.to) {
-		return {
-			to: op.to,
-			amount: parseFloat(op.amount) || null,
-			asset: op.asset_type === "native" ? "XLM" : op.asset_code || "XLM",
-		};
-	}
-	// Asset balance changes (contracts, etc.)
-	if (op.asset_balance_changes && op.asset_balance_changes.length > 0) {
-		const first = op.asset_balance_changes[0];
-		const total = op.asset_balance_changes.reduce(
-			(sum, c) => sum + (parseFloat(c.amount) || 0),
-			0
-		);
-		return {
-			to: first.to || null,
-			amount: total || null,
-			asset: first.asset_code || first.asset_type || "XLM",
-		};
-	}
-	return { to: null, amount: null, asset: "XLM" };
+const formatStroopsToXlm = (stroops) => {
+	const parsed = parseInt(stroops || 0, 10) || 0;
+	if (parsed <= 0) return "0";
+	return (parsed / STROOPS_PER_XLM).toFixed(7).replace(/\.?0+$/, "") || "0";
 };
 
 /**
- * Fetch operations for a transaction to get to/amount
+ * Resolve USD price for a Stellar asset symbol
+ * @param {string} symbol
+ * @param {number} xlmPrice
+ * @param {Map<string, number>} priceCache
+ * @returns {Promise<number>}
  */
-const fetchTransactionOperations = async (txHash) => {
+const resolveStellarAssetPrice = async (symbol, xlmPrice, priceCache = new Map()) => {
+	const normalized = String(symbol || "").trim().toUpperCase();
+	if (!normalized) return 0;
+	if (priceCache.has(normalized)) return priceCache.get(normalized);
+
+	let resolvedPrice = 0;
+	if (normalized === "XLM" || normalized === "YXLM") {
+		resolvedPrice = Number(xlmPrice) || 0;
+	} else if (USD_STABLECOIN_SYMBOLS.has(normalized)) {
+		resolvedPrice = 1;
+	} else {
+		try {
+			const tickerSymbol = normalized === "EURC" ? "EUR" : normalized;
+			const { price } = await getTickerPrice({ symbol: tickerSymbol });
+			resolvedPrice = parseFloat(price) || 0;
+		} catch {
+			resolvedPrice = normalized === "EURC" ? 1 : 0;
+		}
+	}
+
+	priceCache.set(normalized, resolvedPrice);
+	return resolvedPrice;
+};
+
+/**
+ * Extract from/to/amount/asset/type from a Horizon operation
+ * @param {Object} op
+ * @param {string} [userAddress]
+ */
+const extractPaymentInfo = (op, userAddress = "") => {
+	if (!op) return { from: null, to: null, amount: null, asset: "XLM", operationType: null };
+
+	const opType = op.type || null;
+
+	// Standard payment operation
+	if (opType === "payment" && op.to) {
+		return {
+			from: op.from || op.source_account || null,
+			to: op.to,
+			amount: parseFloat(op.amount) || null,
+			asset: op.asset_type === "native" ? "XLM" : op.asset_code || "XLM",
+			operationType: opType,
+		};
+	}
+
+	// Account creation / initial funding operation
+	if (opType === "create_account") {
+		return {
+			from: op.funder || op.source_account || null,
+			to: op.account || null,
+			amount: parseFloat(op.starting_balance) || null,
+			asset: "XLM",
+			operationType: opType,
+		};
+	}
+
+	// Account merge operation
+	if (opType === "account_merge") {
+		return {
+			from: op.account || op.source_account || null,
+			to: op.into || null,
+			amount: parseFloat(op.amount) || null,
+			asset: "XLM",
+			operationType: opType,
+		};
+	}
+
+	// Path payments (DEX / cross-asset send or receive)
+	if (opType === "path_payment_strict_send" || opType === "path_payment_strict_receive") {
+		const from = op.from || op.source_account || null;
+		const to = op.to || null;
+		const isSenderOnly = Boolean(userAddress && from === userAddress && to !== userAddress);
+		const rawAmount = isSenderOnly ? op.source_amount || op.amount : op.amount || op.source_amount;
+		const assetType = isSenderOnly ? op.source_asset_type || op.asset_type : op.asset_type || op.source_asset_type;
+		const assetCode = isSenderOnly ? op.source_asset_code || op.asset_code : op.asset_code || op.source_asset_code;
+
+		return {
+			from,
+			to,
+			amount: parseFloat(rawAmount) || null,
+			asset: assetType === "native" ? "XLM" : assetCode || "XLM",
+			operationType: opType,
+		};
+	}
+
+	// Asset balance changes (Soroban contracts, claimable balances, etc.)
+	if (op.asset_balance_changes && op.asset_balance_changes.length > 0) {
+		const relevantChange =
+			(userAddress &&
+				op.asset_balance_changes.find((c) => c.to === userAddress || c.from === userAddress)) ||
+			op.asset_balance_changes[0];
+		const total = op.asset_balance_changes.reduce((sum, c) => sum + (parseFloat(c.amount) || 0), 0);
+		return {
+			from: relevantChange.from || op.source_account || null,
+			to: relevantChange.to || null,
+			amount: parseFloat(relevantChange.amount) || total || null,
+			asset:
+				relevantChange.asset_type === "native"
+					? "XLM"
+					: relevantChange.asset_code || relevantChange.asset_type || "XLM",
+			operationType: opType,
+		};
+	}
+
+	return {
+		from: op.source_account || null,
+		to: null,
+		amount: null,
+		asset: "XLM",
+		operationType: opType,
+	};
+};
+
+/**
+ * Select the most relevant operation for userAddress from a transaction's operation list
+ * @param {Array<Object>} ops
+ * @param {string} [userAddress]
+ */
+const selectRelevantOperationInfo = (ops, userAddress = "") => {
+	if (!Array.isArray(ops) || ops.length === 0) {
+		return { from: null, to: null, amount: null, asset: "XLM", operationType: null };
+	}
+
+	const parsedOps = ops.map((op) => extractPaymentInfo(op, userAddress));
+
+	if (userAddress) {
+		const matchingUserWithAmount = parsedOps.find(
+			(info) => (info.to === userAddress || info.from === userAddress) && info.amount !== null
+		);
+		if (matchingUserWithAmount) return matchingUserWithAmount;
+
+		const matchingUser = parsedOps.find((info) => info.to === userAddress || info.from === userAddress);
+		if (matchingUser) return matchingUser;
+	}
+
+	const firstWithAmount = parsedOps.find((info) => info.amount !== null || info.to !== null);
+	return firstWithAmount || parsedOps[0];
+};
+
+/**
+ * Fetch operations for a transaction to get from/to/amount/asset
+ */
+const fetchTransactionOperations = async (txHash, userAddress = "") => {
 	try {
 		const { data } = await instance.get(
-			`${HORIZON_URL}/transactions/${txHash}/operations?limit=1`,
+			`${HORIZON_URL}/transactions/${txHash}/operations?limit=20`,
 			{ headers: { "user-agent": generateRandomUserAgent() } }
 		);
 		const ops = data._embedded?.records || [];
-		return ops[0] ? extractPaymentInfo(ops[0]) : { to: null, amount: null, asset: "XLM" };
+		return selectRelevantOperationInfo(ops, userAddress);
 	} catch {
-		return { to: null, amount: null, asset: "XLM" };
+		return { from: null, to: null, amount: null, asset: "XLM", operationType: null };
 	}
 };
 
@@ -61,17 +190,30 @@ const formatSingleTransaction = (tx, userAddress, paymentInfo = {}) => {
 		if (!tx._links && tx.hash && typeof tx.traffic !== "undefined") return tx;
 
 		const txDate = moment.utc(tx.created_at);
-		const isOutgoing = tx.source_account === userAddress;
-		const feeXLM = ((parseInt(tx.fee_charged || 0, 10) || 0) * STROOPS_TO_XLM).toString();
+		const fromAddress = paymentInfo.from || tx.source_account || "";
+		const toAddress = paymentInfo.to ?? null;
+
+		let isOutgoing = tx.source_account === userAddress;
+		if (userAddress) {
+			if (toAddress === userAddress && fromAddress !== userAddress) {
+				isOutgoing = false;
+			} else if (fromAddress === userAddress) {
+				isOutgoing = true;
+			}
+		}
+
+		const feeXLM = formatStroopsToXlm(tx.fee_charged);
 
 		return {
 			hash: tx.hash || tx.id,
-			from: tx.source_account || "",
-			to: paymentInfo.to ?? null,
+			from: fromAddress,
+			to: toAddress,
 			amount: paymentInfo.amount ?? null,
 			asset: paymentInfo.asset ?? "XLM",
+			operationType: paymentInfo.operationType ?? null,
+			timestamp: txDate.isValid() ? txDate.toISOString() : "",
 			date: txDate.isValid() ? txDate.format("YYYY-MM-DD") : "",
-			time: txDate.isValid() ? txDate.format("HH:mm:ss") : "",
+			time: txDate.isValid() ? `${txDate.format("HH:mm:ss")} UTC` : "",
 			age: txDate.isValid() ? txDate.fromNow() : "",
 			fee: feeXLM,
 			status: tx.successful ? "Success" : "Failed",
@@ -90,7 +232,7 @@ const formatTransactions = async (transactions, userAddress) => {
 	if (!Array.isArray(transactions)) return [];
 
 	const opsPromises = transactions.map((tx) =>
-		fetchTransactionOperations(tx.hash || tx.id)
+		fetchTransactionOperations(tx.hash || tx.id, userAddress)
 	);
 	const paymentInfos = await Promise.all(opsPromises);
 
@@ -163,32 +305,45 @@ const getAddress = async (params, query = {}) => {
 			tokens: [],
 		};
 
-		if (data.balances && data.balances.length > 0) {
-			for (const balance of data.balances) {
-				const balanceValue = parseFloat(balance.balance);
-				const assetInfo = {
-					asset: balance.asset_type === "native" ? "XLM" : balance.asset_code,
-					issuer: balance.asset_type === "native" ? null : balance.asset_issuer,
-					balance: balanceValue,
-					fiatBalance: 0,
-				};
-
-				if (balance.asset_type === "native") {
-					xlmBalance = balanceValue;
-				} else {
-					tokenHoldings.tokens.push(assetInfo);
-					tokenHoldings.balance += balanceValue;
-				}
-			}
-			tokenHoldings.total = tokenHoldings.tokens.length;
-		}
-
 		let xlmPrice = 0;
 		try {
 			const { price } = await getTickerPrice({ symbol: "XLM" });
 			xlmPrice = parseFloat(price) || 0;
 		} catch (err) {
 			console.error("Stellar getTickerPrice error:", err?.message);
+		}
+
+		const priceCache = new Map([["XLM", xlmPrice]]);
+
+		if (data.balances && data.balances.length > 0) {
+			for (const balance of data.balances) {
+				const balanceValue = parseFloat(balance.balance) || 0;
+
+				if (balance.asset_type === "native") {
+					xlmBalance = balanceValue;
+					continue;
+				}
+
+				const assetCode = balance.asset_code || "UNKNOWN";
+				const tokenPrice = await resolveStellarAssetPrice(assetCode, xlmPrice, priceCache);
+				const tokenFiat = Number((balanceValue * tokenPrice).toFixed(6));
+
+				const assetInfo = {
+					asset: assetCode,
+					symbol: assetCode,
+					name: assetCode,
+					issuer: balance.asset_issuer || null,
+					balance: balanceValue,
+					amount: balanceValue,
+					price: tokenPrice,
+					fiatBalance: tokenFiat,
+				};
+
+				tokenHoldings.tokens.push(assetInfo);
+				tokenHoldings.fiatBalance = Number((tokenHoldings.fiatBalance + tokenFiat).toFixed(6));
+			}
+			tokenHoldings.total = tokenHoldings.tokens.length;
+			tokenHoldings.balance = tokenHoldings.fiatBalance;
 		}
 
 		const xlmFiatBalance = xlmBalance * xlmPrice;
@@ -287,4 +442,9 @@ module.exports = {
 	getAddress,
 	getTransactionsList,
 	getTransactionDetail,
+	formatStroopsToXlm,
+	extractPaymentInfo,
+	selectRelevantOperationInfo,
+	formatSingleTransaction,
+	resolveStellarAssetPrice,
 };
