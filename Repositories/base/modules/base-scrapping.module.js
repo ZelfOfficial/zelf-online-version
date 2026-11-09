@@ -1,18 +1,24 @@
 const axios = require("axios");
 const moment = require("moment");
 const https = require("https");
+const { formatUnits } = require("ethers");
 const { get_ApiKey } = require("../../Solana/modules/oklink");
 const StandardizedChainFormatter = require("../../class/standardized-chain-formatter");
 const { getTickerPrice } = require("../../binance/modules/binance.module");
 const { getTokenPrice } = require("../utils/token-pricing");
 const commonTokens = require("../data/common-tokens.json");
+const config = require("../../../Core/config");
+const { fetchTransfers } = require("../../Alchemy/modules/alchemy-rpc.util");
 const {
 	normalizePage,
+	normalizeTransactionLimit,
 	formatDecimalString,
 	mapEtherscanV2Transaction,
 	mapBlockscoutTransaction,
 	mapBlockscoutTokenTransfer,
 	buildListResponse,
+	buildStandardRow,
+	inferTraffic,
 	fetchTransactionsFromEtherscanV2,
 	fetchTransactionsFromBlockscout,
 	pickBlockscoutCursor,
@@ -27,6 +33,7 @@ const {
 
 const BASE_CHAIN_ID = 8453;
 const BASE_BLOCKSCOUT_BASE = process.env.BASE_BLOCKSCOUT_URL || "https://base.blockscout.com";
+const BASE_ALCHEMY_CATEGORIES = Object.freeze(["external", "internal", "erc20"]);
 
 // Initialize Base formatter
 const baseFormatter = new StandardizedChainFormatter("Base", "ETH", "https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png");
@@ -320,12 +327,13 @@ const getTransactionsList = async (query) => {
 			console.error("Price fetch failed, using default:", priceError.message);
 		}
 
+		const alchemyProvider = async (hopTimeout) => getBaseAlchemyTransactions(address, query, show, price, hopTimeout);
 		const blockscoutProvider = async (hopTimeout, walkDeadlineMs) =>
 			getBaseBlockscoutTransactions(address, query, show, price, hopTimeout, walkDeadlineMs);
 		const oklinkProvider = async (hopTimeout) => getOKLinkTransactions(address, page, show, price, hopTimeout);
 		const baseScanProvider = async (hopTimeout) => getBaseScanTransactions(address, page, show, price, hopTimeout);
 
-		const ladderResult = await runTransactionProviderLadder([blockscoutProvider, oklinkProvider, baseScanProvider], {
+		const ladderResult = await runTransactionProviderLadder([alchemyProvider, blockscoutProvider, oklinkProvider, baseScanProvider], {
 			deadlineMs,
 			primaryProviderTimeoutMs: TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS,
 		});
@@ -534,6 +542,155 @@ const getPortfolioSummary = async (params) => {
 	} catch (error) {
 		console.error("Error getting Base portfolio summary:", error.message || "Unknown error");
 		return { error: "Failed to fetch portfolio summary" };
+	}
+};
+
+// Printable ASCII only: drops non-ASCII lookalikes and zero-width or other invisible marks.
+const isSpamAssetSymbol = (symbol) => {
+	if (symbol === null || symbol === undefined) return false;
+	const value = String(symbol);
+	if (!value) return false;
+	return /[^\u0020-\u007E]/.test(value);
+};
+
+const parseAlchemyDecimals = (decimal) => {
+	if (decimal === null || decimal === undefined || decimal === "") return 18;
+
+	try {
+		const parsed = typeof decimal === "number" ? decimal : Number(BigInt(String(decimal).trim()));
+		if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 36) return parsed;
+	} catch (_error) {
+		const parsed = Number(decimal);
+		if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 36) return parsed;
+	}
+
+	return 18;
+};
+
+const alchemyTransferAmount = (rawContract) => {
+	const rawValue = rawContract?.value;
+	if (rawValue === null || rawValue === undefined || rawValue === "") return "0";
+
+	try {
+		return formatUnits(BigInt(rawValue), parseAlchemyDecimals(rawContract?.decimal));
+	} catch (_error) {
+		return "0";
+	}
+};
+
+const alchemyBlockNumber = (blockNum) => {
+	if (blockNum === null || blockNum === undefined || blockNum === "") return "";
+
+	try {
+		return BigInt(blockNum).toString(10);
+	} catch (_error) {
+		return String(blockNum);
+	}
+};
+
+const alchemyPageKey = (value) => {
+	if (typeof value !== "string") return undefined;
+	const key = value.trim();
+	if (!key || key.toLowerCase() === "null") return undefined;
+	return key;
+};
+
+const alchemyTransferId = (transfer) => {
+	if (transfer?.uniqueId) return String(transfer.uniqueId);
+	const raw = transfer?.rawContract || {};
+	return [transfer?.hash || "", transfer?.category || "", raw.address || "", raw.value || "", transfer?.from || "", transfer?.to || ""].join(":");
+};
+
+const isAlchemyTransferPage = (page) => Boolean(page) && typeof page === "object" && Array.isArray(page.transfers);
+
+const alchemyTimestampMs = (transfer) => {
+	const parsed = Date.parse(transfer?.metadata?.blockTimestamp || "");
+	return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const mergeAlchemyTransfers = (incomingTransfers, outgoingTransfers) => {
+	const seen = new Set();
+	const merged = [];
+
+	for (const transfer of [...(outgoingTransfers || []), ...(incomingTransfers || [])]) {
+		if (!transfer || typeof transfer !== "object") continue;
+		const id = alchemyTransferId(transfer);
+		if (seen.has(id)) continue;
+		seen.add(id);
+		if (isSpamAssetSymbol(transfer.asset)) continue;
+		merged.push(transfer);
+	}
+
+	merged.sort((left, right) => alchemyTimestampMs(right) - alchemyTimestampMs(left));
+	return merged;
+};
+
+const mapAlchemyTransfer = (transfer, address, price) => {
+	const from = transfer.from || "";
+	const to = transfer.to || "";
+	const native = transfer.category === "external" || transfer.category === "internal";
+	const asset = transfer.asset || (native ? "ETH" : "TOKEN");
+
+	return buildStandardRow({
+		hash: transfer.hash,
+		block: alchemyBlockNumber(transfer.blockNum),
+		from,
+		to,
+		amount: alchemyTransferAmount(transfer.rawContract),
+		asset,
+		method: native ? "ETH transfer" : `${asset} transfer`,
+		traffic: inferTraffic(from, to, address),
+		txnFee: "0",
+		timestamp: transfer.metadata?.blockTimestamp || 0,
+		price: native ? price : 0,
+	});
+};
+
+/**
+ * Native and ERC-20 history from Alchemy. Returns null when Base is not configured
+ * or the transfer calls fail, so the provider ladder can continue.
+ */
+const getBaseAlchemyTransactions = async (address, query, show, price, hopTimeout = DEFAULT_TX_TIMEOUT_MS) => {
+	if (!config.alchemy?.networks?.base) return null;
+
+	const limit = normalizeTransactionLimit(show);
+	const pageNumber = normalizePage(query.page === "0" ? 1 : query.page);
+	const request = {
+		address,
+		maxCount: limit,
+		network: "base",
+		category: BASE_ALCHEMY_CATEGORIES,
+		order: "desc",
+		timeout: hopTimeout,
+	};
+
+	try {
+		const [incoming, outgoing] = await Promise.all([
+			fetchTransfers({ ...request, direction: "in", pageKey: alchemyPageKey(query.toPageKey) }),
+			fetchTransfers({ ...request, direction: "out", pageKey: alchemyPageKey(query.fromPageKey) }),
+		]);
+
+		if (!isAlchemyTransferPage(incoming) || !isAlchemyTransferPage(outgoing)) return null;
+
+		const merged = mergeAlchemyTransfers(incoming.transfers, outgoing.transfers);
+		const transactions = baseFormatter.formatTransactions(merged.map((transfer) => mapAlchemyTransfer(transfer, address, price)));
+
+		if (!transactions.length) return null;
+
+		return {
+			...buildListResponse(transactions, {
+				page: pageNumber,
+				show: limit,
+				nextPageParams: {
+					fromPageKey: outgoing.pageKey || null,
+					toPageKey: incoming.pageKey || null,
+				},
+			}),
+			source: "alchemy",
+		};
+	} catch (_error) {
+		console.log("Base Alchemy transactions failed: ALCHEMY_TRANSFERS_FAILED");
+		return null;
 	}
 };
 

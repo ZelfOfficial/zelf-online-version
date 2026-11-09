@@ -1,14 +1,11 @@
-const { getCleanInstance } = require("../../../Core/axios");
 const { formatEther, formatUnits, getAddress, isAddress } = require("ethers");
 
 const config = require("../../../Core/config");
+const { fetchTransfers, rpcRequest } = require("./alchemy-rpc.util");
 const { searchTag } = require("../../Tags/modules/tags-search.module");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { getSessionFullTagName } = require("../middlewares/alchemy.middleware");
 
-const instance = getCleanInstance(config.alchemy?.timeoutMs || 30000);
-
-const ALCHEMY_TRANSFER_CATEGORIES = Object.freeze(["external", "internal", "erc20", "erc721", "erc1155", "specialnft"]);
 const ALCHEMY_ALL_TOKENS_SPEC = "erc20";
 const NATIVE_SYMBOLS = Object.freeze({
     arbitrum: "ETH",
@@ -37,11 +34,6 @@ const sameAddress = (left, right) => {
     if (!normalizedLeft || !normalizedRight) return false;
 
     return normalizedLeft === normalizedRight;
-};
-
-const toHexQuantity = (value) => {
-    const parsed = Number(value);
-    return `0x${parsed.toString(16)}`;
 };
 
 const parseHexBalance = (value) => {
@@ -80,41 +72,6 @@ const getTokenBalanceSpec = (network, tokenMode = "all") => {
     }
 
     return ALCHEMY_ALL_TOKENS_SPEC;
-};
-
-const getNetworkUrl = (network) => {
-    const url = config.alchemy?.networks?.[network];
-
-    if (!url) {
-        throw createError(409, "unsupported_network");
-    }
-
-    return url;
-};
-
-const rpcRequest = async (network, method, params = []) => {
-    const url = getNetworkUrl(network);
-
-    try {
-        const { data } = await instance.post(url, {
-            id: `${network}-${method}-${Date.now()}`,
-            jsonrpc: "2.0",
-            method,
-            params,
-        });
-
-        if (data?.error) {
-            throw createError(500, data.error.message || "alchemy_request_failed");
-        }
-
-        return data?.result;
-    } catch (error) {
-        if (error.status) throw error;
-        if (error.response?.data?.error?.message) throw createError(500, error.response.data.error.message);
-        if (error.code === "ECONNABORTED") throw createError(504, "alchemy_timeout");
-
-        throw createError(500, error.message || "alchemy_request_failed");
-    }
 };
 
 const resolveOwnedTagAddress = async ({ tagName, domain }, authUser) => {
@@ -240,29 +197,6 @@ const sortTransfersDescending = (left, right) => {
     return rightTime - leftTime;
 };
 
-const fetchTransfers = async ({ address, direction, maxCount, network, pageKey }) => {
-    const params = {
-        category: ALCHEMY_TRANSFER_CATEGORIES,
-        excludeZeroValue: false,
-        fromBlock: "0x0",
-        maxCount: toHexQuantity(maxCount),
-        toBlock: "latest",
-        withMetadata: true,
-    };
-
-    if (pageKey) {
-        params.pageKey = pageKey;
-    }
-
-    if (direction === "in") {
-        params.toAddress = address;
-    } else {
-        params.fromAddress = address;
-    }
-
-    return rpcRequest(network, "alchemy_getAssetTransfers", [params]);
-};
-
 const getBalances = async ({ domain, networks, tagName, tokenMode = "all" }, authUser) => {
     const { address, fullTagName } = await resolveOwnedTagAddress({ tagName, domain }, authUser);
     const balances = await Promise.all(networks.map((network) => getBalancesForNetwork(network, address, tokenMode)));
@@ -330,6 +264,7 @@ const getTransaction = async ({ domain, network, tagName, transactionHash }, aut
 
 module.exports = {
     fetchTokenMetadata,
+    fetchTransfers,
     formatTokenBalance,
     getBalances,
     getBalancesForNetwork,
