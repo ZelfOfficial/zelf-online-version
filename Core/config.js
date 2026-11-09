@@ -459,6 +459,9 @@ const configuration = {
             avalanche:
                 process.env.ALCHEMY_AVALANCHE_URL ||
                 (process.env.ALCHEMY_API_KEY ? `https://avax-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}` : null),
+            base:
+                process.env.ALCHEMY_BASE_URL ||
+                (process.env.ALCHEMY_API_KEY ? `https://base-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}` : null),
         },
     },
     lifi: {
