@@ -10,13 +10,23 @@ const {
 	normalizePage,
 	formatDecimalString,
 	mapEtherscanV2Transaction,
+	mapBlockscoutTransaction,
+	mapBlockscoutTokenTransfer,
 	buildListResponse,
 	fetchTransactionsFromEtherscanV2,
+	fetchTransactionsFromBlockscout,
+	pickBlockscoutCursor,
+	pickBlockscoutTokenCursor,
+	runTransactionProviderLadder,
 	DEFAULT_TX_TIMEOUT_MS,
+	TX_LIST_DEADLINE_MS,
+	TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS,
 	formatUtcIsoDate,
+	isTimeoutError,
 } = require("../../etherscan/modules/evm-transaction-list.util");
 
 const BASE_CHAIN_ID = 8453;
+const BASE_BLOCKSCOUT_BASE = process.env.BASE_BLOCKSCOUT_URL || "https://base.blockscout.com";
 
 // Initialize Base formatter
 const baseFormatter = new StandardizedChainFormatter("Base", "ETH", "https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png");
@@ -291,58 +301,43 @@ const getTokens = async (params, query) => {
  * @param {Object} query - Query parameters containing address, page, and show
  * @returns {Array} Array of transactions
  */
+const emptyTransactionList = (page) => ({
+	pagination: { records: "0", pages: "0", page: String(page) },
+	transactions: [],
+});
+
 const getTransactionsList = async (query) => {
 	try {
 		const { address, page = "0", show = "100" } = query;
+		const deadlineMs = query.deadlineMs || TX_LIST_DEADLINE_MS;
+		const pageNumber = normalizePage(page === "0" ? 1 : page);
 
-		// Get ETH price for transaction formatting
-		let price = "3000.00000000"; // Default price
+		let price = "3000.00000000";
 		try {
-			const { getTickerPrice } = require("../../binance/modules/binance.module");
 			const priceData = await getTickerPrice({ symbol: "ETH" });
 			price = priceData.price || "3000.00000000";
 		} catch (priceError) {
 			console.error("Price fetch failed, using default:", priceError.message);
 		}
 
-		// Try OKLink API first (it might work with the right endpoint)
-		let response;
-		let source;
+		const blockscoutProvider = async (hopTimeout, walkDeadlineMs) =>
+			getBaseBlockscoutTransactions(address, query, show, price, hopTimeout, walkDeadlineMs);
+		const oklinkProvider = async (hopTimeout) => getOKLinkTransactions(address, page, show, price, hopTimeout);
+		const baseScanProvider = async (hopTimeout) => getBaseScanTransactions(address, page, show, price, hopTimeout);
 
-		try {
-			const oklinkResponse = await getOKLinkTransactions(address, page, show, price);
-			if (oklinkResponse && oklinkResponse.transactions && oklinkResponse.transactions.length > 0) {
-				response = oklinkResponse;
-				source = "oklink";
-			}
-		} catch (oklinkError) {
-			console.error("OKLink failed:", oklinkError.message);
+		const ladderResult = await runTransactionProviderLadder([blockscoutProvider, oklinkProvider, baseScanProvider], {
+			deadlineMs,
+			primaryProviderTimeoutMs: TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS,
+		});
+
+		if (ladderResult) {
+			return ladderResult;
 		}
 
-		// Try BaseScan API as fallback
-		if (!response) {
-			try {
-				const baseScanResponse = await getBaseScanTransactions(address, page, show, price);
-				if (baseScanResponse && baseScanResponse.transactions && baseScanResponse.transactions.length > 0) {
-					response = baseScanResponse;
-					source = "basescan";
-				}
-			} catch (baseScanError) {
-				console.error("BaseScan failed:", baseScanError.message);
-			}
-		}
-
-		// Add source to response if response exists
-		if (response) {
-			response.source = source;
-			return response;
-		}
-
-		// If no transactions found from external APIs, return empty result
-		return { pagination: { records: "0", pages: "0", page: String(page) }, transactions: [] };
+		return emptyTransactionList(pageNumber);
 	} catch (error) {
 		console.error("Error getting Base transactions:", error.message || "Unknown error");
-		return { pagination: { records: "0", pages: "0", page: "0" }, transactions: [] };
+		return emptyTransactionList("0");
 	}
 };
 
@@ -571,6 +566,109 @@ const getBaseScanTransactions = async (address, page, show, price, timeout = DEF
 	}
 };
 
+const blockscoutPageRows = (page) => (Array.isArray(page?.items) ? page.items : []);
+
+const incompleteBlockscoutList = (pageNumber, limit, page) => ({
+	...buildListResponse([], {
+		page: pageNumber,
+		show: limit,
+		incomplete: true,
+		hasMore: page?.hasMore !== false,
+		pagingNote: page?.pagingNote,
+		nextPageParams: page?.nextPageParams || undefined,
+	}),
+	source: "blockscout",
+});
+
+/**
+ * Native transfers and ERC-20/721/1155 transfers from Base Blockscout API v2.
+ * Same row shape as the Etherscan V2 mapper used by the extension.
+ */
+const getBaseBlockscoutTransactions = async (address, query, show, price, hopTimeout = DEFAULT_TX_TIMEOUT_MS, walkDeadlineMs) => {
+	const limit = parseInt(show, 10) || 25;
+	const pageNumber = normalizePage(query.page === "0" ? 1 : query.page);
+	const walkBudgetMs = typeof walkDeadlineMs === "number" && walkDeadlineMs > 0 ? walkDeadlineMs : hopTimeout;
+	const httpGet = (url, options) => instance.get(url, options);
+	const request = {
+		baseUrl: BASE_BLOCKSCOUT_BASE,
+		address,
+		limit,
+		page: pageNumber,
+		timeout: hopTimeout,
+		deadlineMs: walkBudgetMs,
+	};
+
+	try {
+		const [nativeSettled, tokenSettled] = await Promise.allSettled([
+			fetchTransactionsFromBlockscout(httpGet, {
+				...request,
+				cursor: pickBlockscoutCursor(query),
+				resource: "transactions",
+			}),
+			fetchTransactionsFromBlockscout(httpGet, {
+				...request,
+				cursor: pickBlockscoutTokenCursor(query),
+				resource: "token-transfers",
+			}),
+		]);
+
+		const nativePage = nativeSettled.status === "fulfilled" ? nativeSettled.value : null;
+		const tokenPage = tokenSettled.status === "fulfilled" ? tokenSettled.value : null;
+		const nativeError = nativeSettled.status === "rejected" ? nativeSettled.reason : null;
+		const tokenError = tokenSettled.status === "rejected" ? tokenSettled.reason : null;
+
+		if (!nativePage && !tokenPage) {
+			if (isTimeoutError(nativeError) || isTimeoutError(tokenError)) {
+				throw isTimeoutError(nativeError) ? nativeError : tokenError;
+			}
+			return null;
+		}
+
+		const nativeRows = blockscoutPageRows(nativePage).map((tx) => mapBlockscoutTransaction(tx, address, { asset: "ETH", price }));
+		const tokenRows = blockscoutPageRows(tokenPage).map((tx) => mapBlockscoutTokenTransfer(tx, address));
+		const seen = new Set();
+		const merged = [...nativeRows, ...tokenRows]
+			.filter((row) => {
+				const key = [row.hash, row.asset, row.from, row.to, row.amount, row.timestamp].join("|");
+				if (seen.has(key)) return false;
+				seen.add(key);
+				return true;
+			})
+			.sort((left, right) => (right.timestamp || 0) - (left.timestamp || 0));
+		const transactions = baseFormatter.formatTransactions(merged);
+		const incomplete = Boolean(nativePage?.incomplete || tokenPage?.incomplete);
+
+		if (!transactions.length) {
+			if (incomplete) {
+				return incompleteBlockscoutList(pageNumber, limit, nativePage?.incomplete ? nativePage : tokenPage);
+			}
+			return null;
+		}
+
+		return {
+			...buildListResponse(transactions, {
+				page: pageNumber,
+				show: limit,
+				nextPageParams: nativePage?.nextPageParams || undefined,
+				nextTokenPageParams: tokenPage?.nextPageParams || undefined,
+				incomplete,
+				hasMore: incomplete ? true : undefined,
+				pagingNote: nativePage?.pagingNote || tokenPage?.pagingNote,
+			}),
+			source: "blockscout",
+		};
+	} catch (error) {
+		if (isTimeoutError(error)) {
+			return incompleteBlockscoutList(pageNumber, limit, {
+				hasMore: true,
+				pagingNote: "Transaction list pagination exceeded the time budget before reaching the requested page.",
+			});
+		}
+		console.log("Base Blockscout transactions failed:", error.message);
+		return null;
+	}
+};
+
 /**
  * Get OKLink transactions for Base (using the working endpoint)
  * @param {string} address - Address to get transactions for
@@ -639,6 +737,7 @@ const getOKLinkTransactions = async (address, page, show, price, timeout = DEFAU
 			const transactions = baseFormatter.formatTransactions(rawTransactions);
 
 			return {
+				source: "oklink",
 				pagination: {
 					records: data.data.total.toString(),
 					pages: Math.ceil(data.data.total / parseInt(show)).toString(),

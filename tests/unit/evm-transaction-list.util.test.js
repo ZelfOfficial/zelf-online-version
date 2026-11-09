@@ -6,6 +6,7 @@ const {
 	mapEtherscanV2Transaction,
 	mapRouteScanTransaction,
 	mapBlockscoutTransaction,
+	mapBlockscoutTokenTransfer,
 	buildListResponse,
 	fetchTransactionsFromEtherscanV2,
 	fetchTransactionsFromRouteScan,
@@ -99,6 +100,52 @@ describe("evm-transaction-list.util", () => {
 		expect(row.fiatAmount).toBe("2500.00");
 		expect(row.timestamp).toBe(Math.floor(Date.parse("2024-01-01T00:00:00.000Z") / 1000));
 		expect(row.date).toBe("2024-01-01 00:00:00");
+	});
+
+	it("maps Blockscout token transfers with token decimals and exchange rate", () => {
+		const row = mapBlockscoutTokenTransfer(
+			{
+				tx_hash: "0x" + "c".repeat(64),
+				block_number: 200,
+				timestamp: "2024-07-01T12:00:00.000000Z",
+				from: { hash: "0x" + "1".repeat(40) },
+				to: { hash: TEST_ADDRESS },
+				method: "transfer",
+				token: { symbol: "USDC", decimals: "6", exchange_rate: "1", type: "ERC-20" },
+				total: { decimals: "6", value: "2500000" },
+			},
+			TEST_ADDRESS
+		);
+
+		expect(row).toMatchObject({
+			hash: "0x" + "c".repeat(64),
+			asset: "USDC",
+			amount: "2.5",
+			fiatAmount: "2.50",
+			traffic: "IN",
+			method: "transfer",
+			block: "200",
+		});
+		expect(row.date).toBe("2024-07-01 12:00:00");
+	});
+
+	it("maps Blockscout NFT transfers with zero decimals", () => {
+		const row = mapBlockscoutTokenTransfer(
+			{
+				transaction_hash: "0x" + "d".repeat(64),
+				block_number: 3,
+				timestamp: "2024-07-02T00:00:00.000000Z",
+				from: { hash: TEST_ADDRESS },
+				to: { hash: "0x" + "2".repeat(40) },
+				token: { symbol: "BASE-NFT", type: "ERC-721" },
+				total: { value: "7" },
+			},
+			TEST_ADDRESS
+		);
+
+		expect(row.amount).toBe("7");
+		expect(row.asset).toBe("BASE-NFT");
+		expect(row.traffic).toBe("OUT");
 	});
 
 	it("maps Blockscout rows with nested from/to and ISO timestamp", () => {
@@ -390,6 +437,36 @@ describe("evm-transaction-list.util", () => {
 
 		expect(page2.items[0].hash).toBe("0x2");
 		expect(httpGet).toHaveBeenCalledTimes(2);
+	});
+
+	it("fetchTransactionsFromBlockscout requests token-transfers and rejects unknown resources", async () => {
+		const httpGet = jest.fn().mockResolvedValueOnce({
+			status: 200,
+			data: {
+				items: [{ tx_hash: "0x" + "e".repeat(64), total: { value: "1", decimals: "6" } }],
+				next_page_params: { block_number: 4, index: 1 },
+			},
+		});
+
+		const page = await fetchTransactionsFromBlockscout(httpGet, {
+			baseUrl: "https://base.blockscout.com/",
+			address: TEST_ADDRESS,
+			limit: 10,
+			page: 1,
+			resource: "token-transfers",
+			timeout: 7000,
+		});
+
+		expect(page.items).toHaveLength(1);
+		expect(httpGet.mock.calls[0][0]).toBe(`https://base.blockscout.com/api/v2/addresses/${TEST_ADDRESS}/token-transfers`);
+		expect(httpGet.mock.calls[0][1].timeout).toBe(7000);
+		await expect(
+			fetchTransactionsFromBlockscout(httpGet, {
+				baseUrl: "https://base.blockscout.com",
+				address: TEST_ADDRESS,
+				resource: "internal-transactions",
+			})
+		).rejects.toThrow("BLOCKSCOUT_RESOURCE_UNSUPPORTED");
 	});
 
 	it("fetchTransactionsFromBlockscout uses cursor directly for the next page", async () => {

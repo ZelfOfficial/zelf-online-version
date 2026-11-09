@@ -57,7 +57,7 @@ const transactions = async (ctx) => {
 	} catch (error) {
 		console.error("Base transactions controller error:", error.message);
 		ctx.status = 500;
-		ctx.body = { error: "Internal server error" };
+		ctx.body = { error: "Internal server error", code: "BASE_HISTORY_FAILED" };
 	}
 };
 
