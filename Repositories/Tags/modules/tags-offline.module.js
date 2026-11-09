@@ -232,7 +232,7 @@ const leaseOfflineTag = async (params, authUser) => {
         assertDomainAcceptsNewUse(domain);
     }
 
-    const referralTagObject = await _validateReferral(referralTagName, authUser, domainConfig);
+    const referralTagObject = await _validateReferral(referralTagName, authUser, domainConfig, { enforceLimit: !sync });
 
     const decryptedParams = await TagsPartsModule.decryptParams({ password: syncPassword, removePGP: params.removePGP }, authUser);
 

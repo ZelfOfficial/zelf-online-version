@@ -33,6 +33,7 @@ This is a Koa backend API with MongoDB, Mongoose, and JWT-protected routes.
 
 -   `server.js` loads unprotected routes first, then applies `koa-jwt`, then loads protected routes.
 -   Register new endpoints through `Routes/unprotected-repositories.js` or `Routes/protected-repositories.js`; adding a repository route file alone is not enough.
+-   `GET /api/zelf-ids/referral-availability` is public (no JWT). New signups past `REFERRAL_REWARD_LIMIT` return `409` `REFERRAL_LIMIT_REACHED`. Recovery is not capped.
 -   Wallet RPC is session-JWT only. `POST /api/protected/rpc/:chainKey` is JSON-RPC (ethereum, ethereum-sepolia, polygon, avalanche, bsc, arbitrum, optimism, base, blockdag, solana). Bitcoin Blockbook is `/api/protected/rpc/btc/:network/...`. Stellar Horizon is `/api/protected/rpc/stellar/...`. `POST /api/rpc/:chainKey` is the same JSON-RPC proxy and also requires a JWT. Paid upstream URLs come from env (`EXTENSION_*` and the aliases in `.env.example`). Contract comments live in `Repositories/RPC/routes/protected-rpc.routes.js`. Focused check: `npm run test:rpc-proxy`.
 -   Most backend work follows the repository pattern under `Repositories/<Feature>/`: routes, controllers, modules, middlewares, and models.
 -   `/api/zelf-ids` is owned by `Repositories/ZelfID/` and is served on `https://v4.zelf.world` (same host as ZelfEncrypt v4, `ZELF_PROOF_V4_URL`, path `/zelf-v4`). `/api/tags` stays on Tags + ZelfEncrypt 3.1.6 (`https://v4.zelf.world` + `/zelf`).

@@ -118,6 +118,21 @@ const searchTagsByDomain = async (ctx) => {
     }
 };
 
+const referralAvailability = async (ctx) => {
+    try {
+        const { requireReferralDomainConfig } = require("../../Tags/modules/referral-capacity.module");
+        const domainConfig = await requireReferralDomainConfig(ctx.state.extractedDomain);
+        const data = await Module.getReferralAvailability(ctx.state.extractedName, domainConfig);
+
+        ctx.body = { data };
+    } catch (error) {
+        const _exception = errorHandler(error, ctx);
+
+        ctx.status = _exception.status;
+        ctx.body = { message: _exception.message, code: _exception.code };
+    }
+};
+
 const leaseTag = async (ctx) => {
     try {
         const { extractedDomain, extractedName } = ctx.state;
@@ -570,6 +585,7 @@ const extendLicenseForOwnerHandler = async (ctx) => {
 module.exports = {
     searchTag,
     searchTagsByDomain,
+    referralAvailability,
     leaseTag,
     leaseOffline,
     syncAddresses,

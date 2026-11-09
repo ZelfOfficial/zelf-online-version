@@ -186,7 +186,7 @@ const leaseOffline = async (params, authUser) => {
     await ZelfIdModule._findDuplicatedTag(tagName, domain, domainConfig);
     assertDomainAcceptsNewUse(domain);
 
-    const referralTagObject = await ZelfIdModule._validateReferral(referralTagName, authUser, domainConfig);
+    const referralTagObject = await ZelfIdModule._validateReferral(referralTagName, authUser, domainConfig, { enforceLimit: true });
     const decrypted = await ZelfIdPartsModule.decryptParams({ password: params.password, removePGP: params.removePGP }, authUser);
     const password = decrypted.password;
     const securityType = password ? (/^\d{6}$/.test(password) ? "pin" : "password") : null;
