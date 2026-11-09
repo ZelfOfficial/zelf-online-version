@@ -480,50 +480,58 @@ const generatePGPKeys = async (dataToEncrypt, addresses, password) => {
     };
 };
 
+/**
+ * Same rule as decryptParams. Armored PGP is session-decrypted. Blank values become null.
+ * Any other value is kept as sent. `removePGP` is ignored: the face whitelist strips it, and a
+ * phone session has no PGP key, so plaintext must not be passed to sessionDecrypt.
+ * @param {string|null|undefined} value
+ * @param {Object} authUser
+ */
+const decryptSensitiveValue = async (value, authUser) => SessionModule.decryptIfPGP(value, authUser);
+
 const decryptCreditCardParams = async (params, authUser) => {
-    let { cvv, cardNumber, masterPassword } = params;
-
-    if (params.removePGP) {
-        return {
-            cvv,
-            cardNumber,
-            masterPassword,
-        };
-    }
-
-    cvv = await SessionModule.sessionDecrypt(params.cvv, authUser);
-    cardNumber = params.cardNumber ? await SessionModule.sessionDecrypt(params.cardNumber, authUser) : null;
-    masterPassword = params.masterPassword ? await SessionModule.sessionDecrypt(params.masterPassword, authUser) : null;
+    const [cvv, cardNumber, masterPassword] = await Promise.all([
+        decryptSensitiveValue(params.cvv, authUser),
+        decryptSensitiveValue(params.cardNumber, authUser),
+        decryptSensitiveValue(params.masterPassword, authUser),
+    ]);
 
     return { cvv, cardNumber, masterPassword };
 };
 
 const decryptPasswordParams = async (params, authUser) => {
-    let { password } = params;
-
-    if (params.removePGP) {
-        return {
-            password,
-        };
-    }
-
-    password = await SessionModule.sessionDecrypt(params.password, authUser);
+    const password = await decryptSensitiveValue(params.password, authUser);
 
     return { password };
 };
 
+/**
+ * Note values are a map. Only armored strings are unwrapped; plaintext keys (including a missing
+ * `content`) stay as the client sent them.
+ */
 const decryptNotesParams = async (params, authUser) => {
-    const { keyValuePairs } = params;
+    const source = params.keyValuePairs;
 
-    if (params.removePGP) {
-        return {
-            keyValuePairs,
-        };
+    if (!source || typeof source !== "object" || Array.isArray(source)) {
+        return { keyValuePairs: source };
     }
 
-    keyValuePairs.content = await SessionModule.sessionDecrypt(keyValuePairs.content, authUser);
+    const keys = Object.keys(source);
+    const values = await Promise.all(
+        keys.map((key) =>
+            SessionModule.isPGPMessage(source[key]) ? decryptSensitiveValue(source[key], authUser) : source[key],
+        ),
+    );
 
-    return { keyValuePairs };
+    let changed = false;
+    const keyValuePairs = {};
+
+    keys.forEach((key, index) => {
+        keyValuePairs[key] = values[index];
+        if (values[index] !== source[key]) changed = true;
+    });
+
+    return { keyValuePairs: changed ? keyValuePairs : source };
 };
 
 const encryptCreditCardParams = async (params, authUser) => {
