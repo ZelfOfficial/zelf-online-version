@@ -5,13 +5,18 @@ const {
     groupReferralRecords,
     explicitReferralPrice,
     referralRewardLimit,
-    countedReferralFriends,
+    canonicalReferralTagName,
+    referralCapacity,
 } = require("./referral-reward.util");
+const {
+    requireReferralDomainConfig,
+    rewardedReferralFriends,
+    loadReferralRecords,
+} = require("./referral-capacity.module");
 const config = require("../../../Core/config");
 const { searchTag } = require("./tags.module");
-const TagsSearchModule = require("./tags-search.module");
 const moment = require("moment");
-const { getDomainConfig, loadDynamicDomains } = require("../config/supported-domains");
+const { getDomainConfig } = require("../config/supported-domains");
 const jwt = require("jsonwebtoken");
 const bitcoinModule = require("../../bitcoin/modules/bitcoin-scrapping.module");
 const ETHModule = require("../../etherscan/modules/etherscan-scrapping.module");
@@ -855,37 +860,7 @@ const _storeReferralRewardReceipt = async ({
  * @returns {Promise<Object>} Domain config
  * @throws 400 domain_not_supported, or 503 domain_config_unavailable when the licenses cannot be loaded
  */
-const _requireDomainConfig = async (domain) => {
-    const name = String(domain || "")
-        .replace(/^\./, "")
-        .trim()
-        .toLowerCase();
-
-    if (!name) throw new Error("400:domain_not_supported");
-
-    const cached = getDomainConfig(name);
-
-    if (cached) return cached;
-
-    let loaded = null;
-
-    try {
-        loaded = await loadDynamicDomains(null, false);
-    } catch (error) {
-        console.error("Referral domain config reload failed:", error?.message || error);
-    }
-
-    const domainConfig = getDomainConfig(name);
-
-    if (domainConfig) return domainConfig;
-
-    if (loaded && Object.keys(loaded).length) throw new Error("400:domain_not_supported");
-
-    const err = new Error("domain_config_unavailable");
-    err.status = 503;
-    err.code = "domain_config_unavailable";
-    throw err;
-};
+const _requireDomainConfig = (domain) => requireReferralDomainConfig(domain);
 
 /**
  * Step 1: Verify referral exists in IPFS/Arweave and return the friend's record.
@@ -899,28 +874,7 @@ const _requireDomainConfig = async (domain) => {
  */
 const _findReferralRecordInStorage = async (referralTagName, friendFullTagName, friendDomain, rewardType, authUser) => {
     const domainConfig = await _requireDomainConfig(friendDomain);
-
-    const ipfsRecords = await TagsSearchModule.searchIPFS(
-        {
-            key: "referralTagName",
-            value: referralTagName,
-            domain: friendDomain,
-            domainConfig,
-        },
-        authUser
-    );
-
-    const arweaveRecords = await TagsSearchModule.searchArweave(
-        {
-            key: "referralTagName",
-            value: referralTagName,
-            domain: friendDomain,
-            domainConfig,
-        },
-        authUser
-    );
-
-    const records = [...ipfsRecords, ...arweaveRecords];
+    const records = await loadReferralRecords(referralTagName, friendDomain, domainConfig, authUser);
 
     const friendRecord = findReferralRecord(records, friendFullTagName, rewardType);
 
@@ -1010,20 +964,6 @@ const _readReferralReward = async (friendFullTagName, referralTagName, rewardTyp
     return { ipfsReward, mongoRecord, claimed: Boolean(ipfsReward || mongoRecord?.status === "completed" || mongoRecord?.payload?.signature) };
 };
 
-/** Friends (canonical names) that already have a reward paid or in flight for this referrer. */
-const _rewardedReferralFriends = async (referralTagName) => {
-    const records = await ReferralRewardModel.find(
-        { referralTagName, status: { $in: ["pending", "processing", "completed"] } },
-        { tagName: 1, domain: 1 }
-    );
-    return new Set(
-        (Array.isArray(records) ? records : []).map((r) => {
-            const name = referralName(r.tagName);
-            return name.includes(".") ? name : `${name}.${r.domain || "zelf"}`;
-        })
-    );
-};
-
 const _checkIfRewardAlreadyClaimed = async (friendFullTagName, referralTagName, rewardType) => {
     const result = await _readReferralReward(friendFullTagName, referralTagName, rewardType);
     if (result.claimed) throw new Error("reward_already_claimed");
@@ -1040,7 +980,7 @@ const _checkIfRewardAlreadyClaimed = async (friendFullTagName, referralTagName, 
  * @param {Object} authUser - Authenticated user (referrer)
  */
 const claimReferralReward = async (tagName, domain, friendTagName, friendDomain, authUser, rewardType = null) => {
-    const referralTagName = tagName.includes(".") ? tagName : `${tagName}.${domain}`;
+    const referralTagName = canonicalReferralTagName(tagName.includes(".") ? tagName : `${tagName}.${domain}`, domain);
 
     const friendFullTagName = friendTagName.includes(".") ? friendTagName : `${friendTagName}.${friendDomain}`;
 
@@ -1073,10 +1013,10 @@ const claimReferralReward = async (tagName, domain, friendTagName, friendDomain,
 
     const rewardRecord = await _checkIfRewardAlreadyClaimed(friendFullTagName, referralTagName, rewardType);
 
-    // Only the first N friends earn rewards; extra referrals stay as history (#45).
+    // Same counted set as signup and GET /api/zelf-ids/referral-availability.
     const limit = referralRewardLimit();
-    const rewardedFriends = await _rewardedReferralFriends(referralTagName);
-    const counted = countedReferralFriends(groupReferralRecords(domainReferralRecords), rewardedFriends, limit);
+    const rewardedFriends = await rewardedReferralFriends(referralTagName);
+    const counted = referralCapacity(groupReferralRecords(domainReferralRecords), rewardedFriends, limit).counted;
     const friendKey = referralName(friendFullTagName);
     if (!rewardedFriends.has(friendKey) && (rewardedFriends.size >= limit || !counted.has(friendKey))) {
         throw _claimError(409, "referral_limit_reached");
@@ -1116,32 +1056,12 @@ const claimReferralReward = async (tagName, domain, friendTagName, friendDomain,
  * @param {Object} authUser
  */
 const getMyReferrals = async (tagName, domain, authUser) => {
-    const referralTagName = tagName.includes(".") ? tagName : `${tagName}.${domain}`;
+    const referralTagName = canonicalReferralTagName(tagName.includes(".") ? tagName : `${tagName}.${domain}`, domain);
 
     // Never answer "no referrals" because the domain config was momentarily missing (#514).
     const domainConfig = await _requireDomainConfig(domain);
 
-    const ipfsRecords = await TagsSearchModule.searchIPFS(
-        {
-            key: "referralTagName",
-            value: referralTagName,
-            domain,
-            domainConfig,
-        },
-        authUser
-    );
-
-    const arweaveRecords = await TagsSearchModule.searchArweave(
-        {
-            key: "referralTagName",
-            value: referralTagName,
-            domain,
-            domainConfig,
-        },
-        authUser
-    );
-
-    const domainRecords = [...ipfsRecords, ...arweaveRecords];
+    const domainRecords = await loadReferralRecords(referralTagName, domain, domainConfig, authUser);
 
     const map = groupReferralRecords(domainRecords);
 
@@ -1149,7 +1069,7 @@ const getMyReferrals = async (tagName, domain, authUser) => {
     let totalEarnedInZNS = 0;
 
     const limit = referralRewardLimit();
-    const counted = countedReferralFriends(map, await _rewardedReferralFriends(referralTagName), limit);
+    const counted = referralCapacity(map, await rewardedReferralFriends(referralTagName), limit).counted;
 
     for (const [name, record] of map) {
         if (!name) continue;

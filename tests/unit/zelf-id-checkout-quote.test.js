@@ -96,5 +96,33 @@ describe("Zelf ID checkout quote fields", () => {
         expect(quote.billableUsdPrice).toBe(0);
         expect(quote.freeCheckout).toBe(true);
         expect(quote.reward).toBe(9.9);
+        expect(ZelfIdModule._validateReferral).toHaveBeenCalledWith("coupon.zelf", {}, domainConfig, { enforceLimit: true });
+    });
+
+    test("a referral already stored on the record is not re-checked against the cap", async () => {
+        ZelfIdModule.searchTag.mockResolvedValue({
+            available: false,
+            tagName: "checkoutqa",
+            tagObject: {
+                publicData: {
+                    tagName: "checkoutqa.zelf",
+                    type: "mainnet",
+                    plan: "free",
+                    duration: "1",
+                    v: "4",
+                    expiresAt: "2126-01-01 00:00:00",
+                    referralTagName: "old.zelf",
+                    referralSolanaAddress: "stored-sol",
+                },
+            },
+            ipfs: [{ id: "ipfs-1" }],
+        });
+
+        await getPaymentOptions("checkoutqa", "zelf", "1", {}, {
+            requestedPlan: "unlimited",
+            referralTagName: "coupon",
+        });
+
+        expect(ZelfIdModule._validateReferral).not.toHaveBeenCalled();
     });
 });

@@ -70,7 +70,7 @@ const leaseTag = async (params, authUser) => {
     await _findDuplicatedTag(tagName, domain, domainConfig);
     assertDomainAcceptsNewUse(domain);
 
-    const referralTagObject = await _validateReferral(referralTagName, authUser, domainConfig);
+    const referralTagObject = await _validateReferral(referralTagName, authUser, domainConfig, { enforceLimit: true });
 
     const decryptedParams = await TagsPartsModule.decryptParams(params, authUser);
 
@@ -509,7 +509,11 @@ const _findTag = async (params, storage, authUser) => {
  * @param {Object} authUser
  * @param {Domain} domainConfig
  */
-const _validateReferral = async (referralTagName, authUser, domainConfig) => {
+/**
+ * Resolve a referral code. `options.enforceLimit` rejects a new registration once the
+ * inviter is at the reward cap. Recovery omits the flag.
+ */
+const _validateReferral = async (referralTagName, authUser, domainConfig, options = {}) => {
     if (!referralTagName) return null;
 
     const domain = domainConfig.name;
@@ -530,6 +534,11 @@ const _validateReferral = async (referralTagName, authUser, domainConfig) => {
 
     if (tagObject.publicData.type === "hold") {
         tagObject.publicData[domainConfig.getTagKey()] = tagObject.publicData[domainConfig.getTagKey()].replace(".hold", "");
+    }
+
+    if (options.enforceLimit) {
+        const { assertReferrerAcceptsNewReferral } = require("./referral-capacity.module");
+        await assertReferrerAcceptsNewReferral(tagObject, domainConfig);
     }
 
     return tagObject;

@@ -608,9 +608,10 @@ const buildPlanChangeMetadata = (params, tagObject, domainConfig) => {
 };
 
 /**
- * Referral for a checkout. The record's stored referral always wins (it was set at lease).
- * Otherwise an optional checkout `referralTagName` must be an existing, different Zelf ID
- * of the same domain. Its discount comes only from the license (`payment.whitelist`).
+ * Referral for a checkout. The record's stored referral always wins (it was set at lease)
+ * and is not re-checked against the cap. Otherwise an optional checkout `referralTagName`
+ * must be an existing, different Zelf ID of the same domain that still accepts new referrals.
+ * Its discount comes only from the license (`payment.whitelist`).
  * @returns {Promise<{ referralTagName: string, referralSolanaAddress: string }>}
  */
 const resolveCheckoutReferral = async ({ tagName, domain, domainConfig, publicData = {}, referralTagName, authUser }) => {
@@ -626,7 +627,7 @@ const resolveCheckoutReferral = async ({ tagName, domain, domainConfig, publicDa
     if (!bare || bare === `${tagName}`.toLowerCase().split(".")[0]) throw codedError("409:INVALID_REFERRAL");
 
     const ZelfIdModule = require("./zelf-id.module");
-    const referrer = await ZelfIdModule._validateReferral(fullName, authUser, domainConfig);
+    const referrer = await ZelfIdModule._validateReferral(fullName, authUser, domainConfig, { enforceLimit: true });
 
     if (!referrer) throw codedError("404:REFERRAL_NOT_FOUND");
 

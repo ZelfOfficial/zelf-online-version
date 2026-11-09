@@ -44,6 +44,7 @@ const leaseRecovery = async (payload, authUser) => {
 		stack: "v4",
 	});
 
+	// Restoring an account is not a new referral, so the reward cap is not applied here.
 	const referralTagObject = await TagsModule._validateReferral(referralTagName, authUser, domainConfig);
 
 	const { eth, btc, solana, sui, stellar, polkadot, kusama, ton, aptos, zkProof, mnemonic, arweave } = await TagsModule._createWalletsFromPhrase({

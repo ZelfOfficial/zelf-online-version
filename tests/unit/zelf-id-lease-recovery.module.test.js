@@ -101,6 +101,34 @@ describe("ZelfID leaseRecovery (Issue #182)", () => {
         expect(ZelfIdModule.persistZelfIdLease).toHaveBeenCalledTimes(1);
     });
 
+    it("recovers even when a referral code is sent, without enforcing the reward cap", async () => {
+        ZelfIdModule._validateReferral.mockResolvedValue({
+            publicData: { tagName: "inviter.zelf", solanaAddress: "inviter-sol", plan: "unlimited" },
+        });
+        ZelfProofModule.decrypt.mockResolvedValueOnce({
+            metadata: { mnemonic: sampleWallets.mnemonic },
+            publicData: { tagName: "alice.zelf", ethAddress: sampleWallets.eth.address },
+        });
+
+        const result = await ZelfIdRecoveryModule.leaseRecovery(
+            {
+                zelfProof: "original-proof",
+                tagName: "alice.zelf",
+                domain: "zelf",
+                faceBase64: "face-b64",
+                password: "secret",
+                os: "DESKTOP",
+                referralTagName: "inviter",
+            },
+            authUser,
+        );
+
+        expect(result.available).toBe(false);
+        expect(ZelfIdModule._validateReferral).toHaveBeenCalledWith("inviter", authUser, expect.anything());
+        expect(ZelfIdModule._validateReferral.mock.calls[0]).toHaveLength(3);
+        expect(ZelfIdModule.persistZelfIdLease).toHaveBeenCalled();
+    });
+
     it("recovers onto a new tagName when the source Zelf ID has expired", async () => {
         ZelfProofModule.decrypt.mockResolvedValueOnce({
             metadata: { mnemonic: sampleWallets.mnemonic },

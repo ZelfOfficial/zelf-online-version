@@ -6,6 +6,8 @@ const config = require("../../../Core/config");
 const TagsMiddleware = require("../../Tags/middlewares/tags.middleware");
 const TagsMyMiddleware = require("../../Tags/middlewares/my-tags.middleware");
 const ZelfIdsPaymentModule = require("../modules/zelf-ids-payment.module");
+const { assertReferralAvailabilityRateLimit } = require("../modules/referral-availability-rate-limit.module");
+const { errorHandler } = require("../../../Core/http-handler");
 
 const TAG_PAY_REDUCED_FEE_HEADER = "x-zelf-tag-pay-reduced-fee";
 
@@ -371,6 +373,45 @@ const paymentConfirmationValidation = async (ctx, next) => {
     await next();
 };
 
+/**
+ * Public pre-signup lookup. No session. Rate-limited per IP, then the same name/domain
+ * checks as tag search. The response must stay free of the inviter's private fields.
+ */
+const referralAvailabilityValidation = async (ctx, next) => {
+    try {
+        assertReferralAvailabilityRateLimit(ctx.ip || ctx.request.ip);
+    } catch (error) {
+        const handled = errorHandler(error, ctx);
+        ctx.status = handled.status;
+        ctx.body = { message: handled.message, code: handled.code };
+        if (error.retryAfterSeconds) ctx.set("Retry-After", String(error.retryAfterSeconds));
+        return;
+    }
+
+    const tagName = ctx.request.query.tagName || ctx.request.query.referralTagName || ctx.request.query.referral;
+    const domain = ctx.request.query.domain;
+
+    if (!tagName || typeof tagName !== "string" || !String(tagName).trim()) {
+        ctx.status = 409;
+        ctx.body = { validationError: "missing tagName" };
+        return;
+    }
+
+    const { domain: extractedDomain, name } = TagsMiddleware.extractDomainAndName(String(tagName).trim(), domain);
+    const domainValidation = await TagsMiddleware.validateDomainAndName(extractedDomain, name);
+
+    if (!domainValidation.valid) {
+        ctx.status = 409;
+        ctx.body = { validationError: domainValidation.error };
+        return;
+    }
+
+    ctx.state.extractedDomain = extractedDomain;
+    ctx.state.extractedName = name;
+
+    await next();
+};
+
 module.exports = {
     getValidation: TagsMiddleware.getValidation,
     searchByDomainValidation: TagsMiddleware.searchByDomainValidation,
@@ -397,4 +438,5 @@ module.exports = {
     smartContractPaymentConfirmationValidation: TagsMyMiddleware.smartContractPaymentConfirmationValidation,
     receiptEmailValidation: TagsMyMiddleware.receiptEmailValidation,
     extendLicenseForOwnerValidation: TagsMyMiddleware.extendLicenseForOwnerValidation,
+    referralAvailabilityValidation,
 };

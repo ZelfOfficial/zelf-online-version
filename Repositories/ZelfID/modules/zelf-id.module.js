@@ -123,7 +123,7 @@ const leaseTag = async (params, authUser) => {
     await _findDuplicatedTag(tagName, domain, domainConfig);
     assertDomainAcceptsNewUse(domain);
 
-    const referralTagObject = await _validateReferral(referralTagName, authUser, domainConfig);
+    const referralTagObject = await _validateReferral(referralTagName, authUser, domainConfig, { enforceLimit: true });
 
     const decryptedParams = await ZelfIdPartsModule.decryptParams(params, authUser);
 
@@ -659,7 +659,13 @@ const _findDuplicatedTag = async (tagName, domain, domainConfig) => {
     return result;
 };
 
-const _validateReferral = async (referralTagName, authUser, domainConfig) => {
+/**
+ * Resolve a referral code to the inviter's record.
+ * `options.enforceLimit` rejects a new registration or checkout referral once the inviter
+ * is at the reward cap (409 REFERRAL_LIMIT_REACHED). Recovery omits the flag: restoring
+ * an account is not a new referral.
+ */
+const _validateReferral = async (referralTagName, authUser, domainConfig, options = {}) => {
     if (!referralTagName) return null;
 
     const domain = domainConfig.name;
@@ -681,7 +687,31 @@ const _validateReferral = async (referralTagName, authUser, domainConfig) => {
         tagObject.publicData[domainConfig.getTagKey()] = tagObject.publicData[domainConfig.getTagKey()].replace(".hold", "");
     }
 
+    if (options.enforceLimit) {
+        const { assertReferrerAcceptsNewReferral } = require("../../Tags/modules/referral-capacity.module");
+        await assertReferrerAcceptsNewReferral(tagObject, domainConfig);
+    }
+
     return tagObject;
+};
+
+/**
+ * Public pre-signup check. Returns only whether the inviter exists, the cap,
+ * spots remaining, and whether a new referral is accepted.
+ * @param {string} referralTagName bare name or `name.domain`
+ * @param {Object} domainConfig
+ */
+const getReferralAvailability = async (referralTagName, domainConfig) => {
+    const { canonicalReferralTagName } = require("../../Tags/modules/referral-reward.util");
+    const { publicReferralAvailability, canonicalNameFromReferrer } = require("../../Tags/modules/referral-capacity.module");
+    const referrer = await _validateReferral(referralTagName, {}, domainConfig);
+
+    if (!referrer) return publicReferralAvailability(referralTagName, domainConfig, false);
+
+    const fullName =
+        canonicalNameFromReferrer(referrer, domainConfig) || canonicalReferralTagName(referralTagName, domainConfig.name);
+
+    return publicReferralAvailability(fullName, domainConfig, true);
 };
 
 const _createWalletsFromPhrase = async (params) => {
@@ -779,6 +809,7 @@ module.exports = {
     releaseExpiredUnpaidReservation,
     _findDuplicatedTag,
     _validateReferral,
+    getReferralAvailability,
     _createWalletsFromPhrase,
     _decryptParams,
 };

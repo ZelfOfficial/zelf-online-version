@@ -65,6 +65,7 @@ const leaseRecovery = async (payload, authUser) => {
         throwMappedRecoveryDecryptError(decryptedZelfProof.error);
     }
 
+    // Restoring an account is not a new referral, so the reward cap is not applied here.
     const referralTagObject = await ZelfIdModule._validateReferral(referralTagName, authUser, domainConfig);
 
     const { eth, btc, solana, sui, stellar, polkadot, kusama, ton, aptos, zkProof, mnemonic, arweave } = await ZelfIdModule._createWalletsFromPhrase({
