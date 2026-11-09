@@ -23,9 +23,20 @@ async function runTests() {
 
 	// 2. Test Base getTransactionsList formats OKLink transactions with date, amount, fiatAmount, and asset
 	const origAxiosGet = axios.get;
+	const origAxiosCreate = axios.create;
 	const origGetTickerPrice = binanceModule.getTickerPrice;
 	try {
 		binanceModule.getTickerPrice = async () => ({ price: "2500" });
+		axios.create = () => ({
+			get: async () => {
+				const err = new Error("blockscout and basescan disabled in this test");
+				err.response = { status: 404 };
+				throw err;
+			},
+			post: async () => {
+				throw new Error("rpc disabled");
+			},
+		});
 		axios.get = async (url) => {
 			if (url.includes("oklink.com/api/explorer/v2/base/addresses/")) {
 				return {
@@ -81,13 +92,18 @@ async function runTests() {
 		assert.deepStrictEqual(emptyRes.transactions, []);
 	} finally {
 		axios.get = origAxiosGet;
+		axios.create = origAxiosCreate;
 		binanceModule.getTickerPrice = origGetTickerPrice;
 	}
 
 	console.log("All Base transaction history tests (#153) passed!");
 }
 
-runTests().catch((err) => {
-	console.error(err);
-	process.exit(1);
-});
+if (typeof test === "function") {
+	test("Base OKLink history keeps the standardized fields and omits placeholder rows", () => runTests());
+} else {
+	runTests().catch((err) => {
+		console.error(err);
+		process.exit(1);
+	});
+}

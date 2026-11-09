@@ -18,6 +18,7 @@ const validateAddress = async (ctx, next) => {
 		ctx.status = 400;
 		ctx.body = {
 			error: "Invalid address format. Must be a valid Ethereum address (0x followed by 40 hex characters)",
+			code: "INVALID_BASE_ADDRESS",
 		};
 
 		return;
@@ -39,13 +40,14 @@ const validateAddressTransactions = async (ctx, next) => {
 			.required(),
 		page: Joi.string().optional(),
 		show: Joi.string().optional(),
-	});
+	}).unknown(true);
 
 	const { error } = schema.validate({ ...ctx.request.params, ...ctx.request.query });
 	if (error) {
 		ctx.status = 400;
 		ctx.body = {
 			error: "Invalid parameters. Address must be a valid Ethereum address",
+			code: "INVALID_BASE_TRANSACTION_QUERY",
 		};
 
 		return;

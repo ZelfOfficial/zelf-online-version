@@ -262,6 +262,66 @@ const mapRouteScanTransaction = (tx, address, { asset = "ETH", price = 0 } = {})
 	});
 };
 
+const rawUnitsToDecimalString = (raw, decimals = 18) => {
+	let scaleDigits = Number(decimals);
+	if (!Number.isInteger(scaleDigits) || scaleDigits < 0 || scaleDigits > 36) scaleDigits = 18;
+
+	try {
+		const trimmed = String(raw ?? "0").trim();
+		const negative = trimmed.startsWith("-");
+		const absRaw = trimmed.replace(/^[+-]/, "") || "0";
+		if (!/^\d+$/.test(absRaw)) return "0";
+
+		const value = BigInt(absRaw);
+		const scale = 10n ** BigInt(scaleDigits);
+		const whole = value / scale;
+		const fraction = value % scale;
+		const sign = negative ? "-" : "";
+		if (fraction === 0n) return `${sign}${whole.toString()}`;
+
+		const fractionStr = fraction.toString().padStart(scaleDigits, "0").replace(/0+$/, "");
+		return trimTrailingZeros(`${sign}${whole.toString()}.${fractionStr}`);
+	} catch {
+		return "0";
+	}
+};
+
+const resolveBlockscoutTokenDecimals = (tx) => {
+	const token = tx?.token || {};
+	const tokenType = String(token.type || tx?.type || "").toUpperCase();
+	const source = tx?.total?.decimals ?? token.decimals;
+	if (source === null || source === undefined || source === "") {
+		return tokenType.includes("721") || tokenType.includes("1155") ? 0 : 18;
+	}
+
+	const parsed = Number(source);
+	return Number.isInteger(parsed) && parsed >= 0 && parsed <= 36 ? parsed : 18;
+};
+
+const mapBlockscoutTokenTransfer = (tx, address, { price } = {}) => {
+	const from = resolveBlockscoutAddress(tx.from);
+	const to = resolveBlockscoutAddress(tx.to);
+	const token = tx.token || {};
+	const amount = rawUnitsToDecimalString(tx.total?.value ?? tx.value ?? "0", resolveBlockscoutTokenDecimals(tx));
+	const asset = token.symbol || token.name || "TOKEN";
+	const rate = price != null ? price : token.exchange_rate;
+	const hash = tx.tx_hash || tx.transaction_hash || tx.hash || "";
+
+	return buildStandardRow({
+		hash,
+		block: tx.block_number ?? tx.block,
+		from,
+		to,
+		amount,
+		asset,
+		method: tx.method || `${asset} transfer`,
+		traffic: inferTraffic(from, to, address),
+		txnFee: "0",
+		timestamp: tx.timestamp,
+		price: rate || 0,
+	});
+};
+
 const mapBlockscoutTransaction = (tx, address, { asset = "ETH", price = 0 } = {}) => {
 	const from = resolveBlockscoutAddress(tx.from);
 	const to = resolveBlockscoutAddress(tx.to);
@@ -292,7 +352,7 @@ const mapBlockscoutTransaction = (tx, address, { asset = "ETH", price = 0 } = {}
 
 const buildListResponse = (
 	transactions,
-	{ page, show, total, nextCursor, nextPageParams, incomplete, hasMore, pagingNote } = {}
+	{ page, show, total, nextCursor, nextPageParams, nextTokenPageParams, incomplete, hasMore, pagingNote } = {}
 ) => ({
 	pagination: {
 		records: String(total ?? transactions.length),
@@ -300,6 +360,7 @@ const buildListResponse = (
 		page: String(page ?? 1),
 		...(nextCursor ? { nextCursor: String(nextCursor) } : {}),
 		...(nextPageParams ? { nextPageParams } : {}),
+		...(nextTokenPageParams ? { nextTokenPageParams } : {}),
 		...(incomplete ? { incomplete: true } : {}),
 		...(hasMore ? { hasMore: true } : {}),
 		...(pagingNote ? { pagingNote } : {}),
@@ -441,6 +502,16 @@ const fetchTransactionsFromRouteScan = async (
 const BLOCKSCOUT_USER_AGENT =
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
 
+const BLOCKSCOUT_RESOURCES = new Set(["transactions", "token-transfers"]);
+
+const resolveBlockscoutResource = (resource) => {
+	const value = String(resource || "transactions");
+	if (!BLOCKSCOUT_RESOURCES.has(value)) {
+		throw new Error("BLOCKSCOUT_RESOURCE_UNSUPPORTED");
+	}
+	return value;
+};
+
 const classifyBlockscoutHttpStatus = (status) => {
 	if (status == null || status < 400) return;
 
@@ -455,9 +526,9 @@ const classifyBlockscoutHttpStatus = (status) => {
 	throw err;
 };
 
-const fetchBlockscoutPage = async (httpGet, { baseUrl, address, cursor, timeout }) => {
+const fetchBlockscoutPage = async (httpGet, { baseUrl, address, cursor, timeout, resource }) => {
 	const normalizedBase = String(baseUrl || "").replace(/\/$/, "");
-	const url = `${normalizedBase}/api/v2/addresses/${address}/transactions`;
+	const url = `${normalizedBase}/api/v2/addresses/${address}/${resolveBlockscoutResource(resource)}`;
 	const params = cursor && typeof cursor === "object" ? { ...cursor } : {};
 
 	const response = await httpGet(url, {
@@ -488,6 +559,7 @@ const fetchTransactionsFromBlockscout = async (
 		cursor,
 		timeout = DEFAULT_TX_TIMEOUT_MS,
 		deadlineMs = TX_LIST_DEADLINE_MS,
+		resource = "transactions",
 	}
 ) => {
 	const targetPage = normalizePage(page);
@@ -506,6 +578,7 @@ const fetchTransactionsFromBlockscout = async (
 				address,
 				cursor: pageCursor,
 				timeout,
+				resource,
 			})
 		);
 	}
@@ -517,6 +590,7 @@ const fetchTransactionsFromBlockscout = async (
 				address,
 				cursor: null,
 				timeout,
+				resource,
 			})
 		);
 	}
@@ -539,6 +613,7 @@ const fetchTransactionsFromBlockscout = async (
 				address,
 				cursor: walkCursor,
 				timeout: Math.min(timeout, remaining),
+				resource,
 			});
 		} catch (err) {
 			return resolveWalkHopError(
@@ -577,6 +652,20 @@ const pickBlockscoutCursor = (query = {}) => {
 		inserted_at,
 		fee,
 		items_count,
+	};
+};
+
+const pickBlockscoutTokenCursor = (query = {}) => {
+	if (query.tokenBlockscoutCursor && typeof query.tokenBlockscoutCursor === "object") {
+		return query.tokenBlockscoutCursor;
+	}
+
+	if (query.token_block_number == null && query.token_index == null) return null;
+
+	return {
+		...(query.token_block_number != null ? { block_number: query.token_block_number } : {}),
+		...(query.token_index != null ? { index: query.token_index } : {}),
+		...(query.token_items_count != null ? { items_count: query.token_items_count } : {}),
 	};
 };
 
@@ -719,6 +808,7 @@ module.exports = {
 	mapEtherscanV2Transaction,
 	mapRouteScanTransaction,
 	mapBlockscoutTransaction,
+	mapBlockscoutTokenTransfer,
 	buildListResponse,
 	buildStandardRow,
 	fetchTransactionsFromEtherscanV2,
@@ -727,6 +817,7 @@ module.exports = {
 	fetchRouteScanPage,
 	fetchBlockscoutPage,
 	pickBlockscoutCursor,
+	pickBlockscoutTokenCursor,
 	runTransactionProviderLadder,
 	runTransactionProviderRace,
 	withTxListDeadline,
