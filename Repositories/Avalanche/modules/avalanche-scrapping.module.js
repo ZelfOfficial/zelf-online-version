@@ -14,7 +14,7 @@ const ROUTESCAN_ETHERSCAN_API = "https://api.routescan.io/v2/network/mainnet/evm
 const config = require("../../../Core/config");
 const { formatEther } = require("ethers");
 const { getTickerPrice } = require("../../binance/modules/binance.module");
-const { mapRouteScanHolding, mapRoutescanAddressToken } = require("./avalanche-balance.util");
+const { mapRouteScanHolding, mapRoutescanAddressToken, mergeAvalancheTokenHoldings, isNativeAvaxEntry } = require("./avalanche-balance.util");
 const {
 	normalizeTransactionLimit,
 	mapEtherscanAccountTransaction,
@@ -106,16 +106,26 @@ const getBalance = async (params) => {
 
     const price = String(quote.price);
     const fiatBalance = Number(balance) * Number(price);
-    tokenHoldings.tokens.unshift({
-        amount: balance,
-        decimals: 18,
-        fiatBalance,
-        image: "https://cdn.zelf.world/icons/ic_avax.png",
-        name: "Avalanche",
-        price,
-        symbol: "AVAX",
-        tokenType: "AVAX",
-    });
+    const listedTokens = Array.isArray(tokenHoldings.tokens) ? tokenHoldings.tokens : [];
+    const erc20Tokens = listedTokens.filter((token) => !isNativeAvaxEntry(token));
+    if (erc20Tokens.length !== listedTokens.length) {
+        const erc20Fiat = erc20Tokens.reduce((sum, token) => sum + Number(token.fiatBalance || 0), 0);
+        tokenHoldings.balance = String(erc20Fiat);
+        tokenHoldings.total = erc20Tokens.length;
+    }
+    tokenHoldings.tokens = [
+        {
+            amount: balance,
+            decimals: 18,
+            fiatBalance,
+            image: "https://cdn.zelf.world/icons/ic_avax.png",
+            name: "Avalanche",
+            price,
+            symbol: "AVAX",
+            tokenType: "AVAX",
+        },
+        ...erc20Tokens,
+    ];
     return {
         _balance: Number(balance),
         address: params.id,
@@ -234,7 +244,12 @@ const getTokensFromRoutescanTransfers = async (address, query = {}) => {
 	return holdingsFromTokens(tokens);
 };
 
-const loadTokens = async (params, query = {}) => {
+/**
+ * ERC-20 holdings for C-Chain. Routescan can omit tokens Glacier still lists,
+ * so both providers run together. Each request keeps its own timeout. A failed
+ * provider is dropped. If both fail, the list stays empty.
+ */
+const loadRoutescanTokens = async (params, query = {}) => {
 	try {
 		return { ok: true, value: await getTokensFromRoutescanHoldings(params.id, query) };
 	} catch (error) {
@@ -249,17 +264,31 @@ const loadTokens = async (params, query = {}) => {
 	}
 
 	try {
-		return { ok: true, value: await getTokensFromGlacier(params, query) };
-	} catch (error) {
-		console.warn("Avalanche Glacier token list failed:", providerFailureText(error));
-	}
-
-	try {
 		return { ok: true, value: await getTokensFromRouteScan(params.id) };
 	} catch (error) {
 		console.warn("Avalanche RouteScan holdings failed:", providerFailureText(error));
 	}
 
+	return { ok: false, error: "avalanche_routescan_tokens_unavailable" };
+};
+
+const loadGlacierTokens = async (params, query = {}) => {
+	try {
+		return { ok: true, value: await getTokensFromGlacier(params, query) };
+	} catch (error) {
+		console.warn("Avalanche Glacier token list failed:", providerFailureText(error));
+		return { ok: false, error: "avalanche_glacier_tokens_unavailable" };
+	}
+};
+
+const loadTokens = async (params, query = {}) => {
+	const [routescanResult, glacierResult] = await Promise.all([loadRoutescanTokens(params, query), loadGlacierTokens(params, query)]);
+
+	if (routescanResult.ok && glacierResult.ok) {
+		return { ok: true, value: mergeAvalancheTokenHoldings(routescanResult.value, glacierResult.value) };
+	}
+	if (routescanResult.ok) return { ok: true, value: routescanResult.value };
+	if (glacierResult.ok) return { ok: true, value: glacierResult.value };
 	return { ok: false, error: "avalanche_tokens_unavailable", value: emptyTokenHoldings() };
 };
 
