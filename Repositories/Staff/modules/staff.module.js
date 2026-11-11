@@ -189,7 +189,7 @@ const generateInvitation = async (data, authUser) => {
     );
 
     // Send Invitation Email
-    const inviteLink = `${config.stripe.frontendUrl}/auth/accept-invite?token=${invitationToken}`;
+    const inviteLink = `${config.frontendUrl}/auth/accept-invite?token=${invitationToken}`;
 
     await _sendInvitationEmail({
         staffEmail,
@@ -357,7 +357,7 @@ const createFromInvitation = async (data) => {
                 staffName: invitation.staffName,
                 companyName: invitation.ownerCompany,
                 role: invitation.role,
-                dashboardLink: `${config.stripe.frontendUrl}/dashboard`,
+                dashboardLink: `${config.frontendUrl}/dashboard`,
                 subject: `Welcome to ${invitation.ownerCompany}!`,
                 greeting: `Hello ${invitation.staffName},`,
                 sincerely: "Best regards,",
