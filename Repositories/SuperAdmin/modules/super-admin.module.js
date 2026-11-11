@@ -1,14 +1,37 @@
 const Model = require("../models/super-admin.model");
 const MongoORM = require("../../../Core/mongo-orm");
 const crypto = require("crypto");
-const jwt = require("jsonwebtoken");
 const config = require("../../../Core/config");
+const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const moment = require("moment");
 const Mailgun = require("../../../Core/mailgun");
+
+const OTP_MAX_ATTEMPTS = 5;
+const SUPER_ADMIN_TOKEN_HOURS = 12;
 
 const generateOtp = () => {
     return Math.floor(100000 + Math.random() * 900000).toString();
 };
+
+const authError = (status, code) => {
+    const error = new Error(code);
+    error.status = status;
+    error.code = code;
+    return error;
+};
+
+const signSuperAdminToken = (superAdmin) =>
+    signToken(
+        {
+            tokenVersion: Number(superAdmin.tokenVersion || 0),
+            exp: moment().add(SUPER_ADMIN_TOKEN_HOURS, "hours").unix(),
+        },
+        config.JWT_SECRET,
+        {
+            typ: TOKEN_TYPES.superAdmin,
+            superAdminId: superAdmin._id,
+        }
+    );
 
 const get = async (params = {}, authUser = {}) => {
     const queryParams = {
@@ -69,20 +92,18 @@ const auth = async (data, authUser) => {
         findOne: true,
     });
 
-    if (!superAdmin) throw new Error("404");
+    if (!superAdmin) throw authError(404, "SUPER_ADMIN_NOT_FOUND");
+
+    if (superAdmin.disabled === true || superAdmin.active === false || superAdmin.status === "banned" || superAdmin.status === "inactive") {
+        throw authError(403, "SUPER_ADMIN_INACTIVE");
+    }
 
     const isKeyValid = await superAdmin.isValidApiKey(apiKey);
 
-    if (!isKeyValid) throw new Error("403");
+    if (!isKeyValid) throw authError(403, "SUPER_ADMIN_FORBIDDEN");
 
     return {
-        token: jwt.sign(
-            {
-                superAdminId: superAdmin._id,
-                exp: moment().add(365, "day").unix(),
-            },
-            config.JWT_SECRET
-        ),
+        token: signSuperAdminToken(superAdmin),
     };
 };
 
@@ -104,6 +125,8 @@ const requestOtp = async (data) => {
     superAdmin.otp = otp;
 
     superAdmin.otpExpiration = moment().add(15, "minutes").toDate();
+
+    superAdmin.otpAttempts = 0;
 
     await superAdmin.save();
 
@@ -139,35 +162,42 @@ const verifyOtp = async (data) => {
         findOne: true,
     });
 
-    if (!superAdmin) throw new Error("Invalid email or code");
-    if (!superAdmin.otp || !superAdmin.otpExpiration) throw new Error("Invalid email or code");
+    if (!superAdmin) throw authError(401, "INVALID_EMAIL_OR_CODE");
+    if (!superAdmin.otp || !superAdmin.otpExpiration) throw authError(401, "INVALID_EMAIL_OR_CODE");
 
     if (moment().isAfter(moment(superAdmin.otpExpiration))) {
-        throw new Error("Code expired");
+        throw authError(401, "CODE_EXPIRED");
     }
 
-    const isMatch = await new Promise((resolve, reject) => {
+    const isMatch = await new Promise((resolve) => {
         superAdmin.compareOTP(code, (err, match) => {
             if (err) resolve(false);
             resolve(match);
         });
     });
 
-    if (!isMatch) throw new Error("Invalid email or code");
+    if (!isMatch) {
+        superAdmin.otpAttempts = Number(superAdmin.otpAttempts || 0) + 1;
 
-    // Clear OTP
+        if (superAdmin.otpAttempts >= OTP_MAX_ATTEMPTS) {
+            superAdmin.otp = undefined;
+            superAdmin.otpExpiration = undefined;
+            superAdmin.otpAttempts = 0;
+            await superAdmin.save();
+            throw authError(401, "OTP_ATTEMPTS_EXCEEDED");
+        }
+
+        await superAdmin.save();
+        throw authError(401, "INVALID_EMAIL_OR_CODE");
+    }
+
     superAdmin.otp = undefined;
     superAdmin.otpExpiration = undefined;
+    superAdmin.otpAttempts = 0;
     await superAdmin.save();
 
     return {
-        token: jwt.sign(
-            {
-                superAdminId: superAdmin._id,
-                exp: moment().add(12, "hours").unix(), // 12 hours as stated
-            },
-            config.JWT_SECRET
-        ),
+        token: signSuperAdminToken(superAdmin),
     };
 };
 
@@ -180,4 +210,6 @@ module.exports = {
     auth,
     requestOtp,
     verifyOtp,
+    OTP_MAX_ATTEMPTS,
+    SUPER_ADMIN_TOKEN_HOURS,
 };

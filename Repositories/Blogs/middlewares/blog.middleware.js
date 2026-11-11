@@ -1,4 +1,5 @@
-const { string, validate, boolean, array, any } = require("../../../Core/JoiUtils");
+const { string, boolean, array, any, validateStrict } = require("../../../Core/JoiUtils");
+const { verifySuperAdmin } = require("../../SuperAdmin/middlewares/verify-super-admin.middleware");
 
 const SUPPORTED_LOCALES = ["en", "es", "fr", "ja", "ko", "pt", "zh", "zh-TW"];
 
@@ -33,21 +34,20 @@ const schemas = {
     },
 };
 
-const verifySuperAdmin = async (ctx, next) => {
-    if (!ctx.state.user || !ctx.state.user.superAdminId) {
-        ctx.status = 403;
-        ctx.body = { error: "Forbidden: Super Admin access required" };
-        return;
-    }
-    await next();
+const rejectInvalid = (ctx, valid) => {
+    const unknown = valid.error.details?.some((detail) => detail.type === "object.unknown");
+    ctx.status = 409;
+    ctx.body = {
+        code: unknown ? "UNKNOWN_FIELD" : "VALIDATION_ERROR",
+        validationError: valid.error.message,
+    };
 };
 
 const createValidation = async (ctx, next) => {
-    const valid = validate(schemas.create, ctx.request.body);
+    const valid = validateStrict(schemas.create, ctx.request.body);
 
     if (valid.error) {
-        ctx.status = 409;
-        ctx.body = { validationError: valid.error.message };
+        rejectInvalid(ctx, valid);
         return;
     }
 
@@ -55,11 +55,10 @@ const createValidation = async (ctx, next) => {
 };
 
 const updateValidation = async (ctx, next) => {
-    const valid = validate(schemas.update, ctx.request.body);
+    const valid = validateStrict(schemas.update, ctx.request.body);
 
     if (valid.error) {
-        ctx.status = 409;
-        ctx.body = { validationError: valid.error.message };
+        rejectInvalid(ctx, valid);
         return;
     }
 

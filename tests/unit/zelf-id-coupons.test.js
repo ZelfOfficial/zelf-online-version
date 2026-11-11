@@ -552,13 +552,27 @@ describe("Zelf ID plan coupons", () => {
 
     test("non-admins cannot create coupons, and percentOff is validated", async () => {
         const next = jest.fn();
-        const denied = { state: { user: { tagName: "someone.zelf" } }, request: { body: {} }, status: 200, body: undefined };
+        const denied = { headers: {}, state: { user: { tagName: "someone.zelf" } }, request: { body: {} }, status: 200, body: undefined };
         await CouponMiddleware.requireSuperAdmin(denied, next);
-        expect(denied.status).toBe(403);
-        expect(denied.body).toEqual({ error: "Super-admin access required", code: "SUPER_ADMIN_REQUIRED" });
+        expect(denied.status).toBe(401);
+        expect(denied.body.code).toBe("SUPER_ADMIN_REQUIRED");
         expect(next).not.toHaveBeenCalled();
 
-        const allowed = { state: { user: { superAdminId: "admin-id" } }, status: 200 };
+        const SuperAdmin = require("../../Repositories/SuperAdmin/models/super-admin.model");
+        const { signToken } = require("../../Core/jwt-claims");
+        const admin = await SuperAdmin.create({
+            name: "Coupon Admin",
+            email: `coupon-admin-${Date.now()}@zelf.world`,
+            phone: `+1555${String(Date.now()).slice(-7)}`,
+            active: true,
+            status: "joined",
+            apiKey: "coupon-admin-key",
+        });
+        const token = signToken({ tokenVersion: 0, exp: moment().add(1, "hour").unix() }, config.JWT_SECRET, {
+            typ: "super_admin",
+            superAdminId: String(admin._id),
+        });
+        const allowed = { headers: { authorization: `Bearer ${token}` }, state: {}, status: 200 };
         await CouponMiddleware.requireSuperAdmin(allowed, next);
         expect(next).toHaveBeenCalledTimes(1);
 

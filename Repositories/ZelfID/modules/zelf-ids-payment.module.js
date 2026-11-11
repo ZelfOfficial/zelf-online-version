@@ -2,7 +2,7 @@
  * Zelf ID v4 payment metadata, quotes, and store. Tags v3.6 payment files must not import this.
  */
 const moment = require("moment");
-const jwt = require("jsonwebtoken");
+const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const { keccak256, solidityPacked, parseUnits, getAddress } = require("ethers");
 const config = require("../../../Core/config");
 const { codedError, identifiedError } = require("../../../Core/http-handler");
@@ -1074,7 +1074,7 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         deleteEthAddress: true,
     });
 
-    const signedDataPrice = jwt.sign(returnData, config.JWT_SECRET);
+    const signedDataPrice = signToken(returnData, config.JWT_SECRET, { typ: TOKEN_TYPES.quote, expiresIn: "2h" });
 
     return {
         ...returnData,

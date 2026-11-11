@@ -1,6 +1,6 @@
 const crypto = require("crypto");
-const jwt = require("jsonwebtoken");
 const config = require("../../../Core/config");
+const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const moment = require("moment");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const zelfProofModule = require("../../ZelfProof/modules/zelf-proof.module");
@@ -234,13 +234,14 @@ const create = async (data) => {
 			solanaAddress: solana.address,
 			suiAddress: sui.address,
 		},
-		token: jwt.sign(
+		token: signToken(
 			{
 				email: data.email,
 				zkProof,
 				exp: moment().add(1, "day").unix(),
 			},
-			config.JWT_SECRET
+			config.JWT_SECRET,
+			{ typ: TOKEN_TYPES.client }
 		),
 	};
 };
@@ -509,7 +510,7 @@ const auth = async (data, authUser) => {
 		ipfsHash: zelfAccount.cid,
 		zkProof: decryptedZelfAccount.metadata.zkProof,
 		apiKey: decryptedZelfAccount.metadata.apiKey,
-		token: jwt.sign(jwtPayload, config.JWT_SECRET),
+		token: signToken(jwtPayload, config.JWT_SECRET, { typ: isStaffAccount ? TOKEN_TYPES.staff : TOKEN_TYPES.client }),
 	};
 };
 

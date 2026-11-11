@@ -48,9 +48,19 @@ const run = async (validation, user, body) => {
 };
 
 describe("POST /api/zelf-ids/chains/activate session", () => {
-    test("a logged-in session activates without a face stamp", async () => {
-        const session = await createSession({ tagName: "Alice" });
-        const { ctx, continued } = await run(Middleware.activateValidation, { session: session._id, tagName: "alice.zelf", domain: "zelf" }, { chain: "sol" });
+    test("activate uses the decrypt stamp, not the name stored at session create", async () => {
+        const unverified = await createSession({ tagName: "Alice" });
+        const denied = await run(Middleware.activateValidation, { session: unverified._id, tagName: "alice.zelf", domain: "zelf" }, { chain: "sol" });
+        expect(denied.continued).toBe(false);
+        expect(denied.ctx.status).toBe(403);
+        expect(denied.ctx.body.code).toBe("ERR_SESSION_NOT_VERIFIED");
+
+        const session = await createSession({
+            tagName: "bob",
+            verifiedTagName: "alice.zelf",
+            verifiedUntil: new Date(Date.now() + 10 * 60 * 1000),
+        });
+        const { ctx, continued } = await run(Middleware.activateValidation, { session: session._id, domain: "zelf" }, { chain: "sol" });
 
         expect(continued).toBe(true);
         expect(ctx.state.user.tagName).toBe("alice");
@@ -58,8 +68,11 @@ describe("POST /api/zelf-ids/chains/activate session", () => {
         expect(ctx.request.body.chain).toBe("sol");
     });
 
-    test("a session for one Zelf ID cannot activate another", async () => {
-        const session = await createSession({ tagName: "alice" });
+    test("a session verified for one Zelf ID cannot activate another", async () => {
+        const session = await createSession({
+            verifiedTagName: "alice.zelf",
+            verifiedUntil: new Date(Date.now() + 10 * 60 * 1000),
+        });
         const { ctx, continued } = await run(Middleware.activateValidation, { session: session._id, tagName: "bob", domain: "zelf" }, { chain: "sol" });
 
         expect(continued).toBe(false);
@@ -77,14 +90,17 @@ describe("POST /api/zelf-ids/chains/activate session", () => {
         expect(inactive.ctx.status).toBe(401);
         expect(inactive.ctx.body.code).toBe("ERR_SESSION_REQUIRED");
 
-        const unnamed = await createSession({ tagName: null });
+        const unnamed = await createSession({ tagName: null, verifiedTagName: null });
         const identity = await run(Middleware.activateValidation, { session: unnamed._id, tagName: "alice", domain: "zelf" }, { chain: "sol" });
-        expect(identity.ctx.status).toBe(401);
-        expect(identity.ctx.body.code).toBe("ERR_ZELF_IDENTITY_REQUIRED");
+        expect(identity.ctx.status).toBe(403);
+        expect(identity.ctx.body.code).toBe("ERR_SESSION_NOT_VERIFIED");
     });
 
     test("chain is still required", async () => {
-        const session = await createSession();
+        const session = await createSession({
+            verifiedTagName: "alice.zelf",
+            verifiedUntil: new Date(Date.now() + 10 * 60 * 1000),
+        });
         const { ctx, continued } = await run(Middleware.activateValidation, { session: session._id, tagName: "alice", domain: "zelf" }, {});
 
         expect(continued).toBe(false);

@@ -1,41 +1,86 @@
+const { BLOCKED_PRIVILEGE_TYPES, TOKEN_TYPES } = require("../../../Core/jwt-claims");
+
+const deny = (ctx, code) => {
+    ctx.status = 403;
+    ctx.body = { error: code, code };
+};
+
+const isStaffToken = (user) => {
+    if (!user) return false;
+    if (user.typ === TOKEN_TYPES.staff) return true;
+    const accountType = user.accountType || "";
+    return !user.typ && Number.isFinite(user.exp) && (accountType === "staff" || accountType === "staff_account");
+};
+
+const isOwnerToken = (user) => {
+    if (!user || isStaffToken(user)) return false;
+    if (BLOCKED_PRIVILEGE_TYPES.has(user.typ)) return false;
+    if (user.typ === TOKEN_TYPES.client || user.typ === TOKEN_TYPES.lawyer || user.typ === TOKEN_TYPES.session || user.typ === TOKEN_TYPES.duration) {
+        return true;
+    }
+    return !user.typ && Number.isFinite(user.exp);
+};
+
 const requireAdmin = async (ctx, next) => {
     const user = ctx.state.user;
     if (!user) {
         ctx.status = 401;
-        ctx.body = { error: "Unauthorized" };
+        ctx.body = { error: "UNAUTHORIZED", code: "UNAUTHORIZED" };
         return;
     }
-    // Owner (no accountType or accountType!=staff) is admin
-    // Staff with role 'admin' is admin
-    const isStaff = user.accountType === "staff";
-    const role = user.role || "read"; // Default to read if not set
 
-    if (!isStaff || role === "admin") {
-        await next();
-    } else {
-        ctx.status = 403;
-        ctx.body = { error: "Forbidden: Admin access required" };
+    if (BLOCKED_PRIVILEGE_TYPES.has(user.typ)) {
+        deny(ctx, "INVALID_TOKEN_TYPE");
+        return;
     }
+
+    if (isStaffToken(user)) {
+        const role = user.role || "read";
+        if (role === "admin") {
+            await next();
+            return;
+        }
+        deny(ctx, "ADMIN_ACCESS_REQUIRED");
+        return;
+    }
+
+    if (isOwnerToken(user) && user.typ !== TOKEN_TYPES.session && user.typ !== TOKEN_TYPES.duration) {
+        await next();
+        return;
+    }
+
+    deny(ctx, "ADMIN_ACCESS_REQUIRED");
 };
 
 const requireWrite = async (ctx, next) => {
     const user = ctx.state.user;
     if (!user) {
         ctx.status = 401;
-        ctx.body = { error: "Unauthorized" };
+        ctx.body = { error: "UNAUTHORIZED", code: "UNAUTHORIZED" };
         return;
     }
-    const isStaff = user.accountType === "staff";
-    const role = user.role || "read";
 
-    // Owner is always write/admin
-    // Staff with 'admin' or 'write'
-    if (!isStaff || role === "admin" || role === "write") {
-        await next();
-    } else {
-        ctx.status = 403;
-        ctx.body = { error: "Forbidden: Write access required" };
+    if (BLOCKED_PRIVILEGE_TYPES.has(user.typ)) {
+        deny(ctx, "INVALID_TOKEN_TYPE");
+        return;
     }
+
+    if (isStaffToken(user)) {
+        const role = user.role || "read";
+        if (role === "admin" || role === "write") {
+            await next();
+            return;
+        }
+        deny(ctx, "WRITE_ACCESS_REQUIRED");
+        return;
+    }
+
+    if (isOwnerToken(user)) {
+        await next();
+        return;
+    }
+
+    deny(ctx, "WRITE_ACCESS_REQUIRED");
 };
 
 module.exports = {

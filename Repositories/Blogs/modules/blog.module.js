@@ -1,5 +1,28 @@
 const Model = require("../models/blog.model");
 
+const BLOG_WRITABLE_FIELDS = [
+    "slug",
+    "title",
+    "description",
+    "author",
+    "date",
+    "markdownContent",
+    "coverImage",
+    "imageAlt",
+    "tags",
+    "published",
+    "canonicalSlug",
+    "locale",
+];
+
+const pickWritable = (data = {}) => {
+    const out = {};
+    for (const key of BLOG_WRITABLE_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(data, key)) out[key] = data[key];
+    }
+    return out;
+};
+
 function _truthy(v) {
     return v === true || v === "true" || v === 1 || v === "1";
 }
@@ -100,19 +123,18 @@ const show = async (params = {}, authUser = {}) => {
 };
 
 const create = async (data, authUser) => {
-    const blog = new Model(data);
+    const blog = new Model(pickWritable(data));
     await blog.save();
     return blog;
 };
 
 const update = async (data, authUser) => {
-    const { id, _id, ...updates } = data;
-    const identifier = id || _id;
+    const identifier = data.id || data._id;
 
     const blog = await Model.findById(identifier);
     if (!blog) throw new Error("404");
 
-    Object.assign(blog, updates);
+    Object.assign(blog, pickWritable(data));
 
     await blog.save();
 
@@ -134,4 +156,6 @@ module.exports = {
     create,
     update,
     destroy,
+    BLOG_WRITABLE_FIELDS,
+    pickWritable,
 };

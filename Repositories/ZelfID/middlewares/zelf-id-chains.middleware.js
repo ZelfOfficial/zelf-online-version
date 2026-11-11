@@ -15,8 +15,7 @@ const fail = (ctx, status, message, code) => {
 
 /**
  * Logged-in owner for POST /chains/activate.
- * Face verification is not required: stamping the session means a decrypt, which charges the Free monthly ZNS fee.
- * The session record and the token must name the same Zelf ID.
+ * The wallet is the server stamp from a matching decrypt, not a name sent at session create.
  * @param {Object} ctx
  * @returns {Promise<boolean>}
  */
@@ -34,23 +33,24 @@ const requireSessionOwner = async (ctx) => {
     }
 
     const domain = session.domain || authUser.domain || "zelf";
-    const tokenWallet = normalizeZelfName(authUser.tagName, authUser.domain || domain);
-    const sessionWallet = normalizeZelfName(session.tagName, domain);
+    const verified = normalizeZelfName(session.verifiedTagName, domain);
+    const expired = !session.verifiedUntil || new Date(session.verifiedUntil).getTime() <= Date.now();
 
-    if (!tokenWallet.zelfName || !sessionWallet.zelfName) {
-        fail(ctx, 401, "Authenticated Zelf identity is required", "ERR_ZELF_IDENTITY_REQUIRED");
+    if (!verified.zelfName || expired) {
+        fail(ctx, 403, "Session is not verified for this wallet", "ERR_SESSION_NOT_VERIFIED");
         return false;
     }
 
-    if (tokenWallet.zelfName !== sessionWallet.zelfName) {
+    const tokenWallet = normalizeZelfName(authUser.tagName, authUser.domain || domain);
+    if (tokenWallet.zelfName && tokenWallet.zelfName !== verified.zelfName) {
         fail(ctx, 403, "Session is not the owner of this Zelf ID", "ERR_SESSION_OWNER_MISMATCH");
         return false;
     }
 
     ctx.state.user = {
         ...authUser,
-        tagName: sessionWallet.tagName,
-        domain: sessionWallet.domain,
+        tagName: verified.tagName,
+        domain: verified.domain,
     };
     return true;
 };

@@ -37,7 +37,7 @@ const SessionModule = require("../../Session/modules/session.module");
 const QRZelfProofExtractor = require("../../Tags/modules/qr-zelfproof-extractor.module");
 const ArweaveModule = require("../../Arweave/modules/arweave.module");
 const { unPinFiles, unpinContinuationSiblings } = require("../../Tags/modules/tags-ipfs.module");
-const jwt = require("jsonwebtoken");
+const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const {
     resolveZelfIdPlan,
     resolveComplimentaryPlan,
@@ -387,22 +387,25 @@ const decryptTag = async (params, authUser) => {
     }
 
     const SessionModule = require("../../Session/modules/session.module");
-    await SessionModule.markSessionIdentityVerified(
-        authUser,
-        tagObject.publicData[tagKey] || tagObject.publicData.tagName || tagObject.publicData.zelfName || tagName,
-        domain
-    );
+    const decryptedRecord = {
+        publicData: {
+            ...(tagObject.publicData || {}),
+            ...(decryptedZelfProof.publicData || {}),
+        },
+    };
+    await SessionModule.stampVerifiedFromRecord(authUser, decryptedRecord, tagName, domain);
 
     return {
         ...tagObject,
         domain,
         pgp: { encryptedMessage, privateKey },
-        durationToken: jwt.sign(
+        durationToken: signToken(
             {
                 tagName: tagObject.publicData[tagKey] || tagObject.publicData.tagName || tagObject.publicData.zelfName,
                 exp: moment().add(1, "month").unix(),
             },
-            config.JWT_SECRET
+            config.JWT_SECRET,
+            { typ: TOKEN_TYPES.duration }
         ),
         metadata:
             config.env === "development"

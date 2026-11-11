@@ -1,4 +1,5 @@
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
+const { isAccountAccessToken } = require("../../../Core/jwt-claims");
 
 /**
  * JWT Validation Middleware
@@ -12,7 +13,7 @@ const jwtValidation = async (ctx, next) => {
 		const authUser = ctx.state.user;
 
 		// Check if user exists in JWT
-		if (!authUser || !authUser.email) {
+		if (!authUser || !authUser.email || !isAccountAccessToken(authUser)) {
 			ctx.status = 401;
 			ctx.body = {
 				error: "Invalid JWT token - missing user email",

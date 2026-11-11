@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const config = require("../../../Core/config");
+const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const moment = require("moment");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const zelfProofModule = require("../../ZelfProof/modules/zelf-proof.module");
@@ -189,7 +190,7 @@ const generateInvitation = async (data, authUser) => {
 	const activeLawyer = existingRecords.find((r) => r.publicData?.accountType === LAWYER_ACCOUNT_TYPE);
 	if (activeLawyer) throw new Error("403:lawyer_already_exists");
 
-	const invitationToken = jwt.sign(
+	const invitationToken = signToken(
 		{
 			type: "lawyer_invitation",
 			ownerEmail: authUser.email,
@@ -204,6 +205,7 @@ const generateInvitation = async (data, authUser) => {
 			exp: moment().add(24, "hours").unix(),
 		},
 		config.JWT_SECRET,
+		{ typ: TOKEN_TYPES.lawyerInvitation },
 	);
 
 	const invitationData = {
@@ -407,7 +409,7 @@ const createFromInvitation = async (data) => {
 			ethAddress: eth.address,
 			solanaAddress: solana.address,
 		},
-		token: jwt.sign(
+		token: signToken(
 			{
 				email: invitation.lawyerEmail,
 				domain: invitation.domain,
@@ -417,6 +419,7 @@ const createFromInvitation = async (data) => {
 				exp: moment().add(30, "day").unix(),
 			},
 			config.JWT_SECRET,
+			{ typ: TOKEN_TYPES.lawyer },
 		),
 	};
 };
@@ -451,7 +454,7 @@ const auth = async (data) => {
 		ipfsHash: lawyerAccount.cid,
 		zkProof: decryptedAccount.metadata.zkProof,
 		apiKey: decryptedAccount.metadata.apiKey,
-		token: jwt.sign(
+		token: signToken(
 			{
 				email,
 				domain: accountJSON.data.domain || decryptedAccount.metadata.lawyerDomain,
@@ -461,6 +464,7 @@ const auth = async (data) => {
 				exp: moment().add(30, "day").unix(),
 			},
 			config.JWT_SECRET,
+			{ typ: TOKEN_TYPES.lawyer },
 		),
 	};
 };

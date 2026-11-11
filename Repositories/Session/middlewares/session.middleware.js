@@ -1,4 +1,5 @@
 const config = require("../../../Core/config");
+const { BLOCKED_PRIVILEGE_TYPES, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const { validate, string } = require("../../../Core/JoiUtils");
 const MongoORM = require("../../../Core/mongo-orm");
 const Session = require("../models/session.model");
@@ -81,11 +82,29 @@ const decryptValidation = async (ctx, next) => {
 };
 
 const validateJWT = async (ctx, next) => {
-	const authUser = ctx.state.user;
+	const authUser = ctx.state.user || {};
+
+	if (BLOCKED_PRIVILEGE_TYPES.has(authUser.typ) || (authUser.typ && authUser.typ !== TOKEN_TYPES.session && authUser.session)) {
+		ctx.status = 401;
+		ctx.body = { error: "INVALID_TOKEN_TYPE", code: "INVALID_TOKEN_TYPE" };
+		return;
+	}
+
+	if (!authUser.typ && !Number.isFinite(authUser.exp)) {
+		ctx.status = 401;
+		ctx.body = { error: "INVALID_TOKEN_TYPE", code: "INVALID_TOKEN_TYPE" };
+		return;
+	}
 
 	if (!authUser.session) {
 		await next();
 
+		return;
+	}
+
+	if (authUser.typ && authUser.typ !== TOKEN_TYPES.session) {
+		ctx.status = 401;
+		ctx.body = { error: "INVALID_TOKEN_TYPE", code: "INVALID_TOKEN_TYPE" };
 		return;
 	}
 

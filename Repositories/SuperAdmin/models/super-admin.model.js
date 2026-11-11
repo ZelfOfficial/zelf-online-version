@@ -17,7 +17,7 @@ const { requiredEnumField, optionalEnumField, requiredField, refField, defaultFi
 
 const SuperAdminSchema = new Schema({
     name: requiredField(String),
-    status: requiredEnumField(String, ["invited", "joined", "banned"], "joined"),
+    status: requiredEnumField(String, ["invited", "joined", "banned", "inactive"], "joined"),
     avatar: defaultField(String, null),
     countryCode: {
         type: String,
@@ -43,6 +43,20 @@ const SuperAdminSchema = new Schema({
         type: Boolean,
         required: true,
         default: true,
+    },
+    disabled: {
+        type: Boolean,
+        required: true,
+        default: false,
+    },
+    tokenVersion: {
+        type: Number,
+        required: true,
+        default: 0,
+    },
+    tokensValidAfter: {
+        type: Date,
+        required: false,
     },
     isVerified: defaultField(Boolean, false),
     notes: {
@@ -75,6 +89,11 @@ const SuperAdminSchema = new Schema({
     otpExpiration: {
         type: Date,
         required: false,
+    },
+    otpAttempts: {
+        type: Number,
+        required: true,
+        default: 0,
     },
 });
 

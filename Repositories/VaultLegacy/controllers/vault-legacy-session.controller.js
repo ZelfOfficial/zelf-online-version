@@ -6,7 +6,7 @@
  * identifier (installation ID or wallet address) to get a Bearer token.
  */
 
-const jwt = require("jsonwebtoken");
+const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 
 const LEGACY_JWT_SECRET = process.env.LEGACY_JWT_SECRET || process.env.CONNECTION_KEY;
 // Token valid for 24 hours — long enough for an app session
@@ -27,14 +27,14 @@ const create = async (ctx) => {
             return;
         }
 
-        const token = jwt.sign(
+        const token = signToken(
             {
                 identifier,
                 type: "vault-legacy",
                 iat: Math.floor(Date.now() / 1000),
             },
             LEGACY_JWT_SECRET,
-            { expiresIn: TOKEN_TTL_SECONDS }
+            { typ: TOKEN_TYPES.vaultLegacy, expiresIn: TOKEN_TTL_SECONDS }
         );
 
         ctx.body = {

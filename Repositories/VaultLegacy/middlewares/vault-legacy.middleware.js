@@ -7,6 +7,7 @@
  */
 
 const jwt = require("jsonwebtoken");
+const { TOKEN_TYPES } = require("../../../Core/jwt-claims");
 
 const LEGACY_JWT_SECRET = process.env.LEGACY_JWT_SECRET || process.env.CONNECTION_KEY;
 
@@ -30,6 +31,11 @@ const requireJWT = async (ctx, next) => {
 
     try {
         const decoded = jwt.verify(token, LEGACY_JWT_SECRET);
+        if (decoded.typ !== TOKEN_TYPES.vaultLegacy) {
+            ctx.status = 401;
+            ctx.body = { error: "INVALID_TOKEN_TYPE", code: "INVALID_TOKEN_TYPE" };
+            return;
+        }
         ctx.state.legacyUser = decoded;
     } catch (e) {
         ctx.status = 401;

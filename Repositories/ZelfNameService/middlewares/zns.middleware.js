@@ -1,4 +1,6 @@
 const { string, validate, boolean, number, stringEnum } = require("../../../Core/JoiUtils");
+const { verifySuperAdmin } = require("../../SuperAdmin/middlewares/verify-super-admin.middleware");
+const { TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const captchaService = require("../../../Core/captcha");
 const config = require("../../../Core/config");
 const Session = require("../../Session/models/session.model");
@@ -596,25 +598,17 @@ const revenueCatWebhookValidation = async (ctx, next) => {
 };
 
 const referralRewardsValidation = async (ctx, next) => {
-    const { superAdminId } = ctx.state.user;
-
-    if (!superAdminId) {
-        ctx.status = 403;
-
-        ctx.body = { error: "Unauthorized" };
-
-        return;
-    }
-
-    await next();
+    await verifySuperAdmin(ctx, next);
 };
 
 const updateValidation = async (ctx, next) => {
-    const { zelfName } = ctx.state.user;
+    const authUser = ctx.state.user || {};
+    const legacyDuration = !authUser.typ && Number.isFinite(authUser.exp);
+    const durationToken = authUser.typ === TOKEN_TYPES.duration || legacyDuration;
 
-    if (!zelfName) {
+    if (!authUser.zelfName || !durationToken) {
         ctx.status = 403;
-        ctx.body = { validationError: "Access forbidden" };
+        ctx.body = { validationError: "Access forbidden", code: "INVALID_TOKEN_TYPE" };
         return;
     }
 
