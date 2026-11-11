@@ -137,6 +137,8 @@ const roundBillableUsdPrice = (usdAmount) => {
  * @param {{ reducedFeeRequested?: boolean }} [requestOptions]
  */
 const getPaymentOptions = async (tagName, domain, duration, authUser, requestOptions = {}) => {
+    // A session may request a quote for any registered name. Paying to renew a name is not
+    // limited to the stamped owner. The signed result is a price quote, not a session credential.
     const domainConfig = getDomainConfig(domain);
 
     // Get current tag data
@@ -709,6 +711,7 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         }
     }
 
+    // typ "quote" is accepted as Authorization only on POST /api/my-zelf-name/renew.
     const signedDataPrice = signToken(returnData, config.JWT_SECRET, { typ: TOKEN_TYPES.quote, expiresIn: "2h" });
 
     return {
