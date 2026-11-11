@@ -178,34 +178,12 @@ const rejectVault = async (ctx) => {
     }
 };
 
-const getDemoStatus = async (ctx) => {
-    try {
-        const status = await Module.getDemoStatus();
-        ctx.body = { success: true, ...status };
-    } catch (error) {
-        ctx.status = error.status || 500;
-        ctx.body = { error: error.message };
-    }
-};
-
-const ensureDemoVaultAccepted = async (ctx) => {
-    try {
-        const result = await Module.ensureDemoVaultAccepted(ctx.params.vaultId);
-        ctx.body = { success: true, result };
-    } catch (error) {
-        ctx.status = error.status || 500;
-        ctx.body = { error: error.message, details: error.details };
-    }
-};
-
-const resendBeneficiaryClaimableEmails = async (ctx) => {
-    try {
-        const result = await Module.resendBeneficiaryClaimableEmails(ctx.params.vaultId);
-        ctx.body = { success: true, result };
-    } catch (error) {
-        ctx.status = error.status || 500;
-        ctx.body = { error: error.message };
-    }
+const retiredVaultEndpoint = (ctx) => {
+    ctx.status = 410;
+    ctx.body = {
+        code: "LEGACY_DEMO_REMOVED",
+        error: "LEGACY_DEMO_REMOVED",
+    };
 };
 
 module.exports = {
@@ -227,7 +205,5 @@ module.exports = {
     getExecutionStatus,
     acceptVault,
     rejectVault,
-    getDemoStatus,
-    ensureDemoVaultAccepted,
-    resendBeneficiaryClaimableEmails,
+    retiredVaultEndpoint,
 };

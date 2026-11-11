@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
 const Schema = mongoose.Schema;
-const { String, Boolean } = mongoose.Schema.Types;
+const { String } = mongoose.Schema.Types;
 
 const { defaultField, addBasicPlugins } = require("../../../Core/mongoose-utils");
 
@@ -27,9 +27,6 @@ const VaultLegacySchema = new Schema({
     // Keys are event names (e.g. "createVault", "gracePeriod", "livenessFailed"),
     // values are ISO-8601 timestamps of when the e-mail was sent.
     notifiedEvents: { type: Schema.Types.Mixed, default: {} },
-
-    /** Demo inheritance plan — automation only when LEGACY_DEMO_MODE=true */
-    isDemo: { type: Boolean, default: false, index: true },
 
     /** Address proven when beneficiary and lawyer emails were registered. */
     ownerAddress: defaultField(String, null),

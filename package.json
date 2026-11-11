@@ -20,7 +20,7 @@
         "test:app-version": "jest tests/integration/app-version-api.test.js --config jest.integration.config.js --verbose --no-coverage",
         "test:license": "jest tests/integration/license.test.js --verbose --no-coverage",
         "test:human-authn-onboarding": "jest --config jest.integration.config.js tests/integration/human-authn-onboarding-api.test.js --verbose --no-coverage",
-        "test:vault-legacy-demo": "jest --config jest.integration.config.js tests/integration/vault-legacy-demo.test.js --verbose --no-coverage",
+        "test:vault-legacy": "jest tests/unit/vault-legacy-removed.test.js --verbose --no-coverage",
         "test:license-theme": "jest tests/unit/license-theme-merge.test.js --verbose --no-coverage && jest --config jest.integration.http.config.js tests/integration/license-zelf-theme-api.test.js --verbose --no-coverage",
         "test:stellar": "jest tests/integration/stellar-api.test.js --verbose --no-coverage",
         "test:ton": "jest tests/unit/ton-wallet.test.js --verbose --no-coverage && jest --config jest.integration.config.js tests/integration/ton-api.test.js --verbose --no-coverage",

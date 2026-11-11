@@ -13,11 +13,9 @@
 const path = require("path");
 const fs = require("fs");
 const { ethers } = require("ethers");
-const config = require("../../../Core/config");
-const VaultLegacy = require("../models/vault-legacy.model");
 const IPFSManager = require("./ipfs-legacy.module");
 const AvalancheManager = require("./avalanche-legacy.module");
-const LegacyDemo = require("./vault-legacy-demo.module");
+const { normalizeVaultId } = require("./vault-id.module");
 
 // Lazy-initialized singletons
 let _ipfsManager = null;
@@ -169,20 +167,12 @@ const createVault = async ({
     ipfsCidValidator,
     vaultId,
     threshold,
-    isDemo,
 }) => {
     if (!authSig || !beneficiaryAddresses || !ipfsCid || !ipfsCidValidator || !vaultId || !threshold) {
         throw new Error("Missing required fields");
     }
 
-    const vaultIdNorm = LegacyDemo.normalizeVaultId(vaultId);
-    const mongoEntry = await VaultLegacy.findOne({ vaultId: vaultIdNorm }).lean();
-    const vaultIsDemo = isDemo === true || Boolean(mongoEntry?.isDemo);
-
-    if (vaultIsDemo) {
-        LegacyDemo.assertDemoModeEnabled();
-        LegacyDemo.assertDemoLawyer(lawyerAddress);
-    }
+    const vaultIdNorm = normalizeVaultId(vaultId);
 
     let testatorAddress;
     try {
@@ -193,28 +183,16 @@ const createVault = async ({
         throw err;
     }
 
-    const interval = LegacyDemo.resolveDemoHeartbeatInterval(vaultIsDemo, heartbeatInterval);
-    const avalancheManager = getAvalancheManager();
-    const result = await avalancheManager.createVault(
+    return await getAvalancheManager().createVault(
         testatorAddress,
         vaultIdNorm,
         beneficiaryAddresses,
         lawyerAddress,
-        interval,
+        heartbeatInterval,
         ipfsCid,
         ipfsCidValidator,
         threshold
     );
-
-    if (vaultIsDemo && config.legacyDemo?.enabled) {
-        try {
-            await LegacyDemo.ensureVaultAccepted(vaultIdNorm);
-        } catch (e) {
-            console.error("[LEGACY-DEMO] ensureVaultAccepted failed:", e.message);
-        }
-    }
-
-    return { ...result, isDemo: vaultIsDemo };
 };
 
 const updateHeartbeat = async ({ authSig, vaultId }) => {
@@ -270,16 +248,15 @@ const confirmDeath = async ({ authSig, vaultId }) => {
 };
 
 const getVault = async (vaultId) => {
-    const vaultIdNorm = LegacyDemo.normalizeVaultId(vaultId);
-    const isDemo = await LegacyDemo.getIsDemoForVault(vaultIdNorm);
-    return { vault: await getAvalancheManager().getVault(vaultIdNorm), isDemo };
+    const vaultIdNorm = normalizeVaultId(vaultId);
+    return { vault: await getAvalancheManager().getVault(vaultIdNorm) };
 };
 
 const getOnChainVaultOwner = async (vaultId) => {
     if (!process.env.LEGACY_VAULT_REGISTRY_ADDRESS) return null;
 
     try {
-        const vaultIdNorm = LegacyDemo.normalizeVaultId(vaultId);
+        const vaultIdNorm = normalizeVaultId(vaultId);
         const vault = await getAvalancheManager().getVault(vaultIdNorm);
         if (!vault?.exists || !vault.owner || vault.owner === ethers.ZeroAddress) return null;
         return vault.owner;
@@ -325,7 +302,6 @@ const getExecutionStatus = async (vaultId) => {
 
 const acceptVault = async ({ authSig, vaultId }) => {
     if (!authSig || !vaultId) throw new Error("Missing authSig or vaultId");
-    await LegacyDemo.assertNotDemoVaultForLawyerAction(vaultId);
     let lawyerAddress;
     try {
         lawyerAddress = verifyAuthSig(authSig, `ZelfLegacy accept-vault ${vaultId}`);
@@ -339,7 +315,6 @@ const acceptVault = async ({ authSig, vaultId }) => {
 
 const rejectVault = async ({ authSig, vaultId }) => {
     if (!authSig || !vaultId) throw new Error("Missing authSig or vaultId");
-    await LegacyDemo.assertNotDemoVaultForLawyerAction(vaultId);
     let lawyerAddress;
     try {
         lawyerAddress = verifyAuthSig(authSig, `ZelfLegacy reject-vault ${vaultId}`);
@@ -351,32 +326,9 @@ const rejectVault = async ({ authSig, vaultId }) => {
     return await getAvalancheManager().rejectVault(lawyerAddress, vaultId);
 };
 
-const getDemoStatus = async () => LegacyDemo.getDemoStatus();
-
-const ensureDemoVaultAccepted = async (vaultId) => {
-    const vaultIdNorm = LegacyDemo.normalizeVaultId(vaultId);
-    const result = await LegacyDemo.ensureVaultAccepted(vaultIdNorm);
-    return { vaultId: vaultIdNorm, ...result };
-};
-
-const resendBeneficiaryClaimableEmails = async (vaultId) => {
-    const vaultIdNorm = LegacyDemo.normalizeVaultId(vaultId);
-    const entry = await VaultLegacy.findOne({ vaultId: vaultIdNorm });
-    if (!entry) {
-        const err = new Error("Vault email record not found");
-        err.status = 404;
-        throw err;
-    }
-    const result = await LegacyDemo.ensureBeneficiaryClaimableEmails(entry, vaultIdNorm);
-    return { vaultId: vaultIdNorm, ...result };
-};
-
 module.exports = {
     verifyAuthSig,
     getOnChainVaultOwner,
-    getDemoStatus,
-    ensureDemoVaultAccepted,
-    resendBeneficiaryClaimableEmails,
     // Vault share ops
     collectShares,
     getShares,

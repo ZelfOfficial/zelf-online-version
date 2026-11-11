@@ -369,13 +369,6 @@ const configuration = {
         demoMode: process.env.CRYPTO_PAYMENTS_DEMO_MODE === "true" || false,
         demoMultiplier: 0.005, // 0.5% of original price for demo mode (max $0.049 for $9.99)
     },
-    /** VaultLegacy demo wills — never enable LEGACY_DEMO_MODE on production v3.zelf.world */
-    legacyDemo: {
-        enabled: process.env.LEGACY_DEMO_MODE === "true",
-        lawyerAddress: (process.env.LEGACY_DEMO_LAWYER_ADDRESS || "").trim().toLowerCase(),
-        lawyerPrivateKey: process.env.LEGACY_DEMO_LAWYER_PRIVATE_KEY || "",
-        heartbeatInterval: Number(process.env.LEGACY_DEMO_HEARTBEAT_INTERVAL) || 2592000,
-    },
     rpc: {
         /** Upstream JSON-RPC timeout (simulateTransaction / sendTransaction can be slow on Solana). Override with RPC_PROXY_TIMEOUT_MS. */
         timeoutMs: Number(process.env.RPC_PROXY_TIMEOUT_MS) || 45000,
