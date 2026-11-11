@@ -14,7 +14,11 @@ const ZNSRecoveryModule = require("../modules/zns-recovery.module");
 const handleError = (ctx, error) => {
 	console.error({ error });
 	ctx.status = error.status || 500;
-	ctx.body = { error: error.message };
+	const code = typeof error.clientCode === "string" ? error.clientCode : undefined;
+	ctx.body = {
+		error: code || error.message,
+		...(code ? { code } : {}),
+	};
 };
 
 /**

@@ -6,6 +6,7 @@ const { createEthWallet } = require("./eth");
 const { createSolanaWallet } = require("./solana");
 const { createBTCWallet } = require("./btc");
 const sessionModule = require("../../Session/modules/session.module");
+const { findStoredZelfProof } = require("./stored-zelf-proof.module");
 const OfflineProofModule = require("../../Mina/offline-proof");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const moment = require("moment");
@@ -201,9 +202,9 @@ const decryptWallet = async (params, authUser) => {
 
 	let zelfProof = params.zelfProof;
 
-	const zelfName = params.zelfName;
+	const requestedName = params.zelfName;
 
-	if (!zelfProof && zelfName) {
+	if (!zelfProof && requestedName) {
 		// TODO
 	}
 
@@ -230,6 +231,22 @@ const decryptWallet = async (params, authUser) => {
 
 	if (!params?.skipQRCode) {
 		image = await encryptQR({ ...decryptedWallet, faceBase64: face, password });
+	}
+
+	const domain = params.domain || authUser?.domain || "zelf";
+	const recordName = decryptedWallet?.publicData?.zelfName || decryptedWallet?.publicData?.tagName || "";
+	const claimedName = requestedName != null && String(requestedName).trim() !== "" ? requestedName : recordName;
+	const stored = claimedName != null && String(claimedName).trim() !== "" ? await findStoredZelfProof(claimedName, domain, authUser) : null;
+	const stampName = sessionModule.resolveVerificationStamp({
+		stored,
+		requestedName,
+		decryptedName: recordName,
+		clientProof: zelfProof,
+		domain,
+	});
+
+	if (stampName) {
+		await sessionModule.markSessionIdentityVerified(authUser, stampName, domain);
 	}
 
 	return {

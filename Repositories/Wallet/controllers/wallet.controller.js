@@ -75,7 +75,6 @@ const decryptWallet = async (ctx) => {
 	try {
 		const data = await Module.decryptWallet(ctx.request.body, ctx.state.user);
 
-		await SessionModule.deleteSession(ctx.state.user);
 		ctx.body = { data };
 	} catch (error) {
 		console.error(error);
@@ -84,7 +83,11 @@ const decryptWallet = async (ctx) => {
 
 		await SessionModule.deleteSession(ctx.state.user);
 
-		ctx.body = { error: error.message };
+		const code = typeof error.clientCode === "string" ? error.clientCode : undefined;
+		ctx.body = {
+			error: code || error.message,
+			...(code ? { code } : {}),
+		};
 	}
 };
 

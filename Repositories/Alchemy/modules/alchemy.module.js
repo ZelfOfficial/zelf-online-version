@@ -4,7 +4,7 @@ const { formatEther, formatUnits, getAddress, isAddress } = require("ethers");
 const config = require("../../../Core/config");
 const { searchTag } = require("../../Tags/modules/tags.module");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
-const { getSessionFullTagName } = require("../middlewares/alchemy.middleware");
+const SessionModule = require("../../Session/modules/session.module");
 
 const instance = getCleanInstance(config.alchemy?.timeoutMs || 30000);
 
@@ -119,14 +119,13 @@ const rpcRequest = async (network, method, params = []) => {
 
 const resolveOwnedTagAddress = async ({ tagName, domain }, authUser) => {
     const fullTagName = `${tagName}.${domain}`.toLowerCase();
-    const sessionTagName = String(authUser?.tagName || "").toLowerCase();
-    const sessionFullTagName = getSessionFullTagName(authUser);
+    const verifiedTagName = await SessionModule.readVerifiedTagName(authUser);
 
-    if (!sessionTagName) {
+    if (!verifiedTagName) {
         throw createError(403, "owned_tag_session_required");
     }
 
-    if (sessionFullTagName !== fullTagName) {
+    if (verifiedTagName !== fullTagName) {
         throw createError(403, "tag_not_owned");
     }
 

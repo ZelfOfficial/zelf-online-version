@@ -230,9 +230,17 @@ const decryptTag = async (params, authUser) => {
         throw error;
     }
 
-    const { mnemonic, zkProof, solanaSecretKey } = decryptedZelfProof.metadata;
-
     const tagKey = domainConfig.getTagKey() || "tagName";
+    const storedName = tagObject.publicData?.[tagKey] || tagObject.publicData?.zelfName || tagObject.publicData?.tagName || "";
+    const stampName = SessionModule.resolveVerificationStamp({
+        stored: storedName && tagObject.zelfProof ? { zelfName: storedName, zelfProof: tagObject.zelfProof } : null,
+        requestedName: tagName,
+        decryptedName: SessionModule.nameOnRecord(decryptedZelfProof),
+        clientProof: tagObject.zelfProof,
+        domain,
+    });
+
+    const { mnemonic, zkProof, solanaSecretKey } = decryptedZelfProof.metadata;
 
     // Generate Arweave wallet from mnemonic for consistency
     const arweave = await ArweaveModule.generateWalletFromMnemonic(mnemonic);
@@ -257,6 +265,10 @@ const decryptTag = async (params, authUser) => {
             const tag = tagsToAdd[index];
             tagObject.publicData[tag.name] = tag.value;
         }
+    }
+
+    if (stampName) {
+        await SessionModule.markSessionIdentityVerified(authUser, stampName, domain);
     }
 
     return {

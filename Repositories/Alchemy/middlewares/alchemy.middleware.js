@@ -1,6 +1,7 @@
 const config = require("../../../Core/config");
 const { string, stringEnum, validate } = require("../../../Core/JoiUtils");
 const { extractDomainAndName, validateDomainAndName } = require("../../Tags/middlewares/tags.middleware");
+const SessionModule = require("../../Session/modules/session.module");
 
 const NETWORK_ALIASES = Object.freeze({
     arb: "arbitrum",
@@ -88,26 +89,10 @@ const parseMaxCount = (value) => {
     return maxCount;
 };
 
-const getSessionFullTagName = (authUser) => {
-    const sessionTagName = String(authUser?.tagName || "")
-        .trim()
-        .toLowerCase();
-    const sessionDomain = String(authUser?.domain || "")
-        .trim()
-        .toLowerCase();
-
-    if (!sessionTagName) return null;
-    if (sessionTagName.includes(".")) return sessionTagName;
-    if (!sessionDomain) return null;
-
-    return `${sessionTagName}.${sessionDomain}`;
-};
-
 const ensureTagOwnership = async (ctx, tagName, domain) => {
-    const sessionTagName = ctx.state.user?.tagName;
-    const sessionFullTagName = getSessionFullTagName(ctx.state.user);
+    const verifiedTagName = await SessionModule.readVerifiedTagName(ctx.state.user);
 
-    if (!sessionTagName) {
+    if (!verifiedTagName) {
         ctx.status = 403;
         ctx.body = { message: "owned tag session required", code: "Forbidden" };
         return false;
@@ -115,7 +100,7 @@ const ensureTagOwnership = async (ctx, tagName, domain) => {
 
     const requestedTagName = `${tagName}.${domain}`.toLowerCase();
 
-    if (sessionFullTagName !== requestedTagName) {
+    if (verifiedTagName !== requestedTagName) {
         ctx.status = 403;
         ctx.body = { message: "tag not owned", code: "Forbidden" };
         return false;
@@ -297,7 +282,6 @@ const getTransactionValidation = async (ctx, next) => {
 module.exports = {
     SUPPORTED_ALCHEMY_NETWORKS,
     getBalancesValidation,
-    getSessionFullTagName,
     getTransactionValidation,
     getTransactionsValidation,
     normalizeNetwork,

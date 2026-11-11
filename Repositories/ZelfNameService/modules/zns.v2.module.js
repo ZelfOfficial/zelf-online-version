@@ -106,11 +106,41 @@ const decryptZelfName = async (params, authUser) => {
 
 	const { face, password } = await _decryptParams(params, authUser);
 
+	const storedZelfProof = [
+		zelfNameObject?.publicData?.zelfProof,
+		zelfNameObject?.zelfProof,
+		zelfNameObjects.ipfs?.[0]?.publicData?.zelfProof,
+		zelfNameObjects.ipfs?.[0]?.zelfProof,
+		zelfNameObjects.arweave?.[0]?.publicData?.zelfProof,
+		zelfNameObjects.arweave?.[0]?.zelfProof,
+	]
+		.find((value) => typeof value === "string" && value.trim())
+		?.trim();
+
+	if (!storedZelfProof) {
+		const error = new Error("STORED_RECORD_NOT_FOUND");
+		error.status = 404;
+		error.code = "STORED_RECORD_NOT_FOUND";
+		error.clientCode = "STORED_RECORD_NOT_FOUND";
+		throw error;
+	}
+
+	const storedName =
+		SessionModule.nameOnRecord(zelfNameObject) ||
+		SessionModule.nameOnRecord(zelfNameObjects.ipfs?.[0]) ||
+		SessionModule.nameOnRecord(zelfNameObjects.arweave?.[0]);
+	const nameParts = String(storedName || params.zelfName || "")
+		.trim()
+		.toLowerCase()
+		.split(".")
+		.filter(Boolean);
+	const nameDomain = nameParts.length >= 2 ? nameParts[nameParts.length - 1] : "zelf";
+
 	const decryptedZelfProof = await decrypt({
 		addServerPassword: Boolean(params.addServerPassword),
 		faceBase64: face,
 		password,
-		zelfProof: zelfNameObject.publicData.zelfProof || params.zelfProof,
+		zelfProof: storedZelfProof,
 	});
 
 	if (decryptedZelfProof.error) {
@@ -118,6 +148,14 @@ const decryptZelfName = async (params, authUser) => {
 		error.status = 409;
 		throw error;
 	}
+
+	const stampName = SessionModule.resolveVerificationStamp({
+		stored: storedName ? { zelfName: storedName, zelfProof: storedZelfProof } : null,
+		requestedName: params.zelfName,
+		decryptedName: SessionModule.nameOnRecord(decryptedZelfProof),
+		clientProof: params.zelfProof,
+		domain: nameDomain,
+	});
 
 	const { mnemonic, zkProof, solanaSecretKey } = decryptedZelfProof.metadata;
 
@@ -143,6 +181,10 @@ const decryptZelfName = async (params, authUser) => {
 	}
 
 	if (!zelfNameObject.zelfProofQRCode) zelfNameObject.zelfProofQRCode = await ZNSPartsModule.urlToBase64(zelfNameObject.url);
+
+	if (stampName) {
+		await SessionModule.markSessionIdentityVerified(authUser, stampName, nameDomain);
+	}
 
 	return {
 		hasPassword: Boolean(password),
