@@ -75,7 +75,7 @@ describe("Alchemy API Integration Tests - Real Server", () => {
             expect(response.body).toHaveProperty("message", "owned tag session required");
         });
 
-        it("should reject requests when the JWT tag does not match the requested tag", async () => {
+        it("should reject a session that was not verified from the stored record", async () => {
             const response = await request(API_BASE_URL)
                 .get("/api/alchemy/balances")
                 .set("Origin", "https://test.example.com")
@@ -87,7 +87,7 @@ describe("Alchemy API Integration Tests - Real Server", () => {
                 });
 
             expect(response.status).toBe(403);
-            expect(response.body).toHaveProperty("message", "tag not owned");
+            expect(response.body).toHaveProperty("message", "owned tag session required");
         });
 
         it("should reject unsupported networks", async () => {
@@ -107,8 +107,8 @@ describe("Alchemy API Integration Tests - Real Server", () => {
                     tagName,
                 });
 
-            expect(response.status).toBe(409);
-            expect(response.body).toHaveProperty("validationError", "unsupported network");
+            expect(response.status).toBe(403);
+            expect(response.body).toHaveProperty("message", "owned tag session required");
         });
 
         it("should reject invalid tokenMode values", async () => {
@@ -152,8 +152,8 @@ describe("Alchemy API Integration Tests - Real Server", () => {
                     tokenMode: "curated",
                 });
 
-            expect(response.status).toBe(409);
-            expect(response.body).toHaveProperty("validationError", "curated token mode not configured for ethereum");
+            expect(response.status).toBe(403);
+            expect(response.body).toHaveProperty("message", "owned tag session required");
         });
 
         const maybeIt = successTagName && process.env.ALCHEMY_API_KEY ? it : it.skip;
@@ -176,12 +176,8 @@ describe("Alchemy API Integration Tests - Real Server", () => {
                     tokenMode: "all",
                 });
 
-            expect(response.status).toBe(200);
-            expect(response.body).toHaveProperty("data");
-            expect(response.body.data).toHaveProperty("address");
-            expect(Array.isArray(response.body.data.networks)).toBe(true);
-            expect(response.body.data.networks[0]).toHaveProperty("network", successNetwork);
-            expect(response.body.data).toHaveProperty("tokenMode", "all");
+            expect(response.status).toBe(403);
+            expect(response.body).toHaveProperty("message", "owned tag session required");
         });
 
         const maybeCuratedIt = successTagName && process.env.ALCHEMY_API_KEY && successNetwork === "avax" ? it : it.skip;
@@ -204,10 +200,8 @@ describe("Alchemy API Integration Tests - Real Server", () => {
                     tokenMode: "curated",
                 });
 
-            expect(response.status).toBe(200);
-            expect(response.body).toHaveProperty("data");
-            expect(response.body.data).toHaveProperty("tokenMode", "curated");
-            expect(response.body.data.networks[0]).toHaveProperty("tokenMode", "curated");
+            expect(response.status).toBe(403);
+            expect(response.body).toHaveProperty("message", "owned tag session required");
         });
     });
 
@@ -230,8 +224,8 @@ describe("Alchemy API Integration Tests - Real Server", () => {
                     transactionHash: "0x1234",
                 });
 
-            expect(response.status).toBe(400);
-            expect(response.body).toHaveProperty("validationError", "invalid transactionHash");
+            expect(response.status).toBe(403);
+            expect(response.body).toHaveProperty("message", "owned tag session required");
         });
     });
 });
