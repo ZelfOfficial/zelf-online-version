@@ -54,7 +54,11 @@ describe("zelf-ids analytics", () => {
     });
 
     test("other domains are rejected", async () => {
-        await expect(getSummary({ domain: "bdag" }, {}, makeDeps())).rejects.toThrow(/^403/);
+        await expect(getSummary({ domain: "avax" }, {}, makeDeps())).rejects.toThrow(/^403/);
+        await expect(getSummary({ domain: "bdag" }, {}, makeDeps())).rejects.toMatchObject({
+            clientCode: "UNSUPPORTED_DOMAIN",
+            status: 400,
+        });
     });
 
     test("arweave failure does not break the summary", async () => {

@@ -7,7 +7,7 @@ describe("Zelf Link gateways", () => {
 	test("ar.io is the primary gateway", () => {
 		expect(gw.getArnsGatewayHosts()[0]).toBe("ar.io");
 		expect(gw.buildArnsUndernameUrl("abc", "zelf")).toBe("https://abc_zelf.ar.io");
-		expect(gw.buildArnsUndernameUrls("abc", "bdag")[0]).toBe("https://abc_bdag_zelf.ar.io");
+		expect(gw.buildArnsUndernameUrls("abc", "avax")[0]).toBe("https://abc_avax_zelf.ar.io");
 	});
 
 	test("falls back to the next working gateway and caches", async () => {

@@ -3,6 +3,8 @@
  * Allowed: the license owner (jwt.email owns the license) or staff of that license (jwt.ownerEmail).
  * Everyone else gets 403. A requested domain different from the caller's license domain is 403.
  */
+const { assertSupportedDomain } = require("../../../Core/unsupported-networks");
+
 const STAFF_TYPES = new Set(["staff", "staff_account"]);
 
 const licenseDomainOf = (myLicense) =>
@@ -27,6 +29,7 @@ const resolveAuthorizedDomain = async (jwt, requestedDomain, deps = {}) => {
     if (licenseOwner && licenseOwner !== ownerEmail) throw new Error("403:not_license_owner_or_staff");
 
     const wanted = String(requestedDomain || "").trim().toLowerCase().replace(/^\./, "");
+    if (wanted) assertSupportedDomain(wanted);
     if (wanted && wanted !== domain) throw new Error("403:domain_not_managed_by_account");
 
     return { domain, isStaff, ownerEmail };

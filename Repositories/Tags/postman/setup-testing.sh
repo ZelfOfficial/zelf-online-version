@@ -107,7 +107,6 @@ echo "  🆓 .zelf (Free)"
 echo "  💰 .avax ($1.00)"
 echo "  💰 .btc ($0.50)"
 echo "  💰 .tech ($0.75)"
-echo "  💰 .bdag ($5.00)"
 echo ""
 
 print_info "Test data is available in postman/test-data.json"

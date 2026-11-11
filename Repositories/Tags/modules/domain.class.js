@@ -1,5 +1,6 @@
 const config = require("../../../Core/config");
 const { codedError } = require("../../../Core/http-handler");
+const { isUnsupportedDomain, omitUnsupportedCurrencies, omitUnsupportedNetworks, presentDomainRecord } = require("../../../Core/unsupported-networks");
 /**
  * Domain Class
  *
@@ -32,8 +33,8 @@ class Domain {
             customRules: domainData.tags?.customRules || [],
             payment: {
                 methods: domainData.tags?.payment?.methods || ["crypto", "stripe"],
-                currencies: domainData.tags?.payment?.currencies || ["USD"],
-                networks: domainData.tags?.payment?.networks || {},
+                currencies: omitUnsupportedCurrencies(domainData.tags?.payment?.currencies) || ["USD"],
+                networks: omitUnsupportedNetworks(domainData.tags?.payment?.networks) || {},
                 discounts: domainData.tags?.payment.discounts || {
                     yearly: 0.1,
                     lifetime: 0.2,
@@ -51,7 +52,7 @@ class Domain {
                 backupEnabled: domainData.tags?.storage?.backupEnabled ?? false,
             },
             wallet: {
-                networks: domainData.tags?.wallet?.networks || domainData.wallet?.networks || {},
+                networks: omitUnsupportedNetworks(domainData.tags?.wallet?.networks || domainData.wallet?.networks) || {},
             },
         };
 
@@ -680,11 +681,10 @@ const domainOffersPlanPricing = (domainConfig) => {
  */
 const filterOfferedDomains = (domains) => {
     if (!domains || typeof domains !== "object") return domains;
-    const { isDeprecatedDomain } = require("../../../Core/deprecated-networks");
     const offered = {};
-    for (const [name, config] of Object.entries(domains)) {
-        if (isDeprecatedDomain(name) || isDeprecatedDomain(config?.name)) continue;
-        if (domainOffersPlanPricing(config)) offered[name] = config;
+    for (const [name, domainConfig] of Object.entries(domains)) {
+        if (isUnsupportedDomain(name) || isUnsupportedDomain(domainConfig?.name)) continue;
+        if (domainOffersPlanPricing(domainConfig)) offered[name] = presentDomainRecord(domainConfig);
     }
     return offered;
 };
@@ -695,4 +695,5 @@ module.exports = {
     domainFactory,
     domainOffersPlanPricing,
     filterOfferedDomains,
+    presentDomainRecord,
 };

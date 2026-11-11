@@ -22,41 +22,14 @@
 				title: "HR and Operations",
 				description: "Liza have been in IT recruitment, Sales and Business Development for 13 years as well as been involved in 2 start-ups.",
 				profileImage: "https://arweave.net/8nHECUli24cVSaSW_14Tgc96h6CujiempFwrUGWLyRE",
-				currency: "blockDAG",
-				currencyIcon: "https://arweave.net/C3UN6v_nJT81_3dhsIw5dGP0kjPTfUu6LSDqRwmW0OQ",
 				socialLinks: [
 					{
 						type: "linkedin",
 						label: "Follow me on LinkedIn",
 						url: "https://www.linkedin.com/in/liza-van-den-berg-0938263b/",
 					},
-					{
-						type: "x",
-						label: "Follow me on X",
-						url: "https://x.com/blockdag8990",
-					},
-					{
-						type: "email",
-						label: "Email me",
-						url: "mailto:liza@blockdag.network",
-					},
 				],
 				promoItems: [
-					{
-						text: "Know more about BlockDAG",
-						url: "https://blockdag.network",
-						iconType: "world",
-					},
-					{
-						text: "Win 1 year of BDAG name",
-						url: "https://zelf.world/bdag-promo/",
-						iconType: "world",
-					},
-					{
-						text: "Buy BDAG @ $0.005!",
-						url: "https://purchase3.blockdag.network/",
-						iconType: "coin",
-					},
 					{
 						text: "Know about Zelf",
 						url: "https://zelf.world",
@@ -69,8 +42,6 @@
 				title: "Founder & CEO",
 				description: "I'm the founder and CTO of Zelf | Verifik, building the future of decentralized identity and name services.",
 				profileImage: "https://arweave.net/1YrzcQ1c2WlFKI0TptUuwCyAUOKVnX3VV9DrXeHNO40",
-				currency: "blockDAG",
-				currencyIcon: "https://arweave.net/C3UN6v_nJT81_3dhsIw5dGP0kjPTfUu6LSDqRwmW0OQ",
 				socialLinks: [
 					{
 						type: "linkedin",
@@ -90,24 +61,9 @@
 				],
 				promoItems: [
 					{
-						text: "Know more about BlockDAG",
-						url: "https://blockdag.network",
-						iconType: "world",
-					},
-					{
 						text: "Know about Zelf",
 						url: "https://zelf.world",
 						iconType: "world",
-					},
-					{
-						text: "Win 1 year of BDAG name",
-						url: "https://zelf.world/bdag-promo/",
-						iconType: "world",
-					},
-					{
-						text: "Buy BDAG @ $0.005!",
-						url: "https://purchase3.blockdag.network/",
-						iconType: "coin",
 					},
 					{
 						text: "Know about Verifik",
@@ -122,8 +78,6 @@
 				description:
 					'Founder & CEO of Zelf & Verifik. Verifik is Compliance aaS, Onboarding aaS, Authentication aaS tech-enabler for the Americas. My life revolves around thinking, creating and implementing ideas that positively affect everyone (employees and clients) that comes in contact with our brand. "𝐈𝐧 𝐭𝐡𝐞 𝐛𝐞𝐠𝐢𝐧𝐧𝐢𝐧𝐠 𝐰𝐚𝐬 𝐭𝐡𝐞 𝐥𝐨𝐠𝐨𝐬, 𝐭𝐡𝐞 𝐞𝐧𝐭𝐫𝐨𝐩𝐢𝐜 𝐛𝐢𝐭" - 𝐉𝐨𝐡𝐚𝐧 𝐂𝐚𝐬𝐭𝐞𝐥𝐥𝐚𝐧𝐨𝐬',
 				profileImage: "https://arweave.net/o60wwYAztZiwDzRm5TRf86LmhYTS0Pf3uSz66EKAV2s",
-				currency: "blockDAG",
-				currencyIcon: "https://arweave.net/C3UN6v_nJT81_3dhsIw5dGP0kjPTfUu6LSDqRwmW0OQ",
 				socialLinks: [
 					{
 						type: "linkedin",
@@ -143,24 +97,9 @@
 				],
 				promoItems: [
 					{
-						text: "Know more about BlockDAG",
-						url: "https://blockdag.network",
-						iconType: "world",
-					},
-					{
 						text: "Know about Zelf",
 						url: "https://zelf.world",
 						iconType: "world",
-					},
-					{
-						text: "Win 1 year of BDAG name",
-						url: "https://zelf.world/bdag-promo/",
-						iconType: "world",
-					},
-					{
-						text: "Buy BDAG @ $0.005!",
-						url: "https://purchase3.blockdag.network/",
-						iconType: "coin",
 					},
 					{
 						text: "Know about Verifik",
@@ -188,8 +127,12 @@
 			}
 
 			if (currencyIcon) {
-				currencyIcon.src = profile.currencyIcon;
-				currencyIcon.alt = profile.currency;
+				if (profile.currencyIcon) {
+					currencyIcon.src = profile.currencyIcon;
+					currencyIcon.alt = profile.currency || "";
+				} else {
+					currencyIcon.style.display = "none";
+				}
 			}
 
 			if (profileName) {
@@ -329,7 +272,7 @@
 				iconDiv.className = `promo-item-icon ${item.iconType === "square" ? "square" : ""}`;
 
 				if (item.iconType === "coin") {
-					// Coin icon for Buy BDAG
+					// Coin icon
 					const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
 					svg.setAttribute("width", "14");
 					svg.setAttribute("height", "14");

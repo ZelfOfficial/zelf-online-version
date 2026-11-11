@@ -3,6 +3,7 @@ const { verifySuperAdmin } = require("../../SuperAdmin/middlewares/verify-super-
 const captchaService = require("../../../Core/captcha");
 const Session = require("../../Session/models/session.model");
 const { validateDomainName, isDomainActive } = require("../modules/domain-registry.module");
+const { isUnsupportedDomain, rejectIfUnsupportedDomain, respondDomainValidation } = require("../../../Core/unsupported-networks");
 
 const schemas = {
     search: {
@@ -140,7 +141,7 @@ const normalizeRegistryDomain = (d) => {
 
 /**
  * Extract domain from tag name or use provided domain parameter
- * Registry TLD is e.g. zelf / bdag; pin names may use .zelfpay / .bdagpay (not separate domains).
+ * Registry TLD is e.g. zelf; pin names may use .zelfpay (not a separate domain).
  * @param {string} tagName - Full tag name (e.g., "username.avax", "user.zelfpay")
  * @param {string} domain - Domain parameter from request
  * @returns {Object} - { domain, name } — domain is always the licensed/registry TLD for validation
@@ -191,10 +192,15 @@ const extractDomainAndName = (tagName, domain) => {
  * @param {string} name - Tag name without domain
  * @returns {Object} - Validation result
  */
+const finishDomainValidation = respondDomainValidation;
+
 const validateDomainAndName = async (domain, name) => {
     if (!domain) return { valid: false, error: "Domain is required" };
 
     const registryDomain = stripLeadingDot(String(domain).toLowerCase());
+    if (isUnsupportedDomain(registryDomain)) {
+        return { valid: false, code: "UNSUPPORTED_DOMAIN", status: 400, error: "UNSUPPORTED_DOMAIN" };
+    }
 
     let isActive = isDomainActive(registryDomain);
 
@@ -252,16 +258,14 @@ const getValidation = async (ctx, next) => {
         return;
     }
 
+    if (rejectIfUnsupportedDomain(ctx, domain)) return;
+
     // Validate domain and tag name if provided
     if (tagName) {
         const { domain: extractedDomain, name } = extractDomainAndName(tagName, domain);
         const domainValidation = await validateDomainAndName(extractedDomain, name);
 
-        if (!domainValidation.valid) {
-            ctx.status = 409;
-            ctx.body = { validationError: domainValidation.error };
-            return;
-        }
+        if (finishDomainValidation(ctx, domainValidation)) return;
 
         // Add extracted domain and name to context for use in controllers
         ctx.state.extractedDomain = extractedDomain;
@@ -308,6 +312,8 @@ const searchByDomainValidation = async (ctx, next) => {
         return;
     }
 
+    if (rejectIfUnsupportedDomain(ctx, domain)) return;
+
     await next();
 };
 
@@ -338,11 +344,7 @@ const leaseValidation = async (ctx, next) => {
     const { domain: extractedDomain, name } = extractDomainAndName(tagName, domain);
     const domainValidation = await validateDomainAndName(extractedDomain, name);
 
-    if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
-        return;
-    }
+    if (finishDomainValidation(ctx, domainValidation)) return;
 
     // Add extracted domain and name to context
     ctx.state.extractedDomain = extractedDomain;
@@ -400,11 +402,7 @@ const leaseRecoveryValidation = async (ctx, next) => {
     const { domain: extractedDomain, name } = extractDomainAndName(tagName, domain);
     const domainValidation = await validateDomainAndName(extractedDomain, name);
 
-    if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
-        return;
-    }
+    if (finishDomainValidation(ctx, domainValidation)) return;
 
     // Add extracted domain and name to context
     ctx.state.extractedDomain = extractedDomain;
@@ -453,11 +451,7 @@ const leaseOfflineValidation = async (ctx, next) => {
 
     const domainValidation = await validateDomainAndName(extractedDomain, name);
 
-    if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
-        return;
-    }
+    if (finishDomainValidation(ctx, domainValidation)) return;
 
     // Add extracted domain and name to context
     ctx.state.extractedDomain = extractedDomain;
@@ -519,11 +513,7 @@ const leaseConfirmationValidation = async (ctx, next) => {
     const { domain: extractedDomain, name } = extractDomainAndName(tagName, domain);
     const domainValidation = await validateDomainAndName(extractedDomain, name);
 
-    if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
-        return;
-    }
+    if (finishDomainValidation(ctx, domainValidation)) return;
 
     // Add extracted domain and name to context
     ctx.state.extractedDomain = extractedDomain;
@@ -559,11 +549,7 @@ const previewValidation = async (ctx, next) => {
     const { domain: extractedDomain, name } = extractDomainAndName(tagName, domain);
     const domainValidation = await validateDomainAndName(extractedDomain, name);
 
-    if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
-        return;
-    }
+    if (finishDomainValidation(ctx, domainValidation)) return;
 
     // Add extracted domain and name to context
     ctx.state.extractedDomain = extractedDomain;
@@ -688,11 +674,7 @@ const decryptValidation = async (ctx, next) => {
     const { domain: extractedDomain, name } = extractDomainAndName(tagName, domain);
     const domainValidation = await validateDomainAndName(extractedDomain, name);
 
-    if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
-        return;
-    }
+    if (finishDomainValidation(ctx, domainValidation)) return;
 
     // Add extracted domain and name to context
     ctx.state.extractedDomain = extractedDomain;
@@ -808,11 +790,7 @@ const updateValidation = async (ctx, next) => {
         const { domain: extractedDomain, name } = extractDomainAndName(tagName);
         const domainValidation = await validateDomainAndName(extractedDomain, name);
 
-        if (!domainValidation.valid) {
-            ctx.status = 409;
-            ctx.body = { validationError: domainValidation.error };
-            return;
-        }
+        if (finishDomainValidation(ctx, domainValidation)) return;
 
         // Add extracted domain and name to context
         ctx.state.extractedDomain = extractedDomain;
@@ -883,5 +861,7 @@ module.exports = {
     walletBalancesValidation,
     // Utility functions
     extractDomainAndName,
+    finishDomainValidation,
+    rejectIfUnsupportedDomain,
     validateDomainAndName,
 };

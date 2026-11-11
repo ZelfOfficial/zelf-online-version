@@ -23,7 +23,7 @@ const FaceMiddleware = require("../../Face/middlewares/face.middleware");
 server.post(`${PATH}/decrypt`, Middleware.decryptValidation, FaceMiddleware.gate("decrypt"), Controller.decryptTag);
 ```
 
-Use `FaceMiddleware.gateIfFace(action)` when `faceBase64` is optional (BlockDAG zelf wallet flows).
+Use `FaceMiddleware.gateIfFace(action)` when `faceBase64` is optional.
 
 ## Body whitelist
 

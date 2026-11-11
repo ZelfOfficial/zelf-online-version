@@ -4,7 +4,7 @@
  *
  * Paid extension chains have no public fallback: a missing URL fails closed.
  * Public-chain defaults are only for networks the extension already calls
- * without a provider credential (Arbitrum, Optimism, Base, BlockDAG).
+ * without a provider credential (Arbitrum, Optimism, Base).
  */
 
 const envUrl = (...keys) => {
@@ -201,16 +201,6 @@ const CHAIN_SPECS = [
         kind: "evm",
         paid: () => envUrl("EXTENSION_BASE_RPC_URL", "RPC_PROXY_BASE_URL", "BASE_RPC_URL"),
         publicUrl: "https://mainnet.base.org",
-        legacy: true,
-        extension: true,
-    },
-    {
-        key: "blockdag",
-        chainId: () => chainIdFrom("BLOCKDAG_CHAIN_ID", 1404),
-        kind: "evm",
-        paid: () =>
-            envUrl("EXTENSION_BLOCKDAG_RPC_URL", "RPC_PROXY_BLOCKDAG_URL", "BLOCKDAG_MAIN_RPC_URL", "BLOCKDAG_RPC_URL"),
-        publicUrl: "https://rpc.bdagscan.com",
         legacy: true,
         extension: true,
     },

@@ -171,7 +171,7 @@ describe("Lease Offline API Integration Tests - Real Server", () => {
 		});
 
 		it("should handle different domains with invalid data", async () => {
-			const domains = ["zelf", "avax", "bdag"];
+			const domains = ["zelf", "avax"];
 
 			for (const domain of domains) {
 				const leaseData = {

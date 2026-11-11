@@ -43,10 +43,10 @@ describe("roundBillableUsdPrice", () => {
     });
 });
 
-describe("BDAG wei precision via string fallback price", () => {
+describe("native wei precision via a string token price", () => {
     const WAD = BigInt(10) ** BigInt(18);
 
-    it("produces exact 0.4 BDAG when billableUsd=0.02 and tokenPrice='0.05' (string)", () => {
+    it("produces exact 0.4 tokens when billableUsd=0.02 and tokenPrice='0.05' (string)", () => {
         const usdScaled = parseUnits("0.02", 18);
         const pxScaled = parseUnits("0.05", 18);
         const wei = (usdScaled * WAD) / pxScaled;

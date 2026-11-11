@@ -1,15 +1,14 @@
 ---
-description: Treat Zelf backend auth, tags, payments, and BlockDAG changes as high-risk areas
+description: Treat Zelf backend auth, tags, and payment changes as high-risk areas
 alwaysApply: true
 ---
 
 # High-Risk Domains
 
-- Treat changes under `Repositories/Tags/`, `Repositories/BlockDAG/`, payment confirmation flows, session/auth routes, and `security/` as correctness-sensitive work.
+- Treat changes under `Repositories/Tags/`, payment confirmation flows, session/auth routes, and `security/` as correctness-sensitive work.
 - Preserve existing validation, auth requirements, and response contracts unless the task explicitly changes them.
 - Do not spread legacy inconsistencies such as mixed local ports, stale generator instructions, or one-off route wiring shortcuts.
 - When touching Tags search, lease, or payment code, verify domain-specific pricing and validation behavior before copying patterns elsewhere.
-- When touching BlockDAG or NFT code, check the surrounding scripts, smart-contract assets, and public/protected route split before editing.
 - When touching auth or session flows, verify both authenticated and unauthenticated behavior.
 
 ## Review Checklist

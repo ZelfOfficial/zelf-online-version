@@ -21,6 +21,11 @@ const data_analytics = async (ctx) => {
 		ctx.body = { data };
 	} catch (error) {
 		logError("data_analytics", error);
+		if (error.clientCode) {
+			ctx.status = error.status || 400;
+			ctx.body = { code: error.clientCode, message: error.clientMessage || error.clientCode };
+			return;
+		}
 		ctx.status = error.response?.status ?? error.status ?? 500;
 		ctx.body = { error: error.message };
 	}
@@ -33,6 +38,11 @@ const chart_data = async (ctx) => {
 		ctx.body = { data };
 	} catch (error) {
 		logError("chart_data", error);
+		if (error.clientCode) {
+			ctx.status = error.status || 400;
+			ctx.body = { code: error.clientCode, message: error.clientMessage || error.clientCode };
+			return;
+		}
 		ctx.status = error.response?.status ?? error.status ?? 500;
 		ctx.body = { error: error.message };
 	}

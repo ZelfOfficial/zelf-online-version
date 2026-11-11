@@ -59,6 +59,11 @@ const howToRenewValidation = async (ctx, next) => {
 	const domainValidation = await validateDomainAndName(domain, tagName);
 
 	if (!domainValidation.valid) {
+		if (domainValidation.code) {
+			ctx.status = domainValidation.status || 400;
+			ctx.body = { code: domainValidation.code, message: domainValidation.code };
+			return;
+		}
 		ctx.status = 409;
 		ctx.body = { validationError: domainValidation.error };
 		return;

@@ -28,7 +28,7 @@ module.exports = {
 				username: "liza-van-den-berg-0938263b",
 				displayName: "Liza Van den Berg",
 				profileUrl: "https://www.linkedin.com/in/liza-van-den-berg-0938263b/",
-				description: "Liza Van den Berg's LinkedIn profile - Global Community Manager / HR / Operations at BlockDAG Network",
+				description: "Liza Van den Berg's LinkedIn profile - Global Community Manager / HR / Operations",
 			},
 			// Add more LinkedIn accounts here as needed
 		],

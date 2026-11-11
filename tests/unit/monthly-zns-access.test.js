@@ -509,7 +509,7 @@ describe("monthly ZNS access", () => {
         await open({ zelfName: "myname.zelf", balance: 0, now: OCTOBER });
         const plan = await buildMyPlan(
             { publicData: freePublic("myname.zelf") },
-            { zelfName: "myname.zelf", domainConfig, authUser: { tagName: "myname", domain: "zelf" } },
+            { zelfName: "myname.zelf", domainConfig, authUser: { tagName: "myname", domain: "zelf" }, now: OCTOBER },
         );
         expect(plan.monthlyAccess).toMatchObject({
             enabled: true,

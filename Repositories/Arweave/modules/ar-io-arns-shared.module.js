@@ -2,7 +2,6 @@ const config = require("../../../Core/config");
 const solanaAnt = require("./solana-ant.client");
 
 const mappingOfSites = {
-	bdag: config.arns.blockdag_transaction_id,
 	socials: config.arns.socials_transaction_id,
 	zelf: config.arns.index_transaction_id,
 };
@@ -25,7 +24,7 @@ const initAnt = () => ({
 });
 
 /**
- * Map ANT record key to domain (zelf, bdag, …).
+ * Map ANT record key to domain (zelf, socials, …).
  * @param {string} recordKey
  * @returns {string}
  */

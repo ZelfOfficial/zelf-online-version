@@ -7,6 +7,7 @@ const { keccak256, solidityPacked, parseUnits, getAddress } = require("ethers");
 const config = require("../../../Core/config");
 const { codedError, identifiedError } = require("../../../Core/http-handler");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
+const { assertSupportedDomain } = require("../../../Core/unsupported-networks");
 const { buildSearchablePinPages, fitExtraParamsForPin, resolveEncryptVersion, stampExtraParamsVersion } = require("../../Tags/modules/tags-addresses.module");
 const { formatLeaseDate, parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 const TagsIpfsModule = require("../../Tags/modules/tags-ipfs.module");
@@ -113,7 +114,6 @@ const avaxExpectedWeiFromUsd = (usdPrice, avaxUsdPerTokenStr) => expectedWeiFrom
 const bnbExpectedWeiFromUsd = (usdPrice, bnbUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, bnbUsdPerTokenStr, "BNB_USD_PRICE_ZERO");
 const ethExpectedWeiFromUsd = (usdPrice, ethUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, ethUsdPerTokenStr, "ETH_USD_PRICE_ZERO");
 const polExpectedWeiFromUsd = (usdPrice, polUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, polUsdPerTokenStr, "POL_USD_PRICE_ZERO");
-const bdagExpectedWeiFromUsd = (usdPrice, bdagUsdPerTokenStr) => expectedWeiFromUsd(usdPrice, bdagUsdPerTokenStr, "BDAG_USD_PRICE_ZERO");
 
 const POL_NATIVE_DISPLAY_DECIMALS = 7;
 const POL_WEI_PER_TOKEN = 10n ** 18n;
@@ -125,19 +125,9 @@ const polNativeDisplayAmountFromWei = (weiBn) => {
 
 const calculateCryptoValue = async (token = "ETH", price_) => {
     try {
-        const FALLBACK_PRICES = {
-            BDAG: "0.00001805",
-        };
-
-        let tokenPrice;
-
-        if (FALLBACK_PRICES[token]) {
-            tokenPrice = FALLBACK_PRICES[token];
-        } else {
-            const { price } = await getTickerPrice({ symbol: `${token}` });
-            if (!price) throw new Error(`Unable to fetch ${token} price`);
-            tokenPrice = price;
-        }
+        const { price } = await getTickerPrice({ symbol: `${token}` });
+        if (!price) throw new Error(`Unable to fetch ${token} price`);
+        const tokenPrice = price;
 
         const cryptoValue = price_ / tokenPrice;
         const tokenPriceString = decimalStringForParseUnits(tokenPrice);
@@ -635,6 +625,7 @@ const resolveCheckoutReferral = async ({ tagName, domain, domainConfig, publicDa
 };
 
 const getPaymentOptions = async (tagName, domain, duration, authUser, requestOptions = {}) => {
+    assertSupportedDomain(domain);
     const ZelfIdModule = require("./zelf-id.module");
     const domainConfig = getDomainConfig(domain);
     const tagData = await ZelfIdModule.searchTag({ tagName, domain, domainConfig }, authUser);
@@ -790,7 +781,6 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         BNB: null,
         POL: null,
         BASE: null,
-        BDAG: null,
         TON: null,
     };
 
@@ -843,10 +833,6 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         (networks?.base?.enabled && networks?.base?.nativeCurrency?.enabled && networks?.base?.nativeCurrency?.code === "BASE")
     ) {
         prices.BASE = await calculateCryptoValue("ETH", billableUsdPrice);
-    }
-
-    if (networks?.blockdag?.enabled && networks?.blockdag?.nativeCurrency?.enabled && networks?.blockdag?.nativeCurrency?.code === "BDAG") {
-        prices.BDAG = await calculateCryptoValue("BDAG", billableUsdPrice);
     }
 
     if (
@@ -1054,21 +1040,6 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         stableHumanDigits: 6,
         usdcPriceKey: "BASE_USDC",
         usdtPriceKey: "BASE_USDT",
-        billableUsdPrice,
-        devAmountFraction,
-        deleteEthAddress: true,
-    });
-
-    attachEvmPayQuote({
-        returnData,
-        prices,
-        nativePrice: prices.BDAG,
-        configBlock: config.blockdag,
-        versionPrefix: "ZELF_BLOCKDAG_PAY_v1",
-        expectedWeiFn: bdagExpectedWeiFromUsd,
-        weiError: "EXPECTED_WEI_BDAG_NON_POSITIVE",
-        contractKey: "smartContractBDAG",
-        chainId: config.blockdag.chainId,
         billableUsdPrice,
         devAmountFraction,
         deleteEthAddress: true,

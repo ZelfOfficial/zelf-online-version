@@ -8,6 +8,7 @@ const TagsMyMiddleware = require("../../Tags/middlewares/my-tags.middleware");
 const ZelfIdsPaymentModule = require("../modules/zelf-ids-payment.module");
 const { assertReferralAvailabilityRateLimit } = require("../modules/referral-availability-rate-limit.module");
 const { errorHandler } = require("../../../Core/http-handler");
+const { respondDomainValidation } = require("../../../Core/unsupported-networks");
 
 const TAG_PAY_REDUCED_FEE_HEADER = "x-zelf-tag-pay-reduced-fee";
 
@@ -47,11 +48,7 @@ const syncAddressesValidation = async (ctx, next) => {
     const { domain: extractedDomain, name } = TagsMiddleware.extractDomainAndName(tagName, domain);
     const domainValidation = await TagsMiddleware.validateDomainAndName(extractedDomain, name);
 
-    if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
-        return;
-    }
+    if (respondDomainValidation(ctx, domainValidation)) return;
 
     ctx.state.extractedDomain = extractedDomain;
     ctx.state.extractedName = name;
@@ -89,11 +86,7 @@ const leaseOfflineValidation = async (ctx, next) => {
     const { domain: extractedDomain, name } = TagsMiddleware.extractDomainAndName(tagName, domain);
     const domainValidation = await TagsMiddleware.validateDomainAndName(extractedDomain, name);
 
-    if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
-        return;
-    }
+    if (respondDomainValidation(ctx, domainValidation)) return;
 
     ctx.state.extractedDomain = extractedDomain;
     ctx.state.extractedName = name;
@@ -105,7 +98,7 @@ const paymentSchemas = {
     paymentConfirmation: {
         tagName: string().required(),
         domain: string(),
-        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE", "BDAG", "FREE"]),
+        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE", "FREE"]),
         token: string().required(),
     },
     paymentOptions: {
@@ -234,11 +227,7 @@ const paymentOptionsValidation = async (ctx, next) => {
     const { tagName, domain } = ctx.request.query;
     const domainValidation = await TagsMiddleware.validateDomainAndName(domain, tagName);
 
-    if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
-        return;
-    }
+    if (respondDomainValidation(ctx, domainValidation)) return;
 
     const planError = licensePlanDurationError(tagName, domain, ctx.request.query.plan, ctx.request.query.duration);
     if (planError) {
@@ -277,11 +266,7 @@ const stripeCheckoutValidation = async (ctx, next) => {
     const { tagName, domain } = ctx.request.body;
     const domainValidation = await TagsMiddleware.validateDomainAndName(domain, tagName);
 
-    if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
-        return;
-    }
+    if (respondDomainValidation(ctx, domainValidation)) return;
 
     const planError = licensePlanDurationError(tagName, domain, ctx.request.body.plan, ctx.request.body.duration);
     if (planError) {
@@ -316,6 +301,9 @@ const stripeSessionValidation = async (ctx, next) => {
 };
 
 const paymentConfirmationValidation = async (ctx, next) => {
+    const { rejectIfUnsupportedChain, rejectIfUnsupportedDomain } = require("../../../Core/unsupported-networks");
+    if (rejectIfUnsupportedDomain(ctx, ctx.request.body?.domain)) return;
+    if (rejectIfUnsupportedChain(ctx, ctx.request.body?.network)) return;
     const valid = validate(paymentSchemas.paymentConfirmation, ctx.request.body);
 
     if (valid.error) {
@@ -327,11 +315,7 @@ const paymentConfirmationValidation = async (ctx, next) => {
     let { tagName, domain, token, network } = ctx.request.body;
     const domainValidation = await TagsMiddleware.validateDomainAndName(domain, tagName);
 
-    if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
-        return;
-    }
+    if (respondDomainValidation(ctx, domainValidation)) return;
 
     const tokenDecoded = jwt.verify(token, config.JWT_SECRET);
 
@@ -354,7 +338,7 @@ const paymentConfirmationValidation = async (ctx, next) => {
 
     // Crypto confirms can arrive after the quote TTL when the transfer itself was sent in time.
     // Free quotes have no chain timestamp, so an expired one stops here.
-    const cryptoConfirm = ["ETH", "SOL", "BTC", "AVAX", "BDAG", "BNB", "POL", "BASE"].includes(String(network || "").toUpperCase());
+    const cryptoConfirm = ["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE"].includes(String(network || "").toUpperCase());
     if (tokenDecoded.ttl < moment().unix() && !cryptoConfirm) {
         ctx.status = 409;
         ctx.body = { validationError: "TOKEN_EXPIRED" };
@@ -400,11 +384,7 @@ const referralAvailabilityValidation = async (ctx, next) => {
     const { domain: extractedDomain, name } = TagsMiddleware.extractDomainAndName(String(tagName).trim(), domain);
     const domainValidation = await TagsMiddleware.validateDomainAndName(extractedDomain, name);
 
-    if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
-        return;
-    }
+    if (respondDomainValidation(ctx, domainValidation)) return;
 
     ctx.state.extractedDomain = extractedDomain;
     ctx.state.extractedName = name;

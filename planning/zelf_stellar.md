@@ -188,7 +188,6 @@ Zelf has **shipping products and real users**:
 - **Pinata**: IPFS pinning for proof storage
 - **ID R&D**: Liveness detection technology partnership
 - **OffChain Labs**: Infrastructure collaboration
-- **BlockDAG**: Emerging L1 chain (paid 100k USD)
 - **Avalanche**: We participated in a Privacy hackathon and won 1st place.
 
 ### Why Stellar?

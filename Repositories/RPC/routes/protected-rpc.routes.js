@@ -21,7 +21,7 @@ const base = "/protected/rpc";
  *   POST /api/protected/rpc/:chainKey
  *   Body: {"jsonrpc":"2.0","id":1,"method":"...","params":[]}
  *   chainKey: ethereum | ethereum-sepolia (alias sepolia) | polygon | avalanche |
- *             bsc | arbitrum | optimism | base | blockdag | solana
+ *             bsc | arbitrum | optimism | base | solana
  *   Success: HTTP 200 {"jsonrpc":"2.0","id":1,"result":...}
  *   Policy errors use a JSON-RPC error body. HTTP 401 without a JWT,
  *   413 when the body exceeds RPC_PROXY_MAX_BODY_BYTES (default 256 KiB),

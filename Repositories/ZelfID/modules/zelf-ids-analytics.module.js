@@ -8,6 +8,7 @@
  *   - listRecords: filtered, paginated drill-down (page size 50, max 100)
  */
 const { createSwrCache, keepPriorSnapshotSignal } = require("../../../Core/utils/swr-snapshot-cache");
+const { assertSupportedDomain } = require("../../../Core/unsupported-networks");
 const { expandStoredExtraParams } = require("../../Tags/modules/tags-addresses.module");
 
 const SNAPSHOT_CAP = 50000;
@@ -183,6 +184,7 @@ const _snapshotFor = async (query, jwt, deps) => {
     const resolveAuthorizedDomain =
         deps.resolveAuthorizedDomain || require("../../License/modules/license-domain-access.module").resolveAuthorizedDomain;
     const swr = deps.cache || cache;
+    if (query.domain) assertSupportedDomain(query.domain);
     const { domain } = await resolveAuthorizedDomain(jwt, query.domain);
     const key = `analytics:${domain}`;
     const maxStaleMs = swr.maxStaleMs ?? ANALYTICS_SWR_MAX_STALE_MS;

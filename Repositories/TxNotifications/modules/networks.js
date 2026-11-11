@@ -6,14 +6,13 @@
  * validated but not watched yet (phase 2).
  */
 
-const EVM_NETWORKS = Object.freeze(["ethereum", "polygon", "bsc", "avalanche", "blockdag"]);
+const EVM_NETWORKS = Object.freeze(["ethereum", "polygon", "bsc", "avalanche"]);
 
 const NETWORKS = Object.freeze({
     ethereum: { displayName: "Ethereum", family: "evm", nativeSymbol: "ETH", nativeDecimals: 18, watched: true },
     polygon: { displayName: "Polygon", family: "evm", nativeSymbol: "POL", nativeDecimals: 18, watched: true },
     bsc: { displayName: "BNB Smart Chain", family: "evm", nativeSymbol: "BNB", nativeDecimals: 18, watched: true },
     avalanche: { displayName: "Avalanche", family: "evm", nativeSymbol: "AVAX", nativeDecimals: 18, watched: true },
-    blockdag: { displayName: "BlockDAG", family: "evm", nativeSymbol: "BDAG", nativeDecimals: 18, watched: true },
     solana: { displayName: "Solana", family: "solana", nativeSymbol: "SOL", nativeDecimals: 9, watched: true },
     bitcoin: { displayName: "Bitcoin", family: "bitcoin", nativeSymbol: "BTC", nativeDecimals: 8, watched: true },
     ton: { displayName: "TON", family: "ton", nativeSymbol: "TON", nativeDecimals: 9, watched: true },
@@ -33,7 +32,6 @@ const NATIVE_DUST = Object.freeze({
     polygon: "0.001",
     bsc: "0.00001",
     avalanche: "0.0001",
-    blockdag: "0.001",
     solana: "0.00001",
     bitcoin: "0.00000546",
     ton: "0.001",

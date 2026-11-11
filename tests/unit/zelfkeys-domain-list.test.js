@@ -15,7 +15,7 @@ const IPFS = {
         const all = [
             pin("password", "alice.zelf", { website: "github.com", n: 1, created: "2026-10-03T00:00:00Z" }),
             pin("password", "bob.zelf", { website: "gmail.com", n: 2, created: "2026-10-02T00:00:00Z" }),
-            pin("password", "carol.bdag", { website: "x.com", n: 3 }),
+            pin("password", "carol.avax", { website: "x.com", n: 3 }),
             pin("notes", "alice.zelf", { n: 4 }),
             { id: "spoof", publicData: { type: "password", keyOwner: "eve.zelf", category: "other_password" } },
         ];
@@ -38,7 +38,7 @@ describe("ZelfKeys domain list", () => {
         expect(res.domain).toBe("zelf");
         expect(res.domainTotal).toBe(3);
         expect(res.items.map((i) => i.owner)).toEqual(expect.arrayContaining(["alice.zelf", "bob.zelf"]));
-        expect(res.items.find((i) => i.owner === "carol.bdag")).toBeUndefined();
+        expect(res.items.find((i) => i.owner === "carol.avax")).toBeUndefined();
         expect(res.items.find((i) => i.id === "spoof")).toBeUndefined();
         expect(JSON.stringify(res)).not.toContain("SECRET_QR");
         expect(res.countsByType.password).toBe(2);
@@ -56,7 +56,11 @@ describe("ZelfKeys domain list", () => {
     });
 
     test("rejects other domains, non-owners and staff of other licenses", async () => {
-        await expect(listDomainKeys({ domain: "bdag" }, staffJwt, deps(zelfLicense))).rejects.toThrow(/^403/);
+        await expect(listDomainKeys({ domain: "avax" }, staffJwt, deps(zelfLicense))).rejects.toThrow(/^403/);
+        await expect(listDomainKeys({ domain: "bdag" }, staffJwt, deps(zelfLicense))).rejects.toMatchObject({
+            clientCode: "UNSUPPORTED_DOMAIN",
+            status: 400,
+        });
         await expect(listDomainKeys({}, { accountType: "client", email: "x@y.z" }, deps(zelfLicense))).rejects.toThrow(/^403/);
         await expect(
             listDomainKeys({}, { accountType: "staff", email: "s@x", ownerEmail: "other@x" }, deps(zelfLicense)),

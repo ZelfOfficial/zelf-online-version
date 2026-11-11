@@ -11,7 +11,7 @@ const { verifyBscZelfTagPayTx } = require("./bsc-tag-pay-verify.module");
 const { verifyEthZelfTagPayTx } = require("./eth-tag-pay-verify.module");
 const { verifyPolygonZelfTagPayTx } = require("./polygon-tag-pay-verify.module");
 const { verifyBaseZelfTagPayTx } = require("./base-tag-pay-verify.module");
-const { verifyBlockdagZelfTagPayTx } = require("./blockdag-tag-pay-verify.module");
+const { unsupportedChainError } = require("../../../Core/unsupported-networks");
 
 const scPayTxCache = new NodeCache({ stdTTL: 172800, maxKeys: 50000, useClones: false });
 
@@ -253,25 +253,6 @@ function assertSmartContractBasePresent(sc) {
     return { hasNativeWei, hasUsdcPayload, hasUsdtPayload };
 }
 
-// --- JWT `smartContractBDAG`: native BDAG only (ZelfBlockDagPay) ---
-
-function smartContractBdagHasValidNativeWei(sc) {
-    if (sc?.expectedWei == null || String(sc.expectedWei).trim() === "") return false;
-    try {
-        return BigInt(sc.expectedWei) > 0n;
-    } catch {
-        return false;
-    }
-}
-
-function assertSmartContractBdagPresent(sc) {
-    const hasNativeWei = smartContractBdagHasValidNativeWei(sc);
-    if (!sc?.paymentId || sc?.chainId == null || !hasNativeWei) {
-        throw new Error("409:smart_contract_bdag_not_in_token");
-    }
-    return { hasNativeWei };
-}
-
 // --- Orchestration helpers ---
 
 function decodeTagPayToken(tagName, domain, token) {
@@ -357,22 +338,6 @@ function resolveBaseContractAndTxHash(sc, txHash) {
     const expectedContract = getAddress(config.base.tagPayContractAddress);
 
     if (Number(sc.chainId) !== Number(config.base.chainId)) throw new Error("409:chain_id_mismatch");
-
-    const normalizedHash = normalizeTagPayTxHash(txHash);
-    if (!normalizedHash) throw new Error("409:invalid_tx_hash");
-
-    return { expectedContract, normalizedHash };
-}
-
-/**
- * @returns {{ expectedContract: string, normalizedHash: string }}
- */
-function resolveBlockdagContractAndTxHash(sc, txHash) {
-    if (!config.blockdag.tagPayContractAddress) throw new Error("500:blockdag_tag_pay_contract_not_configured");
-
-    const expectedContract = getAddress(config.blockdag.tagPayContractAddress);
-
-    if (Number(sc.chainId) !== Number(config.blockdag.chainId)) throw new Error("409:chain_id_mismatch");
 
     const normalizedHash = normalizeTagPayTxHash(txHash);
     if (!normalizedHash) throw new Error("409:invalid_tx_hash");
@@ -568,32 +533,12 @@ async function verifyBaseChainOrFail({
     });
 }
 
-async function verifyBlockdagChainOrFail({ normalizedHash, expectedContract, sc, hasNativeWei, tokenDecoded }) {
-    const rpcUrl = config.blockdag.rpcUrl;
-    if (!rpcUrl) throw new Error("500:blockdag_rpc_not_configured");
-
-    const confirmations = config.blockdag.tagPayConfirmations || 1;
-
-    return verifyBlockdagZelfTagPayTx({
-        normalizedHash,
-        expectedContract,
-        chainId: config.blockdag.chainId,
-        rpcUrl,
-        confirmations,
-        sc,
-        hasNativeWei,
-        tagNameFull: tokenDecoded.tagName,
-        prices: tokenDecoded.prices,
-    });
-}
-
 const resolveSmartContractPaymentNetwork = (tokenDecoded = {}) => {
     if (tokenDecoded.smartContractAVAX) return "AVAX";
     if (tokenDecoded.smartContractBSC) return "BNB";
     if (tokenDecoded.smartContractETH) return "ETH";
     if (tokenDecoded.smartContractPOLYGON) return "POL";
     if (tokenDecoded.smartContractBASE) return "BASE";
-    if (tokenDecoded.smartContractBDAG) return "BDAG";
     return "smart_contract";
 };
 
@@ -1036,81 +981,11 @@ async function verifyBaseSmartContractPayment(tagName, domain, token, txHash) {
     return result;
 }
 
-async function verifyBlockdagSmartContractPayment(tagName, domain, token, txHash) {
-    const { tokenDecoded, domainConfig } = decodeTagPayToken(tagName, domain, token);
-
-    const sc = tokenDecoded.smartContractBDAG;
-
-    const { hasNativeWei } = assertSmartContractBdagPresent(sc);
-
-    const { expectedContract, normalizedHash } = resolveBlockdagContractAndTxHash(sc, txHash);
-    const cacheKey = scPayCacheKey(normalizedHash);
-
-    const cachedBody = readScPayCache(cacheKey, sc, tokenDecoded.tagName);
-    if (cachedBody) return cachedBody;
-
-    const tagData = await searchTag({ tagName, domain }, {});
-    if (tagData.available) throwPaymentConfirmationTagNotFound(tagName, domain);
-
-    const tagObject = tagData.tagObject;
-    const { renewedAtCondition, registeredAtCondition } = renewalShortCircuitFlags(tagObject, tokenDecoded);
-
-    const onChain = await verifyBlockdagChainOrFail({
-        normalizedHash,
-        expectedContract,
-        sc,
-        hasNativeWei,
-        tokenDecoded,
-    });
-
-    if (!onChain.ok) return onChain.body;
-
-    const { payMode, eventAmount, amountReceivedHuman, amountToPay } = onChain;
-    const paymentConfirmation = buildSmartContractPaymentConfirmation({
-        payMode,
-        eventAmount,
-        amountReceivedHuman,
-        normalizedHash,
-    });
-
-    if (renewedAtCondition || registeredAtCondition) {
-        const result = {
-            cache: true,
-            confirmed: true,
-            amountReceived: String(amountReceivedHuman),
-            paymentConfirmation,
-            publicData: tagObject.publicData,
-            reward: "pending_to_code",
-            licenseExtension: null,
-        };
-        writeScPayCache(cacheKey, sc, tokenDecoded.tagName, result);
-        return result;
-    }
-
-    const licenseExtension = computeScLicenseExtension(tagObject.publicData.expiresAt, tokenDecoded.duration);
-
-    await extendTagAfterSmartContractPay({ domainConfig, domain, tokenDecoded, amountToPay, tagObject, txHash: normalizedHash });
-
-    const result = {
-        tagObject,
-        confirmed: true,
-        amountReceived: String(amountReceivedHuman),
-        paymentConfirmation,
-        licenseExtension,
-    };
-
-    writeScPayCache(cacheKey, sc, tokenDecoded.tagName, result);
-
-    return result;
-}
-
 /**
- * @param {string} [network] - `AVAX_SC` | `BSC_SC` | `ETH_SC` | `POLYGON_SC` | `BASE_SC` | `BLOCKDAG_SC`
+ * @param {string} [network] - `AVAX_SC` | `BSC_SC` | `ETH_SC` | `POLYGON_SC` | `BASE_SC`
  */
 const verifySmartContractPayment = async (tagName, domain, token, txHash, network = "AVAX_SC") => {
-    if (network === "BLOCKDAG_SC") {
-        return verifyBlockdagSmartContractPayment(tagName, domain, token, txHash);
-    }
+    if (String(network || "").toUpperCase() === "BLOCKDAG_SC") throw unsupportedChainError();
     if (network === "BSC_SC") {
         return verifyBscSmartContractPayment(tagName, domain, token, txHash);
     }

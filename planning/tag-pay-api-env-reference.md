@@ -68,20 +68,6 @@ BASE_CHAIN_ID=8453
 BASE_RPC_URL=https://mainnet.base.org
 ```
 
-### BlockDAG — deployed
-
-**Fix:** The npm `solc` binary is **solcjs** and has no `--evm-version` CLI flag. [`deploy-zelf-blockdag-pay.js`](../checkoutContracts/scripts/deploy-zelf-blockdag-pay.js) now compiles via **`solc --standard-json`** with `settings.evmVersion: "paris"` (override with `BLOCKDAG_SOLC_EVM_VERSION`) so bytecode avoids **Shanghai `PUSH0`**, which caused `estimateGas` to fail on the public RPC.
-
-Tx: `0xf085c2ff79eb4e7ec5e1060cf02ec2dc314d78abf802b0a089ef6b147c2f21b8`
-
-```env
-BLOCKDAG_TAG_PAY_CONTRACT_ADDRESS=0x21bA99Feb8D6A8f3bAc8AF1737Ad8aC8994E53D5
-BLOCKDAG_CHAIN_ID=1404
-BLOCKDAG_RPC_URL=https://rpc.bdagscan.com
-```
-
----
-
 ## Full template (fill gaps after remaining deploys)
 
 ```env
@@ -112,11 +98,6 @@ BASE_TAG_PAY_USDC_ADDRESS=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
 BASE_TAG_PAY_USDT_ADDRESS=0xfde4C96ce3cAfAC9F2Df3573baE2D715D34B25A0
 BASE_CHAIN_ID=8453
 BASE_RPC_URL=https://mainnet.base.org
-
-# BlockDAG (compile: standard-json evmVersion paris — see deploy script)
-BLOCKDAG_TAG_PAY_CONTRACT_ADDRESS=0x21bA99Feb8D6A8f3bAc8AF1737Ad8aC8994E53D5
-BLOCKDAG_CHAIN_ID=1404
-BLOCKDAG_RPC_URL=https://rpc.bdagscan.com
 ```
 
 Optional per chain: `*_TAG_PAY_CONFIRMATIONS=1`
@@ -129,4 +110,4 @@ From zelf root, with env vars exported or in shell:
 
 ## All five compile checks
 
-`DRY_RUN=1 npm run deploy:checkout-bsc` (and `-eth`, `-polygon`, `-base`, `-checkout-blockdag`) — all succeeded before live deploys.
+`DRY_RUN=1 npm run deploy:checkout-bsc` (and `-eth`, `-polygon`, `-base`) — all succeeded before live deploys.

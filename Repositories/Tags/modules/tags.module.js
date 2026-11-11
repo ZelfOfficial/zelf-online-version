@@ -28,7 +28,7 @@ const { resolveEncryptVersion } = require("./tags-addresses.module");
 const { generateHoldDomain } = require("./domain-registry.module");
 const { getDomainConfig } = require("../config/supported-domains");
 const { assertDomainOfferedForNewNames } = require("../../ZelfID/modules/zelf-id-plan.module");
-const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
+const { assertSupportedDomain } = require("../../../Core/unsupported-networks");
 const TagsRegistrationModule = require("./tags-registration.module");
 const { extractZelfProofFromQR } = require("./qr-zelfproof-extractor.module");
 const SessionModule = require("../../Session/modules/session.module");
@@ -59,6 +59,7 @@ const generateDomainHoldDomain = (domain, name) => {
 const leaseTag = async (params, authUser) => {
     const { tagName, domain, referralTagName } = params;
     let securityType = params.securityType;
+    assertSupportedDomain(domain);
     const domainConfig = getDomainConfig(domain);
 
     if (!domainConfig) throw new Error(`Unsupported domain: ${domain}`);
@@ -68,7 +69,6 @@ const leaseTag = async (params, authUser) => {
     const tagKey = domainConfig.getTagKey() || "tagName";
 
     await _findDuplicatedTag(tagName, domain, domainConfig);
-    assertDomainAcceptsNewUse(domain);
 
     const referralTagObject = await _validateReferral(referralTagName, authUser, domainConfig, { enforceLimit: true });
 

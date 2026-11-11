@@ -79,6 +79,11 @@ const dailyRewardsValidation = async (ctx, next) => {
 		const domainValidation = await validateDomainAndName(extractedDomain, name);
 
 		if (!domainValidation.valid) {
+			if (domainValidation.code) {
+				ctx.status = domainValidation.status || 400;
+				ctx.body = { code: domainValidation.code, message: domainValidation.code };
+				return;
+			}
 			ctx.status = 400;
 			ctx.body = { error: domainValidation.error };
 			return;
@@ -118,6 +123,11 @@ const rewardHistoryValidation = async (ctx, next) => {
 		const domainValidation = await validateDomainAndName(extractedDomain, name);
 
 		if (!domainValidation.valid) {
+			if (domainValidation.code) {
+				ctx.status = domainValidation.status || 400;
+				ctx.body = { code: domainValidation.code, message: domainValidation.code };
+				return;
+			}
 			ctx.status = 400;
 			ctx.body = { error: domainValidation.error };
 			return;
@@ -154,6 +164,11 @@ const rewardStatsValidation = async (ctx, next) => {
 		const domainValidation = await validateDomainAndName(extractedDomain, name);
 
 		if (!domainValidation.valid) {
+			if (domainValidation.code) {
+				ctx.status = domainValidation.status || 400;
+				ctx.body = { code: domainValidation.code, message: domainValidation.code };
+				return;
+			}
 			ctx.status = 400;
 			ctx.body = { error: domainValidation.error };
 			return;
@@ -204,6 +219,11 @@ const firstTransactionRewardValidation = async (ctx, next) => {
 		const domainValidation = await validateDomainAndName(extractedDomain, name);
 
 		if (!domainValidation.valid) {
+			if (domainValidation.code) {
+				ctx.status = domainValidation.status || 400;
+				ctx.body = { code: domainValidation.code, message: domainValidation.code };
+				return;
+			}
 			ctx.status = 400;
 			ctx.body = { error: domainValidation.error };
 			return;
@@ -244,6 +264,11 @@ const rouletteWheelValidation = async (ctx, next) => {
 		const domainValidation = await validateDomainAndName(extractedDomain, name);
 
 		if (!domainValidation.valid) {
+			if (domainValidation.code) {
+				ctx.status = domainValidation.status || 400;
+				ctx.body = { code: domainValidation.code, message: domainValidation.code };
+				return;
+			}
 			ctx.status = 400;
 			ctx.body = { error: domainValidation.error };
 			return;

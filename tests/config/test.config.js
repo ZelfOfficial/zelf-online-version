@@ -39,6 +39,7 @@ module.exports = {
 		PORT: Number(process.env.PORT) || 3003,
 		LOG_LEVEL: "info", // Keep logs for debugging real data operations
 		// NO MOCKING - Use real external service URLs
+		SOLANA_TOKEN_MINT_ADDRESS: process.env.SOLANA_TOKEN_MINT_ADDRESS || "GfF6PSkH8bKLkws5RMFdzgASwcVbgCfhhKfp8zeoFBkx",
 		EXTERNAL_API_URL: process.env.EXTERNAL_API_URL || "https://api.example.com",
 		BLOCKCHAIN_RPC_URL: process.env.BLOCKCHAIN_RPC_URL || "https://mainnet.infura.io/v3/your-key",
 	},

@@ -13,7 +13,7 @@ const { getMonthlyAccessStatus, isEnabled: monthlyAccessEnabled } = require("./z
 const { parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 const { mergePlanTermIntoPublicData } = require("./zelf-id-plan-term.module");
 
-const CRYPTO_METHODS = new Set(["crypto", "eth", "sol", "btc", "avax", "bnb", "pol", "matic", "base", "bdag", "ton"]);
+const CRYPTO_METHODS = new Set(["crypto", "eth", "sol", "btc", "avax", "bnb", "pol", "matic", "base", "ton"]);
 
 const displayDuration = (duration) => {
     const raw = `${duration ?? ""}`.trim().toLowerCase();
@@ -121,7 +121,7 @@ const upgradeFor = async ({ paymentMethod, plan, duration, nextPlans, zelfName, 
  * @param {Object} params.domainConfig
  * @param {Function} [params.createBillingPortal]
  */
-const buildMyPlan = async (tagObject, { zelfName, domainConfig, createBillingPortal, authUser } = {}) => {
+const buildMyPlan = async (tagObject, { zelfName, domainConfig, createBillingPortal, authUser, now } = {}) => {
     const publicData = tagObject?.publicData || {};
     await mergePlanTermIntoPublicData(publicData);
     const plan = effectivePlan(publicData, domainConfig) || "free";
@@ -164,6 +164,7 @@ const buildMyPlan = async (tagObject, { zelfName, domainConfig, createBillingPor
                 plan,
                 authUser,
                 includeHistory: true,
+                ...(now ? { now } : {}),
             });
         } catch (_error) {
             result.monthlyAccess = {

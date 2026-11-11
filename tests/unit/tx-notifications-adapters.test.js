@@ -8,7 +8,6 @@
 const path = require("path");
 
 const bitcoin = require("../../Repositories/TxNotifications/adapters/bitcoin.adapter");
-const blockdag = require("../../Repositories/TxNotifications/adapters/blockdag.adapter");
 const solana = require("../../Repositories/TxNotifications/adapters/solana.adapter");
 const stellar = require("../../Repositories/TxNotifications/adapters/stellar.adapter");
 const sui = require("../../Repositories/TxNotifications/adapters/sui.adapter");
@@ -206,37 +205,6 @@ describe("sui adapter (GraphQL)", () => {
         const { response, address } = fixture("sui-transactions.json");
         const node = response.data.transactions.nodes.find((n) => sui.parseSuiTransaction(n, address));
         expect(sui.parseSuiTransaction(node, node.sender.address)).toBeNull();
-    });
-});
-
-describe("blockdag adapter (bdagscan)", () => {
-    const { response, address } = fixture("blockdag-address-txs.json");
-
-    it("native BDAG received", () => {
-        const parsed = response.data.map((row) => blockdag.parseBlockdagTransaction(row, address)).filter(Boolean);
-        expect(parsed).toHaveLength(25);
-        expect(parsed[0]).toEqual({
-            network: "blockdag",
-            hash: "0x321ff3a95cc7fd95de3c4d611e99d5b415e20925fcbbbbbc2418b14a033c9e0c",
-            amount: "13.053",
-            asset: "BDAG",
-            from: "0x432a023D1A98557B53aA32c9427e408AE2DD121B",
-            timestampMs: 1790789372000,
-            native: true,
-        });
-    });
-
-    it("for the sender the same rows are outgoing", () => {
-        const sender = response.data[0].from.toLowerCase();
-        expect(response.data.map((row) => blockdag.parseBlockdagTransaction(row, sender)).filter(Boolean)).toHaveLength(0);
-    });
-
-    it("normalizes explorer values", () => {
-        expect(blockdag.decimalValue("20")).toBe("20");
-        expect(blockdag.decimalValue("13.0500")).toBe("13.05");
-        expect(blockdag.decimalValue("1e-7")).toBe("0.0000001");
-        expect(blockdag.decimalValue("0")).toBe("0");
-        expect(blockdag.decimalValue("abc")).toBeNull();
     });
 });
 

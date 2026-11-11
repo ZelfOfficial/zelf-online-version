@@ -2,6 +2,7 @@ const { string, validate, boolean, number, stringEnum, stringOptionalEmptyAsNull
 const Session = require("../../Session/models/session.model");
 const moment = require("moment");
 const { extractDomainAndName, validateDomainAndName } = require("./tags.middleware");
+const { rejectIfUnsupportedChain, rejectIfUnsupportedDomain, respondDomainValidation } = require("../../../Core/unsupported-networks");
 const jwt = require("jsonwebtoken");
 const config = require("../../../Core/config");
 const TagsPaymentModule = require("../modules/tags-payment.module");
@@ -22,13 +23,13 @@ const schemas = {
     paymentConfirmation: {
         tagName: string().required(),
         domain: string(),
-        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE", "BDAG"]).required(),
+        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE"]).required(),
         token: string().required(),
     },
     smartContractPaymentConfirmation: {
         tagName: string().required(),
         domain: string(),
-        network: stringEnum(["AVAX_SC", "BSC_SC", "ETH_SC", "POLYGON_SC", "BASE_SC", "BLOCKDAG_SC"]).required(),
+        network: stringEnum(["AVAX_SC", "BSC_SC", "ETH_SC", "POLYGON_SC", "BASE_SC"]).required(),
         token: string().required(),
         txHash: string().required(),
     },
@@ -40,7 +41,7 @@ const schemas = {
     receiptEmail: {
         tagName: string().required(),
         domain: string(),
-        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE", "BDAG"]).required(),
+        network: stringEnum(["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE"]).required(),
         email: string().email().required(),
         token: string().required(),
     },
@@ -85,11 +86,7 @@ const transferValidation = async (ctx, next) => {
 
     const domainValidation = await validateDomainAndName(extractedDomain, name);
 
-    if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
-        return;
-    }
+    if (respondDomainValidation(ctx, domainValidation)) return;
 
     // Add extracted domain and name to context
     ctx.state.extractedDomain = extractedDomain;
@@ -118,11 +115,7 @@ const paymentOptionsValidation = async (ctx, next) => {
 
     const domainValidation = await validateDomainAndName(domain, tagName);
 
-    if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
-        return;
-    }
+    if (respondDomainValidation(ctx, domainValidation)) return;
 
     await next();
 };
@@ -154,6 +147,8 @@ const paymentOptionsReducedFeeGate = async (ctx, next) => {
  * @param {*} next - Next middleware
  */
 const paymentConfirmationValidation = async (ctx, next) => {
+    if (rejectIfUnsupportedDomain(ctx, ctx.request.body?.domain)) return;
+    if (rejectIfUnsupportedChain(ctx, ctx.request.body?.network)) return;
     const valid = validate(schemas.paymentConfirmation, ctx.request.body);
 
     if (valid.error) {
@@ -166,11 +161,7 @@ const paymentConfirmationValidation = async (ctx, next) => {
 
     const domainValidation = await validateDomainAndName(domain, tagName);
 
-    if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
-        return;
-    }
+    if (respondDomainValidation(ctx, domainValidation)) return;
 
     let tokenDecoded;
 
@@ -210,6 +201,8 @@ const paymentConfirmationValidation = async (ctx, next) => {
 };
 
 const smartContractPaymentConfirmationValidation = async (ctx, next) => {
+    if (rejectIfUnsupportedDomain(ctx, ctx.request.body?.domain)) return;
+    if (rejectIfUnsupportedChain(ctx, ctx.request.body?.network)) return;
     const valid = validate(schemas.smartContractPaymentConfirmation, ctx.request.body);
 
     if (valid.error) {
@@ -222,11 +215,7 @@ const smartContractPaymentConfirmationValidation = async (ctx, next) => {
 
     const domainValidation = await validateDomainAndName(domain, tagName);
 
-    if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
-        return;
-    }
+    if (respondDomainValidation(ctx, domainValidation)) return;
 
     let tokenDecoded;
 
@@ -253,29 +242,6 @@ const smartContractPaymentConfirmationValidation = async (ctx, next) => {
     }
 
     const { network } = ctx.request.body;
-
-    if (network === "BLOCKDAG_SC") {
-        const scBd = tokenDecoded.smartContractBDAG;
-        const hasNative =
-            scBd?.expectedWei != null &&
-            String(scBd.expectedWei).trim() !== "" &&
-            (() => {
-                try {
-                    return BigInt(scBd.expectedWei) > 0n;
-                } catch {
-                    return false;
-                }
-            })();
-
-        if (!scBd?.paymentId || !hasNative) {
-            ctx.status = 409;
-            ctx.body = { validationError: "smart_contract_bdag_not_in_token" };
-            return;
-        }
-
-        await next();
-        return;
-    }
 
     if (network === "ETH_SC") {
         const scE = tokenDecoded.smartContractETH;
@@ -491,6 +457,8 @@ const smartContractPaymentConfirmationValidation = async (ctx, next) => {
 
 const receiptEmailValidation = async (ctx, next) => {
     const { network, token } = ctx.request.body;
+    if (rejectIfUnsupportedDomain(ctx, ctx.request.body?.domain)) return;
+    if (rejectIfUnsupportedChain(ctx, network)) return;
 
     const valid = validate(schemas.receiptEmail, ctx.request.body);
 
@@ -527,6 +495,7 @@ const receiptEmailValidation = async (ctx, next) => {
 };
 
 const referralsValidation = async (ctx, next) => {
+    if (rejectIfUnsupportedDomain(ctx, ctx.request.query?.domain)) return;
     const valid = validate(schemas.referrals, ctx.request.query);
 
     if (valid.error) {
@@ -539,6 +508,8 @@ const referralsValidation = async (ctx, next) => {
 };
 
 const claimReferralValidation = async (ctx, next) => {
+    if (rejectIfUnsupportedDomain(ctx, ctx.request.body?.domain)) return;
+    if (rejectIfUnsupportedDomain(ctx, ctx.request.body?.friendDomain)) return;
     const valid = validate(schemas.claimReferral, ctx.request.body);
 
     if (valid.error) {
@@ -573,11 +544,7 @@ const extendLicenseForOwnerValidation = async (ctx, next) => {
 
     const domainValidation = await validateDomainAndName(domain, tagName);
 
-    if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
-        return;
-    }
+    if (respondDomainValidation(ctx, domainValidation)) return;
 
     await next();
 };

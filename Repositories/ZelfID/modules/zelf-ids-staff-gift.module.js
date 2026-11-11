@@ -7,6 +7,7 @@
  */
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { codedError } = require("../../../Core/http-handler");
+const { assertSupportedDomain } = require("../../../Core/unsupported-networks");
 const { assertLicenseOffersPlan, assertPurchaseKeepsPaidValue, getBareName } = require("./zelf-id-plan.module");
 
 const STAFF_TYPES = new Set(["staff", "staff_account"]);
@@ -47,6 +48,7 @@ const giftZelfId = async (params = {}, jwt, deps = {}) => {
     const duration = `${params.duration ?? ""}`.trim().toLowerCase();
     const reason = String(params.reason || "").trim();
     if (!domain || !bare || !plan || !duration || !reason) throw httpError("409:MISSING_GIFT_FIELDS");
+    assertSupportedDomain(domain);
 
     await resolveAuthorizedDomain(jwt, domain);
 

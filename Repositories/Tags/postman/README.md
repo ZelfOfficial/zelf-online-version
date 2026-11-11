@@ -1,6 +1,6 @@
 # Tags API - Postman Collection
 
-This Postman collection provides comprehensive testing for the multi-domain Tags API system, supporting `.zelf`, `.avax`, `.btc`, `.tech`, `.bdag` and custom domains.
+This Postman collection provides comprehensive testing for the multi-domain Tags API system, supporting `.zelf`, `.avax`, `.btc`, `.tech` and custom domains.
 
 ## 🚀 Quick Start
 
@@ -17,7 +17,7 @@ The collection uses these variables:
 |----------|-------------|---------------|
 | `base_url` | API base URL | `http://localhost:3000` |
 | `jwt_token` | JWT authentication token | `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...` |
-| `domain` | Domain to test | `avax`, `btc`, `tech`, `bdag` |
+| `domain` | Domain to test | `avax`, `btc`, `tech` |
 | `tag_name` | Tag name for testing | `testuser`, `myname` |
 
 ### 3. Authentication
@@ -83,8 +83,7 @@ The collection supports testing with different domains:
   "zelf": "Free domain (0 cents)",
   "avax": "Avalanche domain ($1.00)",
   "btc": "Bitcoin domain ($0.50)",
-  "tech": "Tech domain ($0.75)",
-  "bdag": "Enterprise domain ($5.00)"
+  "tech": "Tech domain ($0.75)"
 }
 ```
 
@@ -100,7 +99,7 @@ Supported currencies vary by domain:
 - **USD** - US Dollar (all domains)
 - **BTC** - Bitcoin (most domains)
 - **ETH** - Ethereum (most domains)
-- **SOL** - Solana (zelf, tech, bdag)
+- **SOL** - Solana (zelf, tech)
 - **AVAX** - Avalanche (avax domain)
 
 ## 🧪 Testing Scenarios
@@ -120,7 +119,6 @@ Supported currencies vary by domain:
 # 2. avax ($1.00)
 # 3. btc ($0.50)
 # 4. tech ($0.75)
-# 5. bdag ($5.00)
 ```
 
 ### 3. **Payment Testing**
