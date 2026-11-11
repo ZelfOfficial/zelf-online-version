@@ -825,10 +825,12 @@ const configuration = {
                 .split(",")
                 .map((s) => Math.max(60, Number(s.trim()) || 900))
                 .filter(Boolean),
-            /** Off by default — shared NAT; enable only for high-abuse environments. */
-            ipLockoutEnabled: process.env.FACE_ATTEMPT_IP_LOCKOUT_ENABLED === "true",
-            /** When IP lockout is enabled, failures/hour before IP block (generous). */
-            ipMaxFailuresPerHour: Math.max(1, Number(process.env.FACE_ATTEMPT_IP_MAX_FAILURES_PER_HOUR) || 100),
+            /** Failed decrypt/export attempts against one Zelf name, across sessions. */
+            targetMaxFailures: Math.max(1, Number(process.env.FACE_ATTEMPT_TARGET_MAX_FAILURES) || 5),
+            /** On unless FACE_ATTEMPT_IP_LOCKOUT_ENABLED=false. Threshold stays high for shared NAT. */
+            ipLockoutEnabled: process.env.FACE_ATTEMPT_IP_LOCKOUT_ENABLED !== "false",
+            /** Failures inside the identity window before an IP block. High so shared networks keep working. */
+            ipMaxFailuresPerHour: Math.max(1, Number(process.env.FACE_ATTEMPT_IP_MAX_FAILURES_PER_HOUR) || 1000),
             /** Per session + per identity (tag/record) before device-scoped lockout. */
             deviceMaxFailures: Math.max(1, Number(process.env.FACE_ATTEMPT_DEVICE_MAX_FAILURES) || 10),
             /** Start requiring PoW after this many identity failures in the window (inclusive). */

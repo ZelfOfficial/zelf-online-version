@@ -4,6 +4,7 @@ const FaceAttemptLimiter = require("./face-attempt-limiter.module");
 const FaceReplay = require("./face-replay.module");
 const { pickWhitelistedBody } = require("./face-body-whitelist.module");
 const { ZELFPROOF_CLIENT_ERROR_STATUS } = require("../../ZelfProof/modules/zelf-proof.module");
+const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
 const config = require("../../../Core/config");
 
 const powEnforcement = () => String(config.faceSecurity?.pow?.enforcement || "log").toLowerCase();
@@ -66,6 +67,26 @@ const buildLockoutIdentityKey = (action, body, ctx) => {
     const identifier = resolveFaceBindingIdentifier(body, ctx);
     if (!identifier) return null;
     return `${action}:${identifier}`;
+};
+
+const countsTargetNameAttempts = (action) => {
+    const name = String(action || "").toLowerCase();
+    return name === "wallet-export" || name.endsWith("decrypt");
+};
+
+/**
+ * Lockout key for the Zelf name being decrypted or exported.
+ * Nonce and proof-of-work binding stay on the session identity.
+ * @returns {string|null}
+ */
+const buildTargetLockoutKey = (action, body, ctx) => {
+    if (!countsTargetNameAttempts(action)) return null;
+    const domain = body?.domain || ctx?.state?.user?.domain || ctx?.state?.extractedDomain || "zelf";
+    const raw = body?.zelfName || body?.tagName || body?.publicData?.zelfName || body?.publicData?.tagName;
+    if (typeof raw !== "string" || !raw.trim()) return null;
+    const normalized = normalizeZelfName(raw, domain);
+    if (!normalized.zelfName) return null;
+    return `target:${normalized.zelfName}`;
 };
 
 /**
@@ -156,6 +177,7 @@ const runFaceSecurityPre = async (ctx, action) => {
 
     const identifier = resolveFaceBindingIdentifier(body, ctx);
     const identityKey = buildLockoutIdentityKey(action, body, ctx);
+    const targetKey = buildTargetLockoutKey(action, body, ctx);
     const sessionKey = sessionKeyFromUser(authUser);
     const ip = ctx.request.ip;
 
@@ -163,12 +185,14 @@ const runFaceSecurityPre = async (ctx, action) => {
         action,
         identifier,
         identityKey,
+        targetKey,
         sessionKey,
         ip,
     };
 
     const { failureCount, powRequired } = await FaceAttemptLimiter.assertFaceAttemptAllowed({
         identityKey,
+        targetKey,
         ip,
         deviceKey: sessionKey,
     });
@@ -251,10 +275,12 @@ const runFaceSecurityPost = async (ctx) => {
     if (!meta) return;
 
     const identityKey = meta.identityKey;
+    const targetKey = meta.targetKey;
     try {
         if (isFaceFailureResponse(ctx)) {
             await FaceAttemptLimiter.recordFailedAttempt({
                 identityKey,
+                targetKey,
                 ip: meta.ip,
                 deviceKey: meta.sessionKey,
             });
@@ -267,6 +293,7 @@ const runFaceSecurityPost = async (ctx) => {
         } else if (ctx.status && ctx.status < 400) {
             await FaceAttemptLimiter.recordSuccessfulAttempt({
                 identityKey,
+                targetKey,
                 deviceKey: meta.sessionKey,
             });
             if (ctx.request.body?.faceBase64) {
@@ -286,6 +313,7 @@ module.exports = {
     buildIdentifier,
     resolveFaceBindingIdentifier,
     buildLockoutIdentityKey,
+    buildTargetLockoutKey,
     resolveFaceNonceContext,
     identityFromAuthUser,
     sessionKeyFromUser,

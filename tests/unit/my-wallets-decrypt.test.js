@@ -7,13 +7,23 @@ jest.mock("../../Repositories/ZelfProof/modules/zelf-proof.module", () => {
     };
 });
 
-jest.mock("../../Repositories/Session/modules/session.module", () => ({
-    sessionDecrypt: jest.fn(),
-    markSessionIdentityVerified: jest.fn(),
+jest.mock("../../Repositories/Session/modules/session.module", () => {
+    const { normalizeZelfName } = jest.requireActual("../../Repositories/Tags/modules/zelf-name.util");
+    return {
+        sessionDecrypt: jest.fn(),
+        markSessionIdentityVerified: jest.fn(),
+        normalizeZelfName,
+    };
+});
+
+jest.mock("../../Repositories/Wallet/modules/stored-zelf-proof.module", () => ({
+    findStoredZelfProof: jest.fn(),
+    proofsMatch: (left, right) => typeof left === "string" && typeof right === "string" && left.length > 0 && left === right,
 }));
 
 const ZelfProofModule = require("../../Repositories/ZelfProof/modules/zelf-proof.module");
 const SessionModule = require("../../Repositories/Session/modules/session.module");
+const StoredZelfProof = require("../../Repositories/Wallet/modules/stored-zelf-proof.module");
 const WalletModule = require("../../Repositories/Wallet/modules/wallet.module");
 const FaceWhitelist = require("../../Repositories/Face/modules/face-body-whitelist.module");
 
@@ -22,10 +32,15 @@ describe("MyWallets legacy decrypt & export (Issue #182)", () => {
         jest.clearAllMocks();
         SessionModule.sessionDecrypt.mockImplementation(async (value) => value);
         SessionModule.markSessionIdentityVerified.mockResolvedValue(undefined);
+        StoredZelfProof.findStoredZelfProof.mockResolvedValue(null);
         ZelfProofModule.encryptQRCode.mockResolvedValue({ zelfQR: "qr-code" });
     });
 
     it("strips NO_PASSWORD_PLACEHOLDER for face-only wallet decrypt and marks session verified", async () => {
+        StoredZelfProof.findStoredZelfProof.mockResolvedValue({
+            zelfName: "legacy.zelf",
+            zelfProof: "legacy-proof",
+        });
         ZelfProofModule.decrypt.mockResolvedValueOnce({
             metadata: { mnemonic: "test mnemonic" },
             publicData: { zelfName: "legacy.zelf", v: "4" },
@@ -53,7 +68,7 @@ describe("MyWallets legacy decrypt & export (Issue #182)", () => {
         expect(SessionModule.markSessionIdentityVerified).toHaveBeenCalledWith(
             { session: "sess-1" },
             "legacy.zelf",
-            undefined,
+            "zelf",
         );
         expect(result.zelfProof).toBe("legacy-proof");
     });
@@ -91,6 +106,55 @@ describe("MyWallets legacy decrypt & export (Issue #182)", () => {
             expect.objectContaining({ password: "real-secret" }),
         );
         expect(result.publicData.zelfName).toBe("qa.zelf");
+        expect(SessionModule.markSessionIdentityVerified).not.toHaveBeenCalled();
+    });
+
+    it("returns an unregistered wallet decrypt without marking the session verified", async () => {
+        ZelfProofModule.decrypt.mockResolvedValueOnce({
+            metadata: { mnemonic: "local mnemonic" },
+            publicData: { zelfName: "local.zelf" },
+        });
+
+        const result = await WalletModule.decryptWallet(
+            {
+                zelfProof: "local-proof",
+                faceBase64: "face-b64",
+                password: "secret",
+                skipQRCode: true,
+            },
+            { session: "sess-1" },
+        );
+
+        expect(result.metadata.mnemonic).toBe("local mnemonic");
+        expect(SessionModule.markSessionIdentityVerified).not.toHaveBeenCalled();
+    });
+
+    it("refuses a client blob that does not match the stored record and does not mark the session", async () => {
+        StoredZelfProof.findStoredZelfProof.mockResolvedValue({
+            zelfName: "victim.zelf",
+            zelfProof: "stored-proof",
+        });
+        ZelfProofModule.decrypt.mockResolvedValueOnce({
+            metadata: { mnemonic: "other mnemonic" },
+            publicData: { zelfName: "victim.zelf" },
+        });
+
+        await expect(
+            WalletModule.decryptWallet(
+                {
+                    zelfProof: "other-proof",
+                    faceBase64: "face-b64",
+                    password: "secret",
+                    zelfName: "victim.zelf",
+                    skipQRCode: true,
+                },
+                { session: "sess-1" },
+            ),
+        ).rejects.toMatchObject({
+            status: 403,
+            code: "ZELF_PROOF_MISMATCH",
+        });
+        expect(SessionModule.markSessionIdentityVerified).not.toHaveBeenCalled();
     });
 
     it("maps wrong password and face mismatch to 401 ERR_INVALID_PASSWORD and 422 ERR_VERIFICATION_FAILED", async () => {

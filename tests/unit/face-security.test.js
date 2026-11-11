@@ -287,6 +287,116 @@ describe("face attempt lockout", () => {
             FaceAttemptLimiter.assertFaceAttemptAllowed({ identityKey: keyP, deviceKey: "sess-p" })
         ).resolves.toBeDefined();
     });
+
+    it("keeps per-IP lockout enabled with a high default threshold", () => {
+        expect(config.faceSecurity.attemptLimiter.ipLockoutEnabled).toBe(true);
+        expect(config.faceSecurity.attemptLimiter.ipMaxFailuresPerHour).toBeGreaterThanOrEqual(1000);
+        expect(config.faceSecurity.attemptLimiter.targetMaxFailures).toBe(5);
+    });
+
+    it("locks one Zelf name across sessions after failed decrypt and export attempts", async () => {
+        const targetKey = FaceSecurity.buildTargetLockoutKey(
+            "wallet-decrypt",
+            { zelfName: "Victim", domain: "zelf" },
+            { state: { user: { session: "sess-a", domain: "zelf" } } }
+        );
+        expect(targetKey).toBe("target:victim.zelf");
+        expect(
+            FaceSecurity.buildTargetLockoutKey(
+                "wallet-export",
+                { zelfName: "victim.zelf", domain: "zelf" },
+                { state: { user: { session: "sess-b", domain: "zelf" } } }
+            )
+        ).toBe(targetKey);
+        expect(
+            FaceSecurity.buildTargetLockoutKey(
+                "store-password",
+                { tagName: "victim", domain: "zelf" },
+                { state: { user: { session: "sess-a", domain: "zelf" } } }
+            )
+        ).toBeNull();
+
+        for (let i = 0; i < 5; i++) {
+            await FaceAttemptLimiter.recordFailedAttempt({
+                identityKey: `wallet-decrypt:session:sess-${i}`,
+                targetKey,
+                deviceKey: `sess-${i}`,
+                ip: `203.0.113.${10 + i}`,
+            });
+        }
+
+        const blocked = {
+            request: {
+                body: { faceBase64: "ZmFjZQ==", zelfName: "victim.zelf", domain: "zelf" },
+                ip: "203.0.113.80",
+            },
+            state: { user: { session: "sess-new", domain: "zelf" } },
+            path: "/api/my-wallets/export",
+            status: undefined,
+            body: undefined,
+            set() {},
+            get() {},
+        };
+        await FaceMiddleware.gate("wallet-export")(blocked, async () => {
+            blocked.status = 200;
+        });
+        expect(blocked.status).toBe(429);
+        expect(blocked.body.code).toBe("TOO_MANY_ATTEMPTS");
+
+        const otherName = {
+            request: {
+                body: { faceBase64: "ZmFjZQ==", zelfName: "other.zelf", domain: "zelf" },
+                ip: "203.0.113.81",
+            },
+            state: { user: { session: "sess-other", domain: "zelf" } },
+            path: "/api/my-wallets/decrypt",
+            status: undefined,
+            body: undefined,
+            set() {},
+            get() {},
+        };
+        await FaceMiddleware.gate("wallet-decrypt")(otherName, async () => {
+            otherName.status = 200;
+        });
+        expect(otherName.status).not.toBe(429);
+        expect(otherName.body?.code).not.toBe("TOO_MANY_ATTEMPTS");
+    });
+
+    it("locks an IP only after the higher shared-address threshold", async () => {
+        const limiter = config.faceSecurity.attemptLimiter;
+        const previousMax = limiter.ipMaxFailuresPerHour;
+        const previousEnabled = limiter.ipLockoutEnabled;
+        limiter.ipMaxFailuresPerHour = 4;
+        limiter.ipLockoutEnabled = true;
+        try {
+            for (let i = 0; i < 4; i++) {
+                await FaceAttemptLimiter.recordFailedAttempt({
+                    identityKey: `decrypt:person${i}@zelf`,
+                    deviceKey: `device-${i}`,
+                    ip: "198.51.100.8",
+                });
+            }
+
+            await expect(
+                FaceAttemptLimiter.assertFaceAttemptAllowed({
+                    identityKey: "decrypt:fresh@zelf",
+                    deviceKey: "device-fresh",
+                    ip: "198.51.100.8",
+                })
+            ).rejects.toMatchObject({ status: 429, clientCode: "TOO_MANY_ATTEMPTS" });
+
+            await expect(
+                FaceAttemptLimiter.assertFaceAttemptAllowed({
+                    identityKey: "decrypt:fresh@zelf",
+                    deviceKey: "device-fresh",
+                    ip: "198.51.100.9",
+                })
+            ).resolves.toBeDefined();
+        } finally {
+            limiter.ipMaxFailuresPerHour = previousMax;
+            limiter.ipLockoutEnabled = previousEnabled;
+        }
+    });
 });
 
 describe("face pow difficulty", () => {
