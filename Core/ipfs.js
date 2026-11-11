@@ -420,6 +420,8 @@ const filter = async (property = "name", value, options = {}) => {
         if (!allFiles.length) return [];
         return _normalizeFiles(allFiles);
     } catch (error) {
+        // Availability checks must distinguish an empty index from a failed query.
+        if (options.throwOnError) throw error;
         console.error("Error filtering files:", error);
         return [];
     }

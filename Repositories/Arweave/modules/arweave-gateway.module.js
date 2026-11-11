@@ -103,21 +103,49 @@ const postGraphql = async (queryString) => {
 	throw lastError || new Error("All Arweave GraphQL gateways failed");
 };
 
+const CONTENT_REDIRECT_LIMIT = 5;
+
+const _redirectLocation = (response, currentUrl) => {
+	const location = response?.headers?.location || response?.headers?.Location;
+	if (!location || typeof location !== "string") return null;
+
+	try {
+		return new URL(location, currentUrl).toString();
+	} catch (_error) {
+		return null;
+	}
+};
+
 /**
  * Fetch raw transaction bytes from the public gateway, then fall back to GraphQL pool.
+ * arweave.net often answers 302; those hops are followed up to CONTENT_REDIRECT_LIMIT.
  * @param {string} txId
  * @returns {Promise<ArrayBuffer|null>}
  */
 const fetchTxData = async (txId) => {
 	const fetchFromBase = async (baseUrl) => {
-		const response = await axios.get(`${_normalizeGatewayBase(baseUrl)}/${txId}`, {
-			responseType: "arraybuffer",
-			timeout: ARWEAVE_HTTP_TIMEOUT_MS,
-			validateStatus: (status) => status >= 200 && status < 300,
-		});
-		if (response?.data && response.data.byteLength > 0) {
-			return response.data;
+		let url = `${_normalizeGatewayBase(baseUrl)}/${txId}`;
+
+		for (let hop = 0; hop <= CONTENT_REDIRECT_LIMIT; hop++) {
+			const response = await axios.get(url, {
+				responseType: "arraybuffer",
+				timeout: ARWEAVE_HTTP_TIMEOUT_MS,
+				// arweave.net answers 302. Follow it instead of treating the redirect as an empty body.
+				maxRedirects: CONTENT_REDIRECT_LIMIT,
+				validateStatus: (status) => status >= 200 && status < 400,
+			});
+
+			if (response.status >= 300 && response.status < 400) {
+				const nextUrl = _redirectLocation(response, url);
+				if (!nextUrl || hop === CONTENT_REDIRECT_LIMIT) return null;
+				url = nextUrl;
+				continue;
+			}
+
+			if (response?.data && response.data.byteLength > 0) return response.data;
+			return null;
 		}
+
 		return null;
 	};
 
