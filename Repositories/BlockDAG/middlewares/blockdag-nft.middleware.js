@@ -256,6 +256,73 @@ const uploadValidation = async (ctx, next) => {
     await next();
 };
 
+const rejectListParam = (ctx, code, param) => {
+    ctx.status = 400;
+    ctx.body = { success: false, error: code, code, ...(param ? { param } : {}) };
+};
+
+const assertOptionalQueryStrings = (ctx, names) => {
+    const query = ctx.request.query || {};
+
+    for (const name of names) {
+        const value = query[name];
+        if (value === undefined || value === null || value === "") continue;
+        if (typeof value !== "string") {
+            rejectListParam(ctx, "INVALID_PARAM", name);
+            return false;
+        }
+    }
+
+    return true;
+};
+
+const listCollectionsValidation = async (ctx, next) => {
+    if (!assertOptionalQueryStrings(ctx, ["owner", "contractAddress", "limit"])) return;
+    await next();
+};
+
+const listItemsValidation = async (ctx, next) => {
+    if (!assertOptionalQueryStrings(ctx, ["owner", "collection", "limit"])) return;
+    await next();
+};
+
+const collectionItemsValidation = async (ctx, next) => {
+    const id = ctx.params ? ctx.params.id : undefined;
+
+    if (id === undefined || id === null || id === "") return rejectListParam(ctx, "MISSING_REQUIRED_PARAM", "id");
+    if (typeof id !== "string") return rejectListParam(ctx, "INVALID_PARAM", "id");
+    if (!assertOptionalQueryStrings(ctx, ["owner", "limit"])) return;
+
+    await next();
+};
+
+const itemByQueryValidation = async (ctx, next) => {
+    const cid = ctx.request.query ? ctx.request.query.cid : undefined;
+
+    if (cid === undefined || cid === null || cid === "") return rejectListParam(ctx, "MISSING_REQUIRED_PARAM", "cid");
+    if (typeof cid !== "string") return rejectListParam(ctx, "INVALID_PARAM", "cid");
+
+    await next();
+};
+
+const itemByIdValidation = async (ctx, next) => {
+    const id = ctx.params ? ctx.params.id : undefined;
+
+    if (id === undefined || id === null || id === "") return rejectListParam(ctx, "MISSING_REQUIRED_PARAM", "id");
+    if (typeof id !== "string") return rejectListParam(ctx, "INVALID_PARAM", "id");
+
+    await next();
+};
+
+const searchCollectionsValidation = async (ctx, next) => {
+    const q = ctx.request.query ? ctx.request.query.q : undefined;
+
+    if (q === undefined || q === null || q === "") return rejectListParam(ctx, "MISSING_REQUIRED_PARAM", "q");
+    if (typeof q !== "string" || q.trim().length < 2) return rejectListParam(ctx, "INVALID_PARAM", "q");
+
+    await next();
+};
+
 module.exports = {
     createCollectionValidation,
     createNFTValidation,
@@ -266,4 +333,10 @@ module.exports = {
     updateCollectionValidation,
     updateItemMetadataValidation,
     uploadValidation,
+    listCollectionsValidation,
+    listItemsValidation,
+    collectionItemsValidation,
+    itemByQueryValidation,
+    itemByIdValidation,
+    searchCollectionsValidation,
 };

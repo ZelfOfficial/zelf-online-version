@@ -234,9 +234,14 @@ const getCollectionItems = async (ctx) => {
 const getItemByQuery = async (ctx) => {
     try {
         const { cid } = ctx.request.query;
-        if (!cid) {
+        if (cid === undefined || cid === null || cid === "") {
             ctx.status = 400;
-            ctx.body = { success: false, error: "cid query parameter is required" };
+            ctx.body = { success: false, error: "MISSING_REQUIRED_PARAM", code: "MISSING_REQUIRED_PARAM", param: "cid" };
+            return;
+        }
+        if (typeof cid !== "string") {
+            ctx.status = 400;
+            ctx.body = { success: false, error: "INVALID_PARAM", code: "INVALID_PARAM", param: "cid" };
             return;
         }
         const result = await BlockDagNftModule.getItem(cid);
@@ -372,9 +377,14 @@ const deployDefaultCollection = async (ctx) => {
 const searchCollections = async (ctx) => {
     try {
         const { q } = ctx.request.query;
-        if (!q || q.trim().length < 2) {
+        if (q === undefined || q === null || q === "") {
             ctx.status = 400;
-            ctx.body = { success: false, error: "Query must be at least 2 characters" };
+            ctx.body = { success: false, error: "MISSING_REQUIRED_PARAM", code: "MISSING_REQUIRED_PARAM", param: "q" };
+            return;
+        }
+        if (typeof q !== "string" || q.trim().length < 2) {
+            ctx.status = 400;
+            ctx.body = { success: false, error: "INVALID_PARAM", code: "INVALID_PARAM", param: "q" };
             return;
         }
         const result = await BlockDagNftModule.searchCollectionsByName(q.trim());
