@@ -11,6 +11,7 @@ const Mailgun = require("../../../Core/mailgun");
 const fs = require("fs");
 const path = require("path");
 const sharp = require("sharp");
+const { assertPasskeyOwner, assertStaffRoleChangeAllowed, callerIsClientAdmin } = require("./staff-auth.util");
 
 /**
  * Get staff members for a client
@@ -450,8 +451,23 @@ const auth = async (data) => {
 const updateRole = async (data, authUser) => {
     const { staffEmail, newRole, faceBase64, masterPassword } = data;
 
-    // Verify client owner
-    const clientAccount = await ClientModule.get({ email: authUser.email });
+    if (!callerIsClientAdmin(authUser)) {
+        const error = new Error("STAFF_NOT_IN_CLIENT");
+        error.status = 403;
+        error.code = "STAFF_NOT_IN_CLIENT";
+        throw error;
+    }
+
+    const staffRecords = await IPFSModule.get({ key: "staffEmail", value: staffEmail });
+    if (!staffRecords.length) throw new Error("404:staff_not_found");
+
+    const staffAccount = staffRecords[0];
+    const staffJSON = await axios.get(staffAccount.url);
+    const staffOwnerEmail = staffAccount.publicData?.staffOwnerEmail || staffJSON.data?.ownerEmail;
+    const clientEmail = assertStaffRoleChangeAllowed(authUser, staffOwnerEmail);
+
+    // Verify client owner. Decryption still requires both face and password.
+    const clientAccount = await ClientModule.get({ email: clientEmail });
     if (!clientAccount) throw new Error("404:client_not_found");
 
     const clientJSON = await axios.get(clientAccount.url);
@@ -464,13 +480,6 @@ const updateRole = async (data, authUser) => {
     });
 
     if (!decryptedClient) throw new Error("409:verification_failed");
-
-    // Get staff account
-    const staffRecords = await IPFSModule.get({ key: "staffEmail", value: staffEmail });
-    if (!staffRecords.length) throw new Error("404:staff_not_found");
-
-    const staffAccount = staffRecords[0];
-    const staffJSON = await axios.get(staffAccount.url);
 
     // Update role in staff data
     const updatedStaffData = {
@@ -491,6 +500,7 @@ const updateRole = async (data, authUser) => {
             metadata: {
                 ...staffAccount.publicData,
                 staffRole: newRole,
+                staffOwnerEmail: staffOwnerEmail || staffAccount.publicData?.staffOwnerEmail,
             },
             name: `${staffEmail}.staff`,
             pinIt: true,
@@ -609,10 +619,11 @@ const _processExistingInvitation = (ipfsRecords, existingJSON, currentData, isRe
  * Save Passkey Metadata to IPFS
  * @param {Object} data { email, phone, passkey }
  */
-const savePasskey = async ({ email, phone, passkey }) => {
+const savePasskey = async ({ email, phone, passkey }, authUser) => {
+    const identity = assertPasskeyOwner(authUser, { email, phone });
     const identifiers = [];
-    if (email) identifiers.push({ key: "passKeysEmail", value: email });
-    if (phone) identifiers.push({ key: "passKeysPhone", value: phone });
+    if (identity.email) identifiers.push({ key: "passKeysEmail", value: identity.email });
+    if (identity.phone) identifiers.push({ key: "passKeysPhone", value: identity.phone });
 
     if (identifiers.length === 0) throw new Error("400:missing_identifier");
 
@@ -622,6 +633,16 @@ const savePasskey = async ({ email, phone, passkey }) => {
     const promises = identifiers.map(async (item) => {
         // Unpin existing
         const existing = await IPFSModule.get({ key: item.key, value: item.value });
+        const foreignRecord = existing.find((record) => {
+            const recorded = record.publicData?.[item.key];
+            return recorded && String(recorded).trim().toLowerCase() !== String(item.value).trim().toLowerCase();
+        });
+        if (foreignRecord) {
+            const error = new Error("PASSKEY_OWNER_MISMATCH");
+            error.status = 403;
+            error.code = "PASSKEY_OWNER_MISMATCH";
+            throw error;
+        }
         if (existing.length) {
             await IPFSModule.unPinFiles(existing.map((r) => r.id)).catch((e) => console.warn(e));
         }

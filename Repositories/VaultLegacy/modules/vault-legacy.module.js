@@ -275,6 +275,20 @@ const getVault = async (vaultId) => {
     return { vault: await getAvalancheManager().getVault(vaultIdNorm), isDemo };
 };
 
+const getOnChainVaultOwner = async (vaultId) => {
+    if (!process.env.LEGACY_VAULT_REGISTRY_ADDRESS) return null;
+
+    try {
+        const vaultIdNorm = LegacyDemo.normalizeVaultId(vaultId);
+        const vault = await getAvalancheManager().getVault(vaultIdNorm);
+        if (!vault?.exists || !vault.owner || vault.owner === ethers.ZeroAddress) return null;
+        return vault.owner;
+    } catch (error) {
+        console.warn("Vault owner lookup skipped:", error.message);
+        return null;
+    }
+};
+
 const getBeneficiaryVaults = async (address) => {
     return { vaultIds: await getAvalancheManager().getBeneficiaryVaults(address) };
 };
@@ -358,6 +372,8 @@ const resendBeneficiaryClaimableEmails = async (vaultId) => {
 };
 
 module.exports = {
+    verifyAuthSig,
+    getOnChainVaultOwner,
     getDemoStatus,
     ensureDemoVaultAccepted,
     resendBeneficiaryClaimableEmails,

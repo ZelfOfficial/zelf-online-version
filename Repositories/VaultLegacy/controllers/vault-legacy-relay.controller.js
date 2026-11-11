@@ -19,6 +19,8 @@ const LegacyDemo = require("../modules/vault-legacy-demo.module");
 const RelayerHealth = require("../modules/vault-legacy-relayer.module");
 
 const { sendLawyerNewPlan, sendTestatorPlanActive } = require("../modules/email");
+const VaultLegacyModule = require("../modules/vault-legacy.module");
+const { resolveProvenVaultOwner } = require("../modules/vault-owner.util");
 
 const IPFS = require("../../IPFS/modules/ipfs.module");
 const { txWaitTimeoutMs, isTransactionWaitTimeout } = require("../legacy-timeouts");
@@ -109,7 +111,7 @@ const ipfsUpload = async (ctx) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const registerEmails = async (ctx) => {
     try {
-        const { vaultId, testatorEmail, lawyerEmail, beneficiaryEmails, beneficiaryTagNames, isDemo } = ctx.request.body;
+        const { vaultId, testatorEmail, lawyerEmail, beneficiaryEmails, beneficiaryTagNames, isDemo, authSig } = ctx.request.body;
 
         if (!vaultId) {
             ctx.status = 400;
@@ -124,11 +126,33 @@ const registerEmails = async (ctx) => {
             LegacyDemo.assertDemoModeEnabled();
         }
 
+        const existing = await VaultLegacy.findOne({ vaultId: vaultIdNorm }).lean();
+        const onChainOwner = await VaultLegacyModule.getOnChainVaultOwner(vaultIdNorm);
+        let signerAddress = null;
+
+        if (authSig) {
+            try {
+                signerAddress = VaultLegacyModule.verifyAuthSig(authSig, `ZelfLegacy register-emails ${vaultIdNorm}`);
+            } catch (signatureError) {
+                const error = new Error("VAULT_OWNER_MISMATCH");
+                error.status = 403;
+                error.code = "VAULT_OWNER_MISMATCH";
+                throw error;
+            }
+        }
+
+        const ownerAddress = resolveProvenVaultOwner({
+            sessionIdentifier: ctx.state.legacyUser?.identifier,
+            signerAddress,
+            expectedOwner: onChainOwner || existing?.ownerAddress || null,
+        });
+
         const update = {
             testatorEmail: testatorEmail || null,
             lawyerEmail: lawyerEmail || null,
             beneficiaryEmails: beneficiaryEmails || [],
             beneficiaryTagNames: beneficiaryTagNames || [],
+            ownerAddress,
         };
 
         if (wantsDemo) {
@@ -144,8 +168,11 @@ const registerEmails = async (ctx) => {
         console.log(`📋 Registered emails for vault ${vaultIdNorm} (MongoDB)${wantsDemo ? " [demo]" : ""}`);
         ctx.body = { success: true, vaultId: vaultIdNorm, isDemo: wantsDemo };
     } catch (error) {
-        ctx.status = 500;
-        ctx.body = { error: error.message };
+        ctx.status = error.status || 500;
+        ctx.body = {
+            error: error.message,
+            ...(error.code ? { code: error.code } : {}),
+        };
     }
 };
 

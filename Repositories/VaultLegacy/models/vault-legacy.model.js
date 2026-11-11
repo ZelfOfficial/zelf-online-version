@@ -30,6 +30,9 @@ const VaultLegacySchema = new Schema({
 
     /** Demo inheritance plan — automation only when LEGACY_DEMO_MODE=true */
     isDemo: { type: Boolean, default: false, index: true },
+
+    /** Address proven when beneficiary and lawyer emails were registered. */
+    ownerAddress: defaultField(String, null),
 });
 
 addBasicPlugins(VaultLegacySchema);

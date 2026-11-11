@@ -2,7 +2,7 @@ const Module = require("../modules/ipfs.module");
 
 const get = async (ctx) => {
 	try {
-		const data = await Module.get(ctx.request.query, ctx.state.user);
+		const data = await Module.get(ctx.request.query, ctx.state.user, { restrictToCaller: true });
 
 		ctx.body = { data };
 	} catch (error) {

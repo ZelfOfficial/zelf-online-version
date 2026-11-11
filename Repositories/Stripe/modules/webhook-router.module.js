@@ -3,6 +3,7 @@ const Stripe = require("stripe");
 const config = require("../../../Core/config");
 const SubscriptionModule = require("../../ZelfKeysSubscription/modules/zelf-keys-subscription.module");
 const StripeModule = require("./stripe.module");
+const PreSaleModule = require("../../PreSale/modules/pre-sale.module");
 
 /**
  * Get Stripe client instance
@@ -71,6 +72,13 @@ const getWebhookSource = async (event) => {
  * @returns {Promise<Object>} - Handler result
  */
 const routeWebhook = async (event) => {
+	if (
+		(event?.type === "checkout.session.completed" || event?.type === "checkout.session.async_payment_succeeded") &&
+		event.data?.object?.metadata?.type === "zns_presale"
+	) {
+		return await PreSaleModule.releaseFromVerifiedStripeEvent(event);
+	}
+
 	const source = await getWebhookSource(event);
 
 	// Extension/app sources route to Subscription module

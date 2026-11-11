@@ -9,6 +9,7 @@ const ClientModule = require("../../Client/modules/client.module");
 const Mailgun = require("../../../Core/mailgun");
 const { createEthWallet } = require("../../Wallet/modules/eth");
 const { createSolanaWallet } = require("../../Wallet/modules/solana");
+const { requirePreferencesOwner } = require("./lawyer-owner.util");
 
 const LAWYER_TYPE = "lawyer";
 const LAWYER_ACCOUNT_TYPE = "lawyer_account";
@@ -566,19 +567,20 @@ const updateProfile = async (data, authUser) => {
  * @returns {Object}
  */
 const setPreferred = async (data, authUser) => {
+	const ownerEmail = requirePreferencesOwner(authUser);
 	const { domain = "zelf", preferredLawyerZelfNames = [], defaultLawyerZelfName } = data;
 
 	const prefsData = {
 		domain,
 		preferredLawyerZelfNames,
 		defaultLawyerZelfName: defaultLawyerZelfName || (preferredLawyerZelfNames.length ? preferredLawyerZelfNames[0] : null),
-		updatedBy: authUser.email,
+		updatedBy: ownerEmail,
 		updatedAt: new Date().toISOString(),
 	};
 
 	// Unpin old preferences
 	const existing = await IPFSModule.get({ key: "preferencesDomain", value: domain });
-	const ownerPrefs = existing.filter((r) => r.publicData?.preferencesOwner === authUser.email);
+	const ownerPrefs = existing.filter((r) => r.publicData?.preferencesOwner === ownerEmail);
 	if (ownerPrefs.length > 0) {
 		await IPFSModule.unPinFiles(ownerPrefs.map((r) => r.id)).catch((e) => console.warn(e.message));
 	}
@@ -592,9 +594,9 @@ const setPreferred = async (data, authUser) => {
 			metadata: {
 				type: "lawyer_preferences",
 				preferencesDomain: domain,
-				preferencesOwner: authUser.email,
+				preferencesOwner: ownerEmail,
 			},
-			name: `${authUser.email}.lawyer-preferences`,
+			name: `${ownerEmail}.lawyer-preferences`,
 			pinIt: true,
 		},
 		{ pro: true },
@@ -614,11 +616,11 @@ const getPreferred = async (params = {}, authUser = {}) => {
 
 	const existing = await IPFSModule.get({ key: "preferencesDomain", value: domain });
 
-	// User-specific preferences first, then domain-wide
-	let prefs = existing.find((r) => r.publicData?.preferencesOwner === authUser.email);
+	const ownerEmail = typeof authUser?.email === "string" ? authUser.email.trim() : "";
+	let prefs = ownerEmail ? existing.find((r) => r.publicData?.preferencesOwner === ownerEmail) : null;
 
 	if (!prefs && existing.length > 0) {
-		prefs = existing[0];
+		prefs = existing.find((r) => typeof r.publicData?.preferencesOwner === "string" && r.publicData.preferencesOwner.trim());
 	}
 
 	if (!prefs) {
