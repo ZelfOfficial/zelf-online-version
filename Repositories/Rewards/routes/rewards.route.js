@@ -15,7 +15,12 @@ module.exports = (server) => {
 	// Daily rewards. Face gate matches other owner actions; the module checks the rewarded Zelf ID.
 	server.post(`${PATH}/daily`, Middleware.dailyRewardsValidation, FaceMiddleware.gate("daily-reward"), Controller.dailyRewards);
 
-	server.post(`${PATH}/first-transaction`, Middleware.firstTransactionRewardValidation, Controller.firstTransactionReward);
+	server.post(
+		`${PATH}/first-transaction`,
+		Middleware.firstTransactionRewardValidation,
+		FaceMiddleware.gate("first-transaction"),
+		Controller.firstTransactionReward
+	);
 
 	server.get(`${PATH}/history/:tagName`, Middleware.rewardHistoryValidation, Controller.rewardHistory);
 

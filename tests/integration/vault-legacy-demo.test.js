@@ -62,7 +62,7 @@ describe("vault-legacy demo mode", () => {
             expect(res.body.error).toMatch(/demo mode is not enabled/i);
         });
 
-        it("accepts isDemo when LEGACY_DEMO_MODE is true", async () => {
+        it("rejects register-emails without vault owner proof when demo mode is on", async () => {
             if (!hasDemoEnv()) {
                 console.warn("Skipping: set LEGACY_DEMO_MODE=true and LEGACY_DEMO_LAWYER_ADDRESS for full demo register test");
                 return;
@@ -82,8 +82,8 @@ describe("vault-legacy demo mode", () => {
                     beneficiaryEmails: [],
                 });
 
-            expect(res.status).toBe(200);
-            expect(res.body).toMatchObject({ success: true, isDemo: true });
+            expect(res.status).toBe(403);
+            expect(res.body.code).toBe("VAULT_OWNER_MISMATCH");
         });
     });
 

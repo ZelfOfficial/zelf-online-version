@@ -51,6 +51,91 @@ const getAvalancheManager = () => {
  * @param {string} [expectedPrefix]
  * @returns {string} checksummed signer address
  */
+const vaultOwnerMismatch = () => {
+    const error = new Error("403:VAULT_OWNER_MISMATCH");
+    error.status = 403;
+    error.code = "VAULT_OWNER_MISMATCH";
+    error.clientCode = "VAULT_OWNER_MISMATCH";
+    error.clientMessage = "VAULT_OWNER_MISMATCH";
+    return error;
+};
+
+const addressOrNull = (value) => {
+    if (typeof value !== "string" || !ethers.isAddress(value)) return null;
+    return ethers.getAddress(value);
+};
+
+const recoverRegisterEmailsSigner = (authSig, vaultId) => {
+    if (!authSig) return null;
+
+    const vaultIdNorm = LegacyDemo.normalizeVaultId(vaultId);
+    const prefixes = [`ZelfLegacy register-emails ${vaultIdNorm}`];
+    if (vaultId && vaultId !== vaultIdNorm) prefixes.push(`ZelfLegacy register-emails ${vaultId}`);
+
+    for (const prefix of prefixes) {
+        try {
+            return verifyAuthSig(authSig, prefix);
+        } catch (_error) {
+            // try the next accepted message
+        }
+    }
+
+    throw vaultOwnerMismatch();
+};
+
+const lookupVaultOwner = async (vaultId) => {
+    let timer;
+    try {
+        const vault = await Promise.race([
+            getAvalancheManager().getVault(vaultId),
+            new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error("vault_lookup_timeout")), 4000);
+            }),
+        ]);
+
+        if (vault?.exists && vault.owner && vault.owner !== ethers.ZeroAddress) {
+            return addressOrNull(vault.owner);
+        }
+
+        return null;
+    } catch (error) {
+        const message = String(error?.message || "");
+        if (/invalid address|missing address|undefined/i.test(message)) return null;
+        return undefined;
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+};
+
+/**
+ * The caller must be the vault owner: the authenticated wallet that owns the vault,
+ * or a signature from the vault owner address.
+ */
+const assertCanRegisterVaultEmails = async ({ vaultId, authSig, legacyUser, existing }) => {
+    const vaultIdNorm = LegacyDemo.normalizeVaultId(vaultId);
+    const signer = addressOrNull(recoverRegisterEmailsSigner(authSig, vaultIdNorm));
+    const sessionAddress = addressOrNull(legacyUser?.ethAddress || legacyUser?.walletAddress || legacyUser?.identifier);
+    const onChainOwner = await lookupVaultOwner(vaultIdNorm);
+    const storedOwner = addressOrNull(existing?.ownerAddress);
+
+    if (typeof onChainOwner === "string") {
+        const signerOwns = signer && signer === onChainOwner;
+        const sessionOwns = sessionAddress && sessionAddress === onChainOwner;
+        if (!signerOwns && !sessionOwns) throw vaultOwnerMismatch();
+        return onChainOwner;
+    }
+
+    if (onChainOwner === undefined) {
+        if (!signer) throw vaultOwnerMismatch();
+        if (storedOwner && signer !== storedOwner) throw vaultOwnerMismatch();
+        return signer;
+    }
+
+    if (!signer) throw vaultOwnerMismatch();
+    if (storedOwner && signer !== storedOwner) throw vaultOwnerMismatch();
+    return signer;
+};
+
 const verifyAuthSig = (authSig, expectedPrefix) => {
     if (!authSig || !authSig.sig || !authSig.signedMessage || !authSig.address) {
         throw new Error("Invalid authSig: missing fields (sig, signedMessage, address)");
@@ -373,6 +458,7 @@ module.exports = {
     changeLawyer,
     confirmDeath,
     getVault,
+    assertCanRegisterVaultEmails,
     getBeneficiaryVaults,
     getBeneficiaryVaultsData,
     getOwnerVaults,
