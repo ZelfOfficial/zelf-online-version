@@ -16,6 +16,7 @@ const path = require("path");
 const config = require("../../../Core/config");
 const VaultLegacy = require("../models/vault-legacy.model");
 const LegacyDemo = require("../modules/vault-legacy-demo.module");
+const VaultLegacyModule = require("../modules/vault-legacy.module");
 const RelayerHealth = require("../modules/vault-legacy-relayer.module");
 
 const { sendLawyerNewPlan, sendTestatorPlanActive } = require("../modules/email");
@@ -124,11 +125,20 @@ const registerEmails = async (ctx) => {
             LegacyDemo.assertDemoModeEnabled();
         }
 
+        const existing = await VaultLegacy.findOne({ vaultId: vaultIdNorm }).lean();
+        const ownerAddress = await VaultLegacyModule.assertCanRegisterVaultEmails({
+            vaultId: vaultIdNorm,
+            authSig: ctx.request.body.authSig,
+            legacyUser: ctx.state.legacyUser,
+            existing,
+        });
+
         const update = {
             testatorEmail: testatorEmail || null,
             lawyerEmail: lawyerEmail || null,
             beneficiaryEmails: beneficiaryEmails || [],
             beneficiaryTagNames: beneficiaryTagNames || [],
+            ownerAddress,
         };
 
         if (wantsDemo) {
@@ -144,8 +154,11 @@ const registerEmails = async (ctx) => {
         console.log(`📋 Registered emails for vault ${vaultIdNorm} (MongoDB)${wantsDemo ? " [demo]" : ""}`);
         ctx.body = { success: true, vaultId: vaultIdNorm, isDemo: wantsDemo };
     } catch (error) {
-        ctx.status = 500;
-        ctx.body = { error: error.message };
+        ctx.status = error.status || 500;
+        ctx.body = {
+            error: error.clientMessage || error.message,
+            ...(error.code ? { code: error.code } : {}),
+        };
     }
 };
 

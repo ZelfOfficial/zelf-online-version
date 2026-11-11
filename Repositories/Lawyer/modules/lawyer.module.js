@@ -570,19 +570,43 @@ const updateProfile = async (data, authUser) => {
  * @returns {Object}
  */
 const setPreferred = async (data, authUser) => {
-	const { domain = "zelf", preferredLawyerZelfNames = [], defaultLawyerZelfName } = data;
+	const owner = typeof authUser?.email === "string" ? authUser.email.trim() : "";
+
+	if (!owner) {
+		const error = new Error("400:OWNER_REQUIRED");
+		error.status = 400;
+		error.code = "OWNER_REQUIRED";
+		error.clientCode = "OWNER_REQUIRED";
+		error.clientMessage = "OWNER_REQUIRED";
+		throw error;
+	}
+
+	const callerDomain = typeof authUser?.domain === "string" ? authUser.domain.trim().toLowerCase() : "";
+	const requestedDomain = String(data?.domain || callerDomain || "zelf").trim().toLowerCase();
+
+	if (!requestedDomain || (callerDomain && requestedDomain !== callerDomain)) {
+		const error = new Error("403:OWNER_REQUIRED");
+		error.status = 403;
+		error.code = "OWNER_REQUIRED";
+		error.clientCode = "OWNER_REQUIRED";
+		error.clientMessage = "OWNER_REQUIRED";
+		throw error;
+	}
+
+	const domain = requestedDomain;
+	const { preferredLawyerZelfNames = [], defaultLawyerZelfName } = data;
 
 	const prefsData = {
 		domain,
 		preferredLawyerZelfNames,
 		defaultLawyerZelfName: defaultLawyerZelfName || (preferredLawyerZelfNames.length ? preferredLawyerZelfNames[0] : null),
-		updatedBy: authUser.email,
+		updatedBy: owner,
 		updatedAt: new Date().toISOString(),
 	};
 
 	// Unpin old preferences
 	const existing = await IPFSModule.get({ key: "preferencesDomain", value: domain });
-	const ownerPrefs = existing.filter((r) => r.publicData?.preferencesOwner === authUser.email);
+	const ownerPrefs = existing.filter((r) => r.publicData?.preferencesOwner === owner);
 	if (ownerPrefs.length > 0) {
 		await IPFSModule.unPinFiles(ownerPrefs.map((r) => r.id)).catch((e) => console.warn(e.message));
 	}
@@ -596,9 +620,9 @@ const setPreferred = async (data, authUser) => {
 			metadata: {
 				type: "lawyer_preferences",
 				preferencesDomain: domain,
-				preferencesOwner: authUser.email,
+				preferencesOwner: owner,
 			},
-			name: `${authUser.email}.lawyer-preferences`,
+			name: `${owner}.lawyer-preferences`,
 			pinIt: true,
 		},
 		{ pro: true },
