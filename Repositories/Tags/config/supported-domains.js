@@ -1,4 +1,5 @@
 const { Domain } = require("../modules/domain.class");
+const { isRemovedDomain, omitRemovedDomain } = require("../../../Core/removed-blockdag");
 const { initCacheInstance } = require("../../../cache/manager");
 const { cache } = require("joi");
 const axios = require("../../../Core/axios").getEncryptionInstance();
@@ -295,7 +296,7 @@ const loadDynamicDomains = async (licenses = null, force = false) => {
             const dynamicDomains = {};
 
             for (const license of licenses) {
-                if (license.name) {
+                if (license.name && !isRemovedDomain(license.name)) {
                     dynamicDomains[license.name.toLowerCase()] = new Domain(license);
                 }
             }
@@ -319,7 +320,7 @@ const loadDynamicDomains = async (licenses = null, force = false) => {
         for (const license of officialLicenses) {
             try {
                 const licenseData = await _loadLicenseJSON(license.url);
-                if (licenseData.name) {
+                if (licenseData.name && !isRemovedDomain(licenseData.name)) {
                     dynamicDomains[licenseData.name.toLowerCase()] = new Domain(licenseData);
                 }
             } catch (error) {
@@ -357,20 +358,20 @@ const getSupportedDomains = (licenses = null) => {
         if (licenseList && licenseList.length > 0) {
             const dynamicDomains = {};
             for (const license of licenseList) {
-                if (license && license.name) {
+                if (license && license.name && !isRemovedDomain(license.name)) {
                     dynamicDomains[license.name.toLowerCase()] = new Domain(license);
                 }
             }
             if (Object.keys(dynamicDomains).length > 0) {
                 saveCache(dynamicDomains);
-                return { ...SUPPORTED_DOMAINS, ...dynamicDomains };
+                return omitRemovedDomain({ ...SUPPORTED_DOMAINS, ...dynamicDomains });
             }
         }
 
         // Fall back to cache when no licenses provided
         const cachedDomains = loadCache();
         if (cachedDomains) {
-            return { ...SUPPORTED_DOMAINS, ...cachedDomains };
+            return omitRemovedDomain({ ...SUPPORTED_DOMAINS, ...cachedDomains });
         }
 
         // If no cache and no licenses provided, trigger async fetch in background
@@ -383,7 +384,7 @@ const getSupportedDomains = (licenses = null) => {
         console.warn("Error loading dynamic domains:", error.message);
     }
 
-    return SUPPORTED_DOMAINS;
+    return omitRemovedDomain(SUPPORTED_DOMAINS);
 };
 
 const isWalrusStorageSupported = (domain, app) => {

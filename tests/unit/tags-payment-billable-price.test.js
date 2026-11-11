@@ -29,8 +29,6 @@ jest.mock("../../Repositories/Tags/modules/qr-zelfproof-extractor.module", () =>
 
 const { roundBillableUsdPrice } = require("../../Repositories/Tags/modules/tags-payment.module");
 
-const { parseUnits, formatEther } = require("ethers");
-
 describe("roundBillableUsdPrice", () => {
     it("rounds noisy floating-point values to the nearest cent", () => {
         expect(roundBillableUsdPrice(0.3999999999999976)).toBe(0.4);
@@ -43,22 +41,3 @@ describe("roundBillableUsdPrice", () => {
     });
 });
 
-describe("BDAG wei precision via string fallback price", () => {
-    const WAD = BigInt(10) ** BigInt(18);
-
-    it("produces exact 0.4 BDAG when billableUsd=0.02 and tokenPrice='0.05' (string)", () => {
-        const usdScaled = parseUnits("0.02", 18);
-        const pxScaled = parseUnits("0.05", 18);
-        const wei = (usdScaled * WAD) / pxScaled;
-        expect(formatEther(wei)).toBe("0.4");
-    });
-
-    it("would produce 0.399999999999999976 with a float 0.05 through toFixed(18)", () => {
-        const badStr = (0.05).toFixed(18).replace(/\.?0+$/, "");
-        expect(badStr).toBe("0.050000000000000003");
-        const usdScaled = parseUnits("0.02", 18);
-        const pxScaled = parseUnits(badStr, 18);
-        const wei = (usdScaled * WAD) / pxScaled;
-        expect(formatEther(wei)).toBe("0.399999999999999976");
-    });
-});

@@ -30,8 +30,8 @@ So: **address display and “generate address” do not make send “almost done
 
 The send stack is **network-specific services + `BlockchainTransactionsService`**.
 
-- [`blockchain-transactions.service.ts`](verifik-wallet-extension/src/app/services/blockchain-transactions.service.ts) `sendTransaction` switches on `network` for: `ethereum`, `polygon`, `binance`, `avalanche`, `solana`, `bitcoin`, `stellar`, `sui`, `blockdag` — **no `polkadot` / `kusama`**.
-- [`send-currency.component.ts`](verifik-wallet-extension/src/app/send-currency/send-currency.component.ts) `isTokenSendable` and `onTokenClick` only wire ETH-family, Solana, BTC, Sui, Stellar, BlockDAG, etc. — **no DOT/KSM** branches; balances for send come from `getAddressData` / `processTokensFromResponse` (Polkadot assets must appear in that pipeline or be added via a dedicated balance fetch).
+- [`blockchain-transactions.service.ts`](verifik-wallet-extension/src/app/services/blockchain-transactions.service.ts) `sendTransaction` switches on `network` for: `ethereum`, `polygon`, `binance`, `avalanche`, `solana`, `bitcoin`, `stellar`, `sui` — **no `polkadot` / `kusama`**.
+- [`send-currency.component.ts`](verifik-wallet-extension/src/app/send-currency/send-currency.component.ts) `isTokenSendable` and `onTokenClick` only wire ETH-family, Solana, BTC, Sui, Stellar, etc. — **no DOT/KSM** branches; balances for send come from `getAddressData` / `processTokensFromResponse` (Polkadot assets must appear in that pipeline or be added via a dedicated balance fetch).
 - There are **no** Substrate dependencies in the extension today (contrast: `ethers`, `bitcoinjs`, Solana, Stellar, Sui, etc.).
 
 ## Crypto alignment: you are not starting from zero

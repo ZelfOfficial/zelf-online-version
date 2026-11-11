@@ -36,7 +36,7 @@ For a test file that expects another port, export that same `PORT` before starti
 - Integration tests: `npm run test:integration`
 - End-to-end tests: `npm run test:e2e`
 - Focused integration checks: `npm run test:lease`, `npm run test:search-tag`, `npm run test:authentication`
-- Ops scripts: `npm run audit:ipfs-pay-balances`, `npm run repair:blockdag-nft-index`, `npm run deploy:checkout-avax`
+- Ops scripts: `npm run audit:ipfs-pay-balances`, `npm run deploy:checkout-avax`
 
 ## Test requirements
 
@@ -56,11 +56,6 @@ For a test file that expects another port, export that same `PORT` before starti
 
 - Check `Repositories/Tags/` plus related integration tests under `tests/integration/`.
 - Use `config/0012589021.json` when a biometric payload is required in tests.
-
-### BlockDAG and NFT flows
-
-- Check `Repositories/BlockDAG/`, especially the public/protected route split and the smart-contract folder under `Repositories/BlockDAG/smart-contracts/`.
-- Relevant maintenance scripts include `npm run repair:blockdag-nft-index`.
 
 ### Vault Legacy (inheritance plans)
 

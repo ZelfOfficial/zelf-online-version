@@ -1,4 +1,5 @@
 const config = require("../../../Core/config");
+const { stripNetworkMap, stripRemovedPayment } = require("../../../Core/removed-blockdag");
 /**
  * Domain Class
  *
@@ -91,6 +92,9 @@ class Domain {
 
         /** Optional second document URL (official license JSON on IPFS); not exposed in toJSON */
         this.themeSettingsUrl = typeof domainData.themeSettingsUrl === "string" ? domainData.themeSettingsUrl : "";
+
+        this.tags.payment = stripRemovedPayment(this.tags.payment);
+        if (this.tags.wallet) this.tags.wallet.networks = stripNetworkMap(this.tags.wallet.networks);
     }
 
     /**

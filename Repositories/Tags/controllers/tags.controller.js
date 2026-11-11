@@ -14,7 +14,7 @@ const TagWalletBalancesModule = require("../modules/tag-wallet-balances.module")
  * Keep full pin name (e.g. user.zelfpay) for IPFS lookup; middleware only supplies registry TLD + local name.
  * @param {string|undefined} rawTagName - tagName from query/body
  * @param {string|null|undefined} extractedName
- * @param {string|null|undefined} extractedDomain - registry domain (zelf, bdag, …)
+ * @param {string|null|undefined} extractedDomain - registry domain (zelf, avax, …)
  */
 const resolveFullTagNameForRequest = (rawTagName, extractedName, extractedDomain) => {
     const raw = rawTagName != null && rawTagName !== "" ? String(rawTagName).trim() : "";

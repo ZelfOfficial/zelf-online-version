@@ -8,8 +8,8 @@ const bitcoinModule = require("../../bitcoin/modules/bitcoin-scrapping.module");
 const ETHModule = require("../../etherscan/modules/etherscan-scrapping.module");
 const solanaModule = require("../../Solana/modules/solana-scrapping.module");
 const AvalancheModule = require("../../Avalanche/modules/avalanche-scrapping.module");
-const BlockDAGModule = require("../../BlockDAG/modules/blockdag.module");
 const { sendCustomEmail } = require("../../../Core/mailgun");
+const { isRemovedChain, isRemovedDomain, unsupportedChainError, unsupportedDomainError } = require("../../../Core/removed-blockdag");
 const { buildMetadata, ensureZelfProofQRCode, storeInIPFS, storeInWalrus, storeInArweave } = require("./tags-payment.module");
 const { parseTagPayAmount, coerceInitiatedAtUnix, filterSessionInboundTransactions } = require("./tag-pay-session-tx.util");
 const { verifySmartContractPayment, throwPaymentConfirmationTagNotFound } = require("./tag-smart-contract-payment.module");
@@ -30,6 +30,9 @@ const LicenseModule = require("../../License/modules/license.module");
  * @param {string} token
  */
 const verifyPaymentConfirmation = async (tagName, domain, network, token) => {
+    if (isRemovedDomain(domain)) throw unsupportedDomainError();
+    if (isRemovedChain(network)) throw unsupportedChainError();
+
     const tokenDecoded = jwt.verify(token, config.JWT_SECRET);
 
     const domainConfig = getDomainConfig(domain);
@@ -59,7 +62,6 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token) => {
         SOL: tokenDecoded.paymentAddress.solanaAddress,
         BTC: tokenDecoded.paymentAddress.btcAddress,
         AVAX: tokenDecoded.paymentAddress.avalancheAddress || tokenDecoded.paymentAddress.ethAddress,
-        BDAG: tokenDecoded.paymentAddress?.blockdagAddress || tokenDecoded.paymentAddress?.ethAddress,
     };
 
     const paymentConfirmation = await confirmPayUniqueAddress(network, addressMapping[network], amountToPay, { initiatedAtUnix });
@@ -254,58 +256,6 @@ const isAvalanchePaymentConfirmed = async (address, amountToPay, initiatedAtUnix
 };
 
 /**
- * Check if BlockDAG payment is confirmed
- * @param {string} address
- * @param {number} amountToPay
- * @returns {Promise<Object>}
- */
-const isBlockDAGPaymentConfirmed = async (address, amountToPay, initiatedAtUnix) => {
-    const amountNum = parseTagPayAmount(amountToPay);
-    if (amountNum == null) {
-        return {
-            confirmed: false,
-            amountReceived: 0,
-            amountToPay,
-            checkedFactor: "invalid_amount",
-        };
-    }
-    try {
-        const response = await BlockDAGModule.getAddress({ address });
-
-        if (response?.error) return false;
-
-        const numericBalance = Number(response?.balance ?? 0);
-
-        if (!Number.isNaN(numericBalance) && numericBalance <= amountNum) {
-            return {
-                confirmed: false,
-                amountReceived: 0,
-                amountToPay: amountNum,
-                transactions: response?.transactions,
-                balance: response?.balance,
-                checkedFactor: "balance",
-            };
-        }
-
-        const sessionTxs = filterSessionInboundTransactions(response?.transactions, initiatedAtUnix);
-        const amountReceived = sessionTxs.reduce((sum, tx) => sum + Number(tx.amount), 0);
-
-        return {
-            confirmed: amountReceived >= amountNum,
-            amountReceived,
-            amountToPay: amountNum,
-            transactions: response?.transactions,
-            balance: response?.balance,
-            checkedFactor: "transactions",
-        };
-    } catch (error) {
-        console.error(error);
-    }
-
-    return false;
-};
-
-/**
  * checkout BTC comparison
  * @param {String} address
  * @param {Number} amountDetected
@@ -340,13 +290,13 @@ const isBTCPaymentConfirmed = async (address, zelfNamePrice) => {
 };
 
 const confirmPayUniqueAddress = async (network, address, amountToPay, options = {}) => {
+    if (isRemovedChain(network)) throw unsupportedChainError();
     const { initiatedAtUnix } = options;
     const map = {
         ETH: isETHPaymentConfirmed,
         SOL: isSolanaPaymentConfirmed,
         BTC: isBTCPaymentConfirmed,
         AVAX: isAvalanchePaymentConfirmed,
-        BDAG: isBlockDAGPaymentConfirmed,
     };
 
     try {
@@ -872,6 +822,8 @@ const claimReferralReward = async (tagName, domain, friendTagName, friendDomain,
     const friendRecord = await _findReferralRecordInStorage(referralTagName, friendFullTagName, friendDomain, rewardType, authUser);
 
     const normalizedDomain = (domain || "").replace(/^\./, "").trim().toLowerCase();
+
+    if (isRemovedDomain(normalizedDomain) || isRemovedDomain(friendDomain)) throw unsupportedDomainError();
 
     const domainConfig = getDomainConfig(normalizedDomain);
 

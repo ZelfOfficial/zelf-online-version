@@ -115,6 +115,14 @@ const validateTagRequest = async ({ ctx, payload }) => {
     const domainValidation = await validateDomainAndName(extractedDomain, name);
 
     if (!domainValidation.valid) {
+        if (domainValidation.status === 400) {
+            ctx.status = 400;
+            ctx.body = {
+                message: domainValidation.code || domainValidation.error,
+                code: domainValidation.code || domainValidation.error,
+            };
+            return null;
+        }
         ctx.status = 409;
         ctx.body = { validationError: domainValidation.error };
         return null;

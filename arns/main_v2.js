@@ -5,7 +5,6 @@
 		const isLocalhost = window.location.hostname === "localhost";
 
 		const randomlocalhosts = [
-			"john4_bdag_zelf.arweave.net",
 			"jumitrmo_zelf.arweave.net",
 			"jumitrmo22_avax_zelf.arweave.net",
 		];

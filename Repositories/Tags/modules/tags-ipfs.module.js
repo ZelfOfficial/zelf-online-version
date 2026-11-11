@@ -1,6 +1,7 @@
 const IPFS = require("../../../Core/ipfs");
 const config = require("../../../Core/config");
 const { getDomainConfig } = require("../config/supported-domains");
+const { isRemovedDomain, unsupportedDomainError } = require("../../../Core/removed-blockdag");
 const { generateStorageKey } = require("./domain-registry.module");
 const { mergeAddressKeyvaluesIntoPublicData } = require("./tags-addresses.module");
 
@@ -90,9 +91,11 @@ const _formatRecord = (item) => {
 	}
 
 	if (formattedResult.publicData?.ethAddress) {
-		formattedResult.publicData.blockDAGAddress = formattedResult.publicData.ethAddress;
-
 		formattedResult.publicData.avalancheAddress = formattedResult.publicData.ethAddress;
+	}
+
+	if (formattedResult.publicData?.blockDAGAddress) {
+		delete formattedResult.publicData.blockDAGAddress;
 	}
 
 	// Legacy: historical IPFS payloads stored Coinbase Commerce checkout JSON as `coinBase`.
@@ -125,7 +128,7 @@ const _formatSearchResults = (result) => {
  * True if a pin belongs to the licensed domain. Metadata `domain` is set on many
  * pins but `.zelfpay` / similar often omit it while `name` / zelfName carry the suffix.
  * @param {Object} row - formatted record from _formatRecord
- * @param {string} domainLower - e.g. "zelf", "bdag"
+ * @param {string} domainLower - e.g. "zelf", "avax"
  */
 const _rowBelongsToDomain = (row, domainLower) => {
 	const metaDomain = String(row.publicData?.domain || "").toLowerCase();
@@ -229,6 +232,8 @@ const unPinFiles = async (ids = []) => {
  */
 const searchByDomain = async (params, authUser) => {
 	const { domain, limit, pageOffset, name } = params;
+
+	if (isRemovedDomain(domain)) throw unsupportedDomainError();
 
 	const domainConfig = getDomainConfig(domain);
 
