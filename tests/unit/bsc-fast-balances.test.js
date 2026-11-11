@@ -236,10 +236,23 @@ describe("GET /bsc/address/:id fast path", () => {
 	const load = ({ rpcDelay = 50, txDelay = 10, txList = [], rpcFails = false } = {}) => {
 		jest.resetModules();
 		process.env.BSC_TX_GRACE_MS = "300";
+		process.env.BSCSCAN_API_KEY = "test-bscscan-key";
 		const calls = mockAxios(async (url) => {
-			if (url.includes("oklink")) {
+			if (String(url).includes("bscscan.com") || String(url).includes("etherscan.io")) {
 				await sleep(txDelay);
-				return { code: "0", data: { hits: txList } };
+				return {
+					status: "1",
+					result: txList.map((tx) => ({
+						hash: tx.hash,
+						from: tx.from,
+						to: tx.to,
+						value: String(Math.round(Number(tx.value || 0) * 1e18)),
+						timeStamp: String(tx.blocktime || 0),
+						blockNumber: String(tx.blockHeight || 0),
+						gasUsed: "21000",
+						gasPrice: "1000000000",
+					})),
+				};
 			}
 			if (url.includes("nodereal")) return { data: "0x0" };
 			return {};
@@ -271,7 +284,10 @@ describe("GET /bsc/address/:id fast path", () => {
 		return { Module: require(MODULE_PATH), getBalancesInSingleCall, calls };
 	};
 
-	afterEach(() => delete process.env.BSC_TX_GRACE_MS);
+	afterEach(() => {
+		delete process.env.BSC_TX_GRACE_MS;
+		delete process.env.BSCSCAN_API_KEY;
+	});
 
 	it("keeps the response shape the extension reads", async () => {
 		const { Module } = load();

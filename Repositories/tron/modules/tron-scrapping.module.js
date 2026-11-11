@@ -182,64 +182,6 @@ const getAddress = async (query) => {
 const getTokens = async (params, query) => {
 	try {
 		const { address } = params;
-		const t = Date.now();
-
-		// Use OKLink API for TRC20 tokens
-		const url = `https://www.oklink.com/api/explorer/v2/tron/addresses/${address}/tokens?offset=0&limit=${query.show || "100"}&t=${t}`;
-
-		const { data } = await axios.get(url, {
-			httpsAgent: agent,
-			timeout: 5000,
-			validateStatus: function (status) {
-				return status < 500;
-			},
-			headers: {
-				"X-Apikey": get_ApiKey().getApiKey(),
-				"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
-			},
-		});
-
-		if ((data.code === "0" || data.code === 0) && data.data && data.data.hits) {
-			const rawTokens = await Promise.all(
-				data.data.hits
-					.filter((token) => token.symbol.toLowerCase() !== "trx") // Filter out TRX since we handle it separately
-					.map(async (token) => {
-						// Use our token pricing utility for accurate prices (especially stablecoins)
-						const correctedPrice = await getTokenPrice(token.symbol);
-						const amount = parseFloat(token.holdingAmount) / Math.pow(10, token.decimals || 6);
-
-						return {
-							address: token.contractAddress,
-							symbol: token.symbol,
-							name: token.tokenName,
-							decimals: token.decimals || 6,
-							amount: amount.toString(),
-							price: correctedPrice,
-							fiatBalance: amount * parseFloat(correctedPrice),
-							image: token.logo || "https://s2.coinmarketcap.com/static/img/coins/64x64/1958.png",
-							tokenType: "TRC20",
-							owner: address,
-							contractAddress: token.contractAddress,
-							rawAmount: token.holdingAmount,
-						};
-					})
-			);
-
-			// Calculate total fiat balance across all tokens
-			const totalFiatBalance = rawTokens.reduce((sum, token) => sum + (token.fiatBalance || 0), 0);
-
-			// Use standardized formatter for token holdings
-			const tokenHoldings = tronFormatter.formatTokenHoldings(rawTokens);
-
-			return {
-				balance: tokenHoldings.balance,
-				total: tokenHoldings.total,
-				totalFiatBalance: totalFiatBalance,
-				tokens: tokenHoldings.tokens,
-			};
-		}
-
-		// If OKLink fails, try TronScan API as fallback
 
 		try {
 			const fallbackResponse = await instance.get(`${TRONSCAN_API}/account/tokens?address=${address}&start=0&limit=${query.show || "100"}`);
@@ -310,27 +252,17 @@ const getTransactionsList = async (query) => {
 			price = priceData || "0.33";
 		} catch (priceError) {}
 
-		// Try OKLink API first
 		let response;
 		let source;
 
 		try {
-			const oklinkResponse = await getOKLinkTransactions(address, page, show, price);
-			if (oklinkResponse && oklinkResponse.transactions && oklinkResponse.transactions.length > 0) {
-				response = oklinkResponse;
-				source = "oklink";
+			const tronScanResponse = await getTronScanTransactions(address, page, show, price);
+			if (tronScanResponse && tronScanResponse.transactions && tronScanResponse.transactions.length > 0) {
+				response = tronScanResponse;
+				source = "tronscan";
 			}
-		} catch (oklinkError) {}
-
-		// Try TronScan API as fallback
-		if (!response) {
-			try {
-				const tronScanResponse = await getTronScanTransactions(address, page, show, price);
-				if (tronScanResponse && tronScanResponse.transactions && tronScanResponse.transactions.length > 0) {
-					response = tronScanResponse;
-					source = "tronscan";
-				}
-			} catch (tronScanError) {}
+		} catch (tronScanError) {
+			console.error("TronScan transactions failed:", tronScanError?.message || tronScanError);
 		}
 
 		// Add source to response if response exists

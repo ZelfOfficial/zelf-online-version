@@ -157,36 +157,15 @@ describe("Base Blockscout history", () => {
 		expect(nativeCalls[1][1].params).toMatchObject({ block_number: 10, index: 1 });
 	});
 
-	it("falls back to OKLink when Blockscout times out", async () => {
+	it("returns an empty list when Blockscout times out and Etherscan has no rows", async () => {
 		axios.get.mockImplementation(async (url) => {
+			if (String(url).includes("oklink.com")) {
+				throw new Error("oklink should not be called");
+			}
 			if (String(url).includes("blockscout.com")) {
 				const error = new Error("timeout of 7000ms exceeded");
 				error.code = "ECONNABORTED";
 				throw error;
-			}
-			if (String(url).includes("oklink.com")) {
-				return {
-					status: 200,
-					data: {
-						code: "0",
-						data: {
-							total: 1,
-							hits: [
-								{
-									hash: "0x" + "b".repeat(64),
-									blockHeight: 5,
-									from: TEST_ADDRESS,
-									to: OTHER_ADDRESS,
-									value: "0.2",
-									blocktime: 1700000000,
-									method: "ETH transfer",
-									status: "0x1",
-									fee: "0.00001",
-								},
-							],
-						},
-					},
-				};
 			}
 			return { status: 200, data: { status: "0", message: "NOTOK", result: [] } };
 		});
@@ -194,8 +173,8 @@ describe("Base Blockscout history", () => {
 		const { getTransactionsList } = loadBaseModule();
 		const result = await getTransactionsList({ address: TEST_ADDRESS, page: "1", show: "10" });
 
-		expect(result.source).toBe("oklink");
-		expect(result.transactions[0]).toMatchObject({ asset: "ETH", fiatAmount: "500.00" });
+		expect(result.transactions).toEqual([]);
+		expect(axios.get.mock.calls.some(([url]) => String(url).includes("oklink.com"))).toBe(false);
 	});
 
 	it("returns a clean empty list when every source fails", async () => {

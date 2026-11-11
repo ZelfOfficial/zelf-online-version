@@ -394,11 +394,6 @@ const getTransactionsList = async (params) => {
                 return { ...buildListResponse(transactions, { page, show }), source: "etherscan_v2" };
             },
             async (timeout) => {
-                const oklinkResponse = await getEthereumTransactionsFromOkLink(address, page - 1, show, price, timeout);
-                if (!oklinkResponse?.transactions?.length) return null;
-                return { ...oklinkResponse, source: "oklink" };
-            },
-            async (timeout) => {
                 const bogotaUrl = process.env.MICROSERVICES_BOGOTA_URL || urlBase;
                 const bogotaToken = process.env.MICROSERVICES_BOGOTA_TOKEN || token;
                 if (!bogotaUrl || !bogotaToken) return null;

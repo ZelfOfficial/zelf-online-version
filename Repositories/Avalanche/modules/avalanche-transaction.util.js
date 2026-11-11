@@ -80,6 +80,24 @@ const mapRouteScanTransaction = (tx, address) => {
 	});
 };
 
+const mapEtherscanAccountTransaction = (tx, address) => {
+	const value = BigInt(tx.value || "0");
+	const functionName = String(tx.functionName || "").split("(")[0].trim();
+	const method = functionName || (value > 0n ? "Transfer" : "Contract Call");
+
+	return buildTransactionRow({
+		hash: tx.hash,
+		block: tx.blockNumber,
+		from: tx.from,
+		to: tx.to,
+		amount: weiToAvaxAmount(tx.value),
+		method,
+		traffic: inferTraffic(tx.from, tx.to, address),
+		txnFee: computeFeeAvax(tx.gasUsed, tx.gasPrice),
+		timestamp: Number(tx.timeStamp) || 0,
+	});
+};
+
 const mapGlacierTransaction = (entry, address) => {
 	const tx = entry.nativeTransaction || entry;
 	const value = BigInt(tx.value || "0");
@@ -106,6 +124,7 @@ module.exports = {
 	upstreamUnavailableError,
 	normalizeTransactionLimit,
 	mapOkLinkTransaction,
+	mapEtherscanAccountTransaction,
 	mapRouteScanTransaction,
 	mapGlacierTransaction,
 	isOkLinkSuccess,

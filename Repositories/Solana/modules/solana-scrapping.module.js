@@ -27,14 +27,13 @@ const resolveDefaultSourceAddress = async (params) => {
 		console.error("solana sourceA getAddress:", e?.message || e);
 	}
 
-	const solscanResponse = await solscan.getAddress(params);
-	if (!looksEmpty(solscanResponse)) {
-		return { response: solscanResponse, source: "solscan" };
-	}
-
-	const oklinkResponse = await oklink.getAddress(params);
-	if (!looksEmpty(oklinkResponse)) {
-		return { response: oklinkResponse, source: "oklink" };
+	try {
+		const solscanResponse = await solscan.getAddress(params);
+		if (!looksEmpty(solscanResponse)) {
+			return { response: solscanResponse, source: "solscan" };
+		}
+	} catch (e) {
+		console.error("solana solscan getAddress:", e?.message || e);
 	}
 
 	if (!looksEmpty(sourceAResult)) {
@@ -78,21 +77,12 @@ const getAddress = async (params) => {
 			response = await solscan.getAddress(params);
 			source = "solscan";
 			break;
-		case "oklink":
-			response = await oklink.getAddress(params);
-			source = "oklink";
-			if (looksEmpty(response)) {
-				try {
-					const saResult = await solanaSourceA.getAddress(params);
-					if (!looksEmpty(saResult)) {
-						response = saResult;
-						source = "sourceA";
-					}
-				} catch (e) {
-					console.error("solana sourceA getAddress:", e?.message || e);
-				}
-			}
+		case "oklink": {
+			const picked = await resolveDefaultSourceAddress(params);
+			response = picked.response;
+			source = picked.source;
 			break;
+		}
 		default: {
 			const picked = await resolveDefaultSourceAddress(params);
 			response = picked.response;
@@ -130,11 +120,19 @@ const getTokens = async (params, query) => {
 		}
 	}
 	try {
-		return await solanaSourceA.getTokens(params, query);
+		const tokens = await solanaSourceA.getTokens(params, query);
+		if (tokens) return tokens;
 	} catch (e) {
 		console.error("solana sourceA getTokens:", e?.message || e);
 	}
-	return (await solscan.getTokens(params, query)) || (await oklink.getTokens(params, query));
+	try {
+		const tokens = await solscan.getTokens(params, query);
+		if (tokens) return tokens;
+	} catch (e) {
+		console.error("solana solscan getTokens:", e?.message || e);
+	}
+	console.error("solana getTokens: providers returned no token list");
+	return { total: 0, balance: 0, fiatBalance: 0, tokens: [] };
 };
 
 const getTransaction = async (params, query) => {
@@ -210,11 +208,22 @@ const getTransactions = async (params, query) => {
 		}
 	}
 	try {
-		return await solanaSourceA.getTransactions(params, query);
+		const transactions = await solanaSourceA.getTransactions(params, query);
+		if (transactions) return transactions;
 	} catch (e) {
 		console.error("solana sourceA getTransactions:", e?.message || e);
 	}
-	return (await solscan.getTransfers(params, query)) || (await oklink.getTransactions(params, query));
+	try {
+		const transactions = await solscan.getTransfers(params, query);
+		if (transactions) return transactions;
+	} catch (e) {
+		console.error("solana solscan getTransactions:", e?.message || e);
+	}
+	console.error("solana getTransactions: providers returned no transaction list");
+	return {
+		pagination: { records: "0", pages: query?.page || 0, page: query?.page || 0 },
+		transactions: [],
+	};
 };
 
 function formatSolanaTransfers(transfers) {

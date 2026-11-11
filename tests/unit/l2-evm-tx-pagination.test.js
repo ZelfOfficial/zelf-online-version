@@ -95,7 +95,7 @@ describe("L2 EVM tx pagination (OP/ARB)", () => {
 		});
 
 		mockLadder.mockImplementation(async (providers) => {
-			expect(providers).toHaveLength(3);
+			expect(providers).toHaveLength(2);
 			return providers[0](4000, 11500);
 		});
 

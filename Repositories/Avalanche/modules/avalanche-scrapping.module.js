@@ -1,14 +1,11 @@
 const axios = require("axios");
 const moment = require("moment");
 const { generateRandomUserAgent } = require("../../../Core/helpers");
-const { get_ApiKey } = require("../../Solana/modules/oklink");
 const cheerio = require("cheerio");
 // Crear instancia axios con timeout
 const instance = axios.create({ timeout: 30000 });
 
-const https = require("https");
-
-const agent = new https.Agent({ rejectUnauthorized: true });
+const ROUTESCAN_ETHERSCAN_API = "https://api.routescan.io/v2/network/mainnet/evm/43114/etherscan/api";
 
 /**
  * Obtiene el balance de una direcci?n en Avalanche
@@ -17,20 +14,71 @@ const agent = new https.Agent({ rejectUnauthorized: true });
 const config = require("../../../Core/config");
 const { formatEther } = require("ethers");
 const { getTickerPrice } = require("../../binance/modules/binance.module");
-const { mapRouteScanHolding } = require("./avalanche-balance.util");
+const { mapRouteScanHolding, mapRoutescanAddressToken } = require("./avalanche-balance.util");
 const {
-	upstreamUnavailableError,
 	normalizeTransactionLimit,
-	mapOkLinkTransaction,
+	mapEtherscanAccountTransaction,
 	mapRouteScanTransaction,
 	mapGlacierTransaction,
-	isOkLinkSuccess,
 	sortTransactions,
 } = require("./avalanche-transaction.util");
 
+const providerFailureText = (error) => {
+	const status = error?.response?.status;
+	const data = error?.response?.data;
+	const detail = typeof data === "string" ? data : data?.message || data?.result || data?.msg;
+	return String([status, detail, error?.message].filter((part) => part !== undefined && part !== null && part !== "").join(" "))
+		.replace(/apikey=[^&\s]+/gi, "apikey=redacted")
+		.slice(0, 300);
+};
+
+const routescanPageNumber = (page) => {
+	const parsed = parseInt(String(page ?? "0"), 10);
+	if (!Number.isFinite(parsed) || parsed < 0) return 1;
+	return parsed + 1;
+};
+
+const emptyTokenHoldings = () => ({ balance: "0", total: 0, tokens: [] });
+
+const avalancheRpcEndpoints = () =>
+	[...new Set([config.rpc?.chains?.avalanche?.rpcUrl, config.avalanche?.rpcUrl, "https://api.avax.network/ext/bc/C/rpc"].filter(Boolean))];
+
+const routescanAccount = async (params) => {
+	const response = await instance.get(ROUTESCAN_ETHERSCAN_API, {
+		params: { module: "account", ...params },
+		timeout: 8000,
+		validateStatus: (status) => status < 500,
+	});
+	if (response.status >= 400) {
+		const error = new Error(`routescan_http_${response.status}`);
+		error.response = { status: response.status, data: response.data };
+		throw error;
+	}
+	return response.data;
+};
+
+const isEtherscanEmpty = (data) => {
+	const result = data?.result;
+	if (Array.isArray(result) && result.length === 0) return true;
+	const text = `${typeof result === "string" ? result : ""} ${data?.message || ""}`;
+	return /no (transactions|records|tokens)/i.test(text);
+};
+
+const etherscanRows = (data, invalidCode) => {
+	if (String(data?.status) === "1" && Array.isArray(data?.result)) return data.result;
+	if (isEtherscanEmpty(data)) return [];
+	const detail = typeof data?.result === "string" ? data.result : data?.message || invalidCode;
+	throw new Error(String(detail).slice(0, 180));
+};
+
+const holdingsFromTokens = (tokens) => ({
+	balance: String(tokens.reduce((sum, token) => sum + Number(token.fiatBalance || 0), 0)),
+	total: tokens.length,
+	tokens,
+});
+
 const nativeBalance = async (address) => {
-    const endpoints = [...new Set([config.rpc?.chains?.avalanche?.rpcUrl, config.avalanche?.rpcUrl,
-        "https://api.avax.network/ext/bc/C/rpc"].filter(Boolean))];
+    const endpoints = avalancheRpcEndpoints();
     for (const endpoint of endpoints) {
         try {
             const { data } = await axios.post(endpoint,
@@ -46,24 +94,12 @@ const getBalance = async (params) => {
     const [quote, balance, tokenHoldingsResult, historyResult] = await Promise.all([
         getTickerPrice({ symbol: "AVAX" }).catch(() => ({ price: "0" })),
         nativeBalance(params.id),
-        getTokens(params, { show: "200" })
-            .then((value) => ({ ok: true, value }))
-            .catch((error) => {
-                console.warn("Avalanche token holdings unavailable:", error?.message || error);
-                return { ok: false, error };
-            }),
-        getTransactionsList({ id: params.id, page: "0", show: "100" })
-            .then((transactions) => ({ ok: true, value: { transactions, incomplete: false } }))
-            .catch((error) => {
-                console.warn("Avalanche transactions unavailable:", error?.message || error);
-                return { ok: false, error };
-            }),
+        loadTokens(params, { show: "200" }),
+        loadTransactions({ id: params.id, page: "0", show: "100" }),
     ]);
 
-    const tokenHoldings = tokenHoldingsResult.ok
-        ? tokenHoldingsResult.value
-        : { balance: "0", total: 0, tokens: [] };
-    const history = historyResult.ok ? historyResult.value : { transactions: [], incomplete: true };
+    const tokenHoldings = tokenHoldingsResult.value;
+    const history = { transactions: historyResult.value, incomplete: !historyResult.ok };
     const tokensFailed = !tokenHoldingsResult.ok;
     const transactionsFailed = !historyResult.ok;
     const partial = tokensFailed || transactionsFailed;
@@ -94,10 +130,10 @@ const getBalance = async (params) => {
         tokensFailed,
         transactionsFailed,
         ...(tokensFailed
-            ? { tokensError: tokenHoldingsResult.error?.message || "avalanche_tokens_unavailable" }
+            ? { tokensError: tokenHoldingsResult.error || "avalanche_tokens_unavailable" }
             : {}),
         ...(transactionsFailed
-            ? { transactionsError: historyResult.error?.message || "avalanche_transactions_unavailable" }
+            ? { transactionsError: historyResult.error || "avalanche_transactions_unavailable" }
             : {}),
     };
 };
@@ -116,10 +152,118 @@ const getTokensFromRouteScan = async (address) => {
     throw new Error("avalanche_holdings_pagination_incomplete");
 };
 
-const getTokens = async (params, query) => {
-    try { return await getTokensFromGlacier(params, query); }
-    catch { return getTokensFromRouteScan(params.id); }
+const getTokensFromRoutescanHoldings = async (address, query = {}) => {
+	const data = await routescanAccount({
+		action: "addresstokenbalance",
+		address,
+		page: routescanPageNumber(query.page),
+		offset: normalizeTransactionLimit(query.show, 100),
+	});
+	return holdingsFromTokens(etherscanRows(data, "routescan_token_list_invalid").map(mapRoutescanAddressToken).filter(Boolean));
 };
+
+const tokenQuantityFromBalancePayload = (data) => {
+	const result = data?.result;
+	return typeof result === "string" && /^\d+$/.test(result) ? result : null;
+};
+
+const tokenBalanceViaRpc = async (contractAddress, walletAddress) => {
+	const data = `0x70a08231${String(walletAddress).toLowerCase().replace(/^0x/, "").padStart(64, "0")}`;
+	for (const endpoint of avalancheRpcEndpoints()) {
+		try {
+			const { data: body } = await axios.post(
+				endpoint,
+				{ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: contractAddress, data }, "latest"] },
+				{ timeout: 8000 }
+			);
+			const hex = body?.result;
+			if (typeof hex === "string" && /^0x[0-9a-f]+$/i.test(hex)) return BigInt(hex).toString();
+		} catch {
+			/* Try the next configured Avalanche RPC. */
+		}
+	}
+	return null;
+};
+
+const getTokensFromRoutescanTransfers = async (address, query = {}) => {
+	const data = await routescanAccount({
+		action: "tokentx",
+		address,
+		page: routescanPageNumber(query.page),
+		offset: normalizeTransactionLimit(query.show, 100),
+		startblock: 0,
+		endblock: 99999999,
+		sort: "desc",
+	});
+	const unique = [];
+	const seen = new Set();
+	for (const row of etherscanRows(data, "routescan_tokentx_invalid")) {
+		const key = String(row?.contractAddress || "").toLowerCase();
+		if (!key || seen.has(key)) continue;
+		seen.add(key);
+		unique.push(row);
+		if (unique.length >= 20) break;
+	}
+
+	const tokens = [];
+	for (const row of unique) {
+		let quantity = null;
+		try {
+			quantity = tokenQuantityFromBalancePayload(
+				await routescanAccount({
+					action: "tokenbalance",
+					contractaddress: row.contractAddress,
+					address,
+					tag: "latest",
+				})
+			);
+		} catch (error) {
+			console.warn("Avalanche Routescan tokenbalance failed:", providerFailureText(error));
+		}
+		if (!quantity) quantity = await tokenBalanceViaRpc(row.contractAddress, address);
+		if (!quantity || quantity === "0") continue;
+		const mapped = mapRoutescanAddressToken({
+			TokenAddress: row.contractAddress,
+			TokenName: row.tokenName,
+			TokenSymbol: row.tokenSymbol,
+			TokenQuantity: quantity,
+			TokenDivisor: row.tokenDecimal,
+		});
+		if (mapped) tokens.push(mapped);
+	}
+	return holdingsFromTokens(tokens);
+};
+
+const loadTokens = async (params, query = {}) => {
+	try {
+		return { ok: true, value: await getTokensFromRoutescanHoldings(params.id, query) };
+	} catch (error) {
+		console.warn("Avalanche Routescan token list failed:", providerFailureText(error));
+	}
+
+	try {
+		const fromTransfers = await getTokensFromRoutescanTransfers(params.id, query);
+		if (fromTransfers.tokens.length) return { ok: true, value: fromTransfers };
+	} catch (error) {
+		console.warn("Avalanche Routescan token transfers failed:", providerFailureText(error));
+	}
+
+	try {
+		return { ok: true, value: await getTokensFromGlacier(params, query) };
+	} catch (error) {
+		console.warn("Avalanche Glacier token list failed:", providerFailureText(error));
+	}
+
+	try {
+		return { ok: true, value: await getTokensFromRouteScan(params.id) };
+	} catch (error) {
+		console.warn("Avalanche RouteScan holdings failed:", providerFailureText(error));
+	}
+
+	return { ok: false, error: "avalanche_tokens_unavailable", value: emptyTokenHoldings() };
+};
+
+const getTokens = async (params, query) => (await loadTokens(params, query)).value;
 
 /**
  * Obtiene los tokens ERC20 de una direcci?n
@@ -184,26 +328,17 @@ const getTokensFromGlacier = async (params, query) => {
 	};
 };
 
-const getTransactionsListFromOkLink = async (params, limit) => {
-	const t = Date.now();
-	const { id, page } = params;
-
-	const url = `https://www.oklink.com/api/explorer/v2/avaxc/addresses/${id}/transactionsByClassfy/condition?offset=${page || "0"}&limit=${limit}&address=${id}&nonzeroValue=false&t=${t}`;
-
-	const { data } = await axios.get(url, {
-		timeout: 8000,
-		httpsAgent: agent,
-		headers: {
-			"X-Apikey": get_ApiKey().getApiKey(),
-			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
-		},
+const getTransactionsListFromRoutescanEtherscan = async (params, limit) => {
+	const data = await routescanAccount({
+		action: "txlist",
+		address: params.id,
+		startblock: 0,
+		endblock: 99999999,
+		page: routescanPageNumber(params.page),
+		offset: limit,
+		sort: "desc",
 	});
-
-	if (!isOkLinkSuccess(data)) {
-		throw new Error(`oklink_transactions_unavailable_${data?.code || "invalid"}`);
-	}
-
-	return sortTransactions(data.data.hits.map((tx) => mapOkLinkTransaction(tx, id)));
+	return sortTransactions(etherscanRows(data, "routescan_txlist_invalid").map((tx) => mapEtherscanAccountTransaction(tx, params.id)));
 };
 
 const getTransactionsListFromRouteScan = async (params, limit) => {
@@ -239,33 +374,36 @@ const getTransactionsListFromGlacier = async (params, limit) => {
 };
 
 /**
- * Obtiene las transacciones de una direcci?n
- * @param {Object} params - Contiene el id (direcci?n)
- * @param {Object} query - Par?metros de paginaci?n
+ * Historial nativo de C-Chain. Routescan (API compatible con Etherscan) es la fuente.
+ * Si el proveedor falla, se usa el listado de RouteScan y luego Glacier. Un fallo total
+ * devuelve [] para que la extensión no reciba 500.
  */
-const getTransactionsList = async (params) => {
+const loadTransactions = async (params) => {
 	const limit = normalizeTransactionLimit(params.show);
 	const queryParams = { ...params, show: String(limit) };
 
 	try {
-		return await getTransactionsListFromOkLink(queryParams, limit);
-	} catch (oklinkErr) {
-		console.warn("Avalanche OKLink transactions failed:", oklinkErr?.message || oklinkErr);
-
-		try {
-			return await getTransactionsListFromRouteScan(queryParams, limit);
-		} catch (routeScanErr) {
-			console.warn("Avalanche RouteScan transactions failed:", routeScanErr?.message || routeScanErr);
-
-			try {
-				return await getTransactionsListFromGlacier(queryParams, limit);
-			} catch (glacierErr) {
-				console.error("Avalanche Glacier transactions failed:", glacierErr?.message || glacierErr);
-				throw upstreamUnavailableError("avalanche_transactions_unavailable");
-			}
-		}
+		return { ok: true, value: await getTransactionsListFromRoutescanEtherscan(queryParams, limit) };
+	} catch (error) {
+		console.warn("Avalanche Routescan transactions failed:", providerFailureText(error));
 	}
+
+	try {
+		return { ok: true, value: await getTransactionsListFromRouteScan(queryParams, limit) };
+	} catch (error) {
+		console.warn("Avalanche RouteScan transactions failed:", providerFailureText(error));
+	}
+
+	try {
+		return { ok: true, value: await getTransactionsListFromGlacier(queryParams, limit) };
+	} catch (error) {
+		console.warn("Avalanche Glacier transactions failed:", providerFailureText(error));
+	}
+
+	return { ok: false, error: "avalanche_transactions_unavailable", value: [] };
 };
+
+const getTransactionsList = async (params) => (await loadTransactions(params)).value;
 
 /**
  * Obtiene detalles de una transacci?n espec?fica

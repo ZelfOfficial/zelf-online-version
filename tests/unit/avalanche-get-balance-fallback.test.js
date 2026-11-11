@@ -40,7 +40,14 @@ describe("avalanche getBalance upstream fallbacks", () => {
             }
             return { data: { code: "0", data: { hits: [] } } };
         });
-        mockInstanceGet.mockImplementation(async (url) => {
+        mockInstanceGet.mockImplementation(async (url, options) => {
+            const action = options?.params?.action;
+            if (action === "txlist") {
+                return { data: { status: "0", message: "No transactions found", result: "No transactions found" } };
+            }
+            if (action === "addresstokenbalance" || action === "tokentx" || action === "tokenbalance") {
+                throw new Error("routescan_tokens_down");
+            }
             if (String(url).includes("glacier-api.avax.network")) {
                 throw { response: { status: 403 } };
             }
@@ -48,9 +55,6 @@ describe("avalanche getBalance upstream fallbacks", () => {
                 throw new Error("routescan_holdings_unavailable");
             }
             throw new Error(`unexpected url ${url}`);
-        });
-        mockAxiosGet.mockResolvedValue({
-            data: { code: "0", data: { hits: [] } },
         });
 
         const result = await getBalance({ id: ADDRESS });

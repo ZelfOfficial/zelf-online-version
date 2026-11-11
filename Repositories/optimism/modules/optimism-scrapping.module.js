@@ -16,13 +16,13 @@ const {
 	fetchTransactionsFromBlockscout,
 	pickBlockscoutCursor,
 	runTransactionProviderLadder,
-	runTransactionProviderRace,
 	TX_LIST_DEADLINE_MS,
 	TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS,
 	DEFAULT_TX_TIMEOUT_MS,
 	formatUtcIsoDate,
 	isTimeoutError,
 } = require("../../etherscan/modules/evm-transaction-list.util");
+const { fetchBlockscoutErc20Items, mapBlockscoutErc20Item } = require("../../etherscan/modules/blockscout-token-list.util");
 
 const OPTIMISM_CHAIN_ID = 10;
 const OPTIMISM_BLOCKSCOUT_BASE = process.env.OPTIMISM_BLOCKSCOUT_URL || "https://explorer.optimism.io";
@@ -143,7 +143,7 @@ const getAddress = async (query) => {
 
 				const transactionsData = await Promise.race([transactionDataPromise, transactionTimeoutPromise]);
 				transactions = transactionsData.transactions || [];
-				console.log(`Found ${transactions.length} transactions via OKLink API`);
+				console.log(`Found ${transactions.length} transactions`);
 			} catch (error) {
 				console.log("Transaction fetch failed:", error.message);
 				transactions = [
@@ -203,60 +203,28 @@ const getAddress = async (query) => {
 /**
  * Get ERC20 tokens for an OP Mainnet address
  */
+const paginateTokens = (tokens, query) => {
+	const limit = Math.max(1, parseInt(query?.show || "100", 10) || 100);
+	const page = Math.max(0, parseInt(query?.page || "0", 10) || 0);
+	return tokens.slice(page * limit, (page + 1) * limit);
+};
+
 const getTokens = async (params, query) => {
 	try {
 		const { address } = params;
-		const t = Date.now();
-
-		// Use OKLink API for ERC20 tokens
-		const url = `https://www.oklink.com/api/explorer/v2/optimism/addresses/${address}/tokens?offset=0&limit=${query.show || "100"}&t=${t}`;
-
-		const { data } = await axios.get(url, {
-			httpsAgent: agent,
-			timeout: 5000,
-			validateStatus: function (status) {
-				return status < 500;
-			},
-			headers: {
-				"X-Apikey": get_ApiKey().getApiKey(),
-				"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
-			},
+		const items = await fetchBlockscoutErc20Items((url, options) => instance.get(url, options), {
+			baseUrl: OPTIMISM_BLOCKSCOUT_BASE,
+			address,
 		});
-
-		if ((data.code === "0" || data.code === 0) && data.data && data.data.hits) {
-			const rawTokens = data.data.hits.map((token) => ({
-				address: token.contractAddress,
-				symbol: token.symbol,
-				name: token.tokenName,
-				decimals: token.decimals || 18,
-				amount: (parseFloat(token.holdingAmount) / Math.pow(10, token.decimals || 18)).toString(),
-				price: token.price || "0",
-				fiatBalance: (parseFloat(token.holdingAmount) * parseFloat(token.price || "0")) / Math.pow(10, token.decimals || 18),
-				image: token.logo || "https://s2.coinmarketcap.com/static/img/coins/64x64/11840.png",
-				tokenType: "ERC20",
-				owner: address,
-				contractAddress: token.contractAddress,
-				rawAmount: token.holdingAmount,
-			}));
-
-			// Calculate total fiat balance across all tokens
-			const totalFiatBalance = rawTokens.reduce((sum, token) => sum + (token.fiatBalance || 0), 0);
-
-			// Use standardized formatter for token holdings
-			const tokenHoldings = optimismFormatter.formatTokenHoldings(rawTokens);
-
-			return {
-				balance: tokenHoldings.balance,
-				total: tokenHoldings.total,
-				totalFiatBalance: totalFiatBalance,
-				tokens: tokenHoldings.tokens,
-			};
-		}
+		const rawTokens = paginateTokens(items.map(mapBlockscoutErc20Item).filter(Boolean), query);
+		const tokenHoldings = optimismFormatter.formatTokenHoldings(rawTokens);
+		const totalFiatBalance = rawTokens.reduce((sum, token) => sum + (token.fiatBalance || 0), 0);
 
 		return {
-			balance: "0",
-			total: 0,
-			tokens: [],
+			balance: tokenHoldings.balance,
+			total: tokenHoldings.total,
+			totalFiatBalance,
+			tokens: tokenHoldings.tokens,
 		};
 	} catch (error) {
 		console.error("Error getting Optimism tokens:", error.message || "Unknown error");
@@ -285,42 +253,14 @@ const getTransactionsList = async (query) => {
 		}
 
 		const pageNumber = normalizePage(page === "0" ? 1 : page);
-		const blockscoutCursor = pickBlockscoutCursor(query);
-		let ladderResult = null;
+		const blockscoutProvider = async (hopTimeout, walkDeadlineMs) =>
+			getOptimismBlockscoutTransactions(address, query, show, price, hopTimeout, walkDeadlineMs);
+		const optimismScanProvider = async (hopTimeout) => getOptimismScanTransactions(address, page, show, price, hopTimeout);
 
-		if (pageNumber === 1) {
-			ladderResult = await runTransactionProviderRace(
-				[
-					async (hopTimeout, walkDeadlineMs) =>
-						getOKLinkTransactions(address, page, show, price, hopTimeout),
-					async (hopTimeout, walkDeadlineMs) =>
-						getOptimismBlockscoutTransactions(address, query, show, price, hopTimeout, walkDeadlineMs),
-				],
-				{ deadlineMs, perProviderTimeoutMs: TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS }
-			);
-		}
-
-		if (!ladderResult?.transactions?.length) {
-			const blockscoutProvider = async (hopTimeout, walkDeadlineMs) =>
-				getOptimismBlockscoutTransactions(address, query, show, price, hopTimeout, walkDeadlineMs);
-			const oklinkProvider = async (hopTimeout) => getOKLinkTransactions(address, page, show, price, hopTimeout);
-			const optimismScanProvider = async (hopTimeout) =>
-				getOptimismScanTransactions(address, page, show, price, hopTimeout);
-
-			const ladderProviders =
-				pageNumber > 1 && !blockscoutCursor
-					? [blockscoutProvider, optimismScanProvider, oklinkProvider]
-					: [
-							...(pageNumber === 1 ? [] : [oklinkProvider]),
-							optimismScanProvider,
-							...(pageNumber === 1 ? [] : [blockscoutProvider]),
-						];
-
-			ladderResult = await runTransactionProviderLadder(ladderProviders, {
-				deadlineMs,
-				primaryProviderTimeoutMs: pageNumber === 1 ? undefined : TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS,
-			});
-		}
+		const ladderResult = await runTransactionProviderLadder([blockscoutProvider, optimismScanProvider], {
+			deadlineMs,
+			primaryProviderTimeoutMs: pageNumber === 1 ? TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS : undefined,
+		});
 
 		if (ladderResult) {
 			return ladderResult;

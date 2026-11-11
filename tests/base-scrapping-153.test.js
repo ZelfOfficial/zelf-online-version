@@ -21,8 +21,9 @@ async function runTests() {
 	assert.strictEqual(formattedWithFiatValue.asset, "ETH");
 	assert.ok(formattedWithFiatValue.date && formattedWithFiatValue.date !== "N/A");
 
-	// 2. Test Base getTransactionsList formats OKLink transactions with date, amount, fiatAmount, and asset
+	// 2. When Blockscout and BaseScan fail, history is an empty list and OKLink is not called.
 	const origAxiosGet = axios.get;
+	const origAxiosPost = axios.post;
 	const origAxiosCreate = axios.create;
 	const origGetTickerPrice = binanceModule.getTickerPrice;
 	try {
@@ -37,29 +38,12 @@ async function runTests() {
 				throw new Error("rpc disabled");
 			},
 		});
+		axios.post = async () => {
+			throw new Error("alchemy disabled");
+		};
 		axios.get = async (url) => {
-			if (url.includes("oklink.com/api/explorer/v2/base/addresses/")) {
-				return {
-					data: {
-						code: "0",
-						data: {
-							total: 1,
-							hits: [
-								{
-									hash: "0x" + "b".repeat(64),
-									blockHeight: 123456,
-									from: "0x75F766ae57E08C9470CCe2AC30dD2b6B009Fccde",
-									to: "0x6B4dd62800000000000000000000000000002d5C",
-									value: "0.1",
-									blocktime: 1759259709,
-									method: "ETH transfer",
-									status: "0x1",
-									fee: "0.00001",
-								},
-							],
-						},
-					},
-				};
+			if (String(url).includes("oklink.com")) {
+				throw new Error("oklink should not be called");
 			}
 			throw new Error("Unexpected URL: " + url);
 		};
@@ -72,26 +56,19 @@ async function runTests() {
 			show: "20",
 		});
 
-		assert.strictEqual(res.source, "oklink");
-		assert.strictEqual(res.transactions.length, 1);
-		const tx = res.transactions[0];
-		assert.strictEqual(tx.hash, "0x" + "b".repeat(64));
-		assert.strictEqual(tx.asset, "ETH");
-		assert.strictEqual(tx.traffic, "OUT");
-		assert.strictEqual(tx.fiatAmount, "250.00");
-		assert.strictEqual(Number(tx.amount), 0.1);
-		assert.ok(tx.date && tx.date !== "N/A", "Transaction must have a valid date string");
+		assert.deepStrictEqual(res.transactions, []);
+		assert.ok(!String(res.source || "").includes("oklink"));
 
-		// 3. Test empty result does not emit a fake 0x0000... placeholder transaction
-		axios.get = async () => ({ data: { code: "0", data: { total: 0, hits: [] } } });
 		const emptyRes = await baseModule.getTransactionsList({
 			address: "0x75F766ae57E08C9470CCe2AC30dD2b6B009Fccde",
 			page: "0",
 			show: "20",
 		});
 		assert.deepStrictEqual(emptyRes.transactions, []);
+		assert.ok(!JSON.stringify(emptyRes).includes("0x0000000000000000000000000000000000000000000000000000000000000000"));
 	} finally {
 		axios.get = origAxiosGet;
+		axios.post = origAxiosPost;
 		axios.create = origAxiosCreate;
 		binanceModule.getTickerPrice = origGetTickerPrice;
 	}
@@ -100,7 +77,7 @@ async function runTests() {
 }
 
 if (typeof test === "function") {
-	test("Base OKLink history keeps the standardized fields and omits placeholder rows", () => runTests());
+	test("Base history keeps standardized fields and omits placeholder rows", () => runTests());
 } else {
 	runTests().catch((err) => {
 		console.error(err);
