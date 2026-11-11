@@ -1,7 +1,8 @@
 /**
  * Legacy demo removal.
  * Demo routes answer 410, nothing schedules the demo retry loop,
- * and the real vault, wallet decrypt, presale, and Stripe routes still load.
+ * and the real vault, wallet decrypt, and presale receipt routes still load.
+ * Stripe checkout, session details, and webhooks answer 410.
  */
 
 const fs = require("fs");
@@ -37,7 +38,6 @@ const WalletMiddleware = require("../../Repositories/Wallet/middlewares/wallet.m
 const loadPaymentRoutes = () => {
     const script = `
         process.env.SOLANA_TOKEN_MINT_ADDRESS = process.env.SOLANA_TOKEN_MINT_ADDRESS || "So11111111111111111111111111111111111111112";
-        process.env.STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "sk_test_123";
         const Koa = require("koa");
         const Router = require("@koa/router");
         const { koaBody } = require("koa-body");
@@ -65,6 +65,7 @@ const loadPaymentRoutes = () => {
                 presaleStatus: presale.status,
                 presaleError: presale.body && presale.body.error,
                 detailsStatus: details.status,
+                detailsError: details.body && details.body.error,
             }));
         })().catch((error) => {
             console.error(error);
@@ -175,7 +176,7 @@ describe("legacy demo removal", () => {
         }
     });
 
-    it("still loads real vault, wallet decrypt, presale, and Stripe routes", async () => {
+    it("still loads real vault, wallet decrypt, and presale routes", async () => {
         expect(findRoute(router, "POST", "/api/vault-legacy/sessions").stack).toEqual([SessionController.create]);
         expect(findRoute(router, "POST", "/api/vault-legacy/relay/register-emails").stack).toEqual([
             requireJWT,
@@ -205,14 +206,15 @@ describe("legacy demo removal", () => {
         expect(decrypt.status).not.toBe(410);
 
         const payments = loadPaymentRoutes();
-        expect(payments.stripeHandlers).toEqual(["webhookValidation", "handleWebhook"]);
+        expect(payments.stripeHandlers).toEqual(["respondStripeMoved"]);
         expect(payments.presaleHandlers).toEqual(["createSession"]);
         expect(payments.detailsHandlers).toEqual(["getSessionDetails"]);
-        expect(payments.stripeStatus).toBe(400);
-        expect(payments.stripeError).toMatch(/stripe-signature/i);
-        expect(payments.presaleStatus).toBe(400);
-        expect(payments.presaleError).toMatch(/amount/i);
-        expect(payments.detailsStatus).toBe(400);
+        expect(payments.stripeStatus).toBe(410);
+        expect(payments.stripeError).toBe("STRIPE_MOVED_TO_V4");
+        expect(payments.presaleStatus).toBe(410);
+        expect(payments.presaleError).toBe("STRIPE_MOVED_TO_V4");
+        expect(payments.detailsStatus).toBe(410);
+        expect(payments.detailsError).toBe("STRIPE_MOVED_TO_V4");
     });
 
     it("does not schedule a demo job", () => {

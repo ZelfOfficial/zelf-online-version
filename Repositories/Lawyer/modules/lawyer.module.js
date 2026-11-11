@@ -244,7 +244,7 @@ const generateInvitation = async (data, authUser) => {
 		{ pro: true },
 	);
 
-	const inviteLink = `${config.stripe?.frontendUrl || "https://dashboard.zelf.world"}/auth/accept-lawyer-invite?token=${invitationToken}`;
+	const inviteLink = `${config.frontendUrl || "https://dashboard.zelf.world"}/auth/accept-lawyer-invite?token=${invitationToken}`;
 
 	try {
 		await Mailgun.sendCustomEmail(

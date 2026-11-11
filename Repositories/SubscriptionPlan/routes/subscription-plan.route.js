@@ -1,29 +1,16 @@
-const Controller = require("../controllers/subscription-plan.controller");
-const Middleware = require("../middlewares/subscription-plan.middleware");
 const config = require("../../../Core/config");
+const { respondStripeMoved } = require("../../Stripe/stripe-moved");
+
 const base = "/subscription-plans";
 
 module.exports = (server) => {
 	const PATH = config.basePath(base);
 
-	// GET /api/subscription-plans - list plans
-	server.get(`${PATH}`, Controller.list);
-
-	// get my subscription
-	server.get(`${PATH}/my-subscription`, Middleware.mySubscriptionValidation, Controller.mySubscription);
-
-	// GET /api/subscription-plans/:productId - get specific plan by product ID
-	server.get(`${PATH}/:productId`, Middleware.getByIdValidation, Controller.getById);
-
-	// now we need to create a subscribe action > will open a stripe checkout session
-	server.post(`${PATH}/subscribe`, Middleware.subscribeValidation, Controller.subscribe);
-
-	// create portal session for subscription management
-	server.post(`${PATH}/create-portal-session`, Middleware.createPortalSessionValidation, Controller.createPortalSession);
-
-	// verify session after redirect
-	server.post(`${PATH}/verify-session`, Middleware.verifySessionValidation, Controller.verifySession);
-
-	// reconcile monthly ZNS grants against Stripe paid invoices and the local ledger
-	server.post(`${PATH}/reconcile-zns`, Controller.reconcileZns);
+	server.get(`${PATH}`, respondStripeMoved);
+	server.get(`${PATH}/my-subscription`, respondStripeMoved);
+	server.get(`${PATH}/:productId`, respondStripeMoved);
+	server.post(`${PATH}/subscribe`, respondStripeMoved);
+	server.post(`${PATH}/create-portal-session`, respondStripeMoved);
+	server.post(`${PATH}/verify-session`, respondStripeMoved);
+	server.post(`${PATH}/reconcile-zns`, respondStripeMoved);
 };

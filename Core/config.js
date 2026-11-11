@@ -22,11 +22,6 @@ const parseWhatsAppExtraApiKeys = () => {
     }
 };
 
-/** Absolute origin for zelf-dashboard Plan & Billing Stripe redirects (success/cancel). */
-const stripeDashboardUrlBase = String(
-    (process.env.DASHBOARD_URL || process.env.FRONTEND_URL || "https://dashboard.zelf.world").trim() || "https://dashboard.zelf.world",
-).replace(/\/$/, "");
-
 /** Default Arweave gateway pool — override per server via .env (see arwave in configuration). */
 const ARWEAVE_DEFAULT_PUBLIC_GATEWAY_URL = "https://arweave.net";
 const ARWEAVE_DEFAULT_GRAPHQL_GATEWAYS = [
@@ -267,46 +262,29 @@ const configuration = {
     fantom: {
         rpcUrl: process.env.FANTOM_RPC_URL || "https://fragrant-wild-smoke.fantom.quiknode.pro/9f6de2bac71c11f7c08e97e7be74a9d770c62a86",
     },
-    stripe: {
-        frontendUrl: process.env.FRONTEND_URL || "http://localhost:4200",
-        redirectUrl: process.env.STRIPE_REDIRECTURL || "https://verifik.app",
-        secretKey: process.env.STRIPE_SECRET_KEY || "",
-        taxes: 0.19,
-        zelfKeys: {
-            success: `${process.env.FRONTEND_URL}/zelfkeys/success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel: `${process.env.FRONTEND_URL}/zelfkeys/cancel?canceled=true`,
+    frontendUrl: process.env.FRONTEND_URL || "http://localhost:4200",
+    /** Zelf Keys plan catalog used by crypto checkout. Card billing for these plans is on v4. */
+    zelfKeysPlans: {
+        basic: {
+            currency: "usd",
+            description: "20 new encryptions per month.",
+            interval: "month",
+            name: "Basic Plan",
+            price: 4.99,
         },
-        dashboard: {
-            /** Absolute origin only (no trailing slash); used for checkout + portal return URLs */
-            origin: stripeDashboardUrlBase,
-            success: `${stripeDashboardUrlBase}/settings/plan-billing?session_id={CHECKOUT_SESSION_ID}`,
-            cancel: `${stripeDashboardUrlBase}/settings/plan-billing?canceled=true`,
+        pro: {
+            currency: "usd",
+            description: "50 new encryptions per month",
+            interval: "month",
+            name: "Pro Plan",
+            price: 9.99,
         },
-        plans: {
-            basic: {
-                currency: "usd",
-                description: "20 new encryptions per month.",
-                interval: "month",
-                name: "Basic Plan",
-                price: 4.99,
-                priceId: process.env.STRIPE_BASIC_PRICE_ID,
-            },
-            pro: {
-                currency: "usd",
-                description: "50 new encryptions per month",
-                interval: "month",
-                name: "Pro Plan",
-                price: 9.99,
-                priceId: process.env.STRIPE_PRO_PRICE_ID,
-            },
-            enterprise: {
-                currency: "usd",
-                description: "100 new encryptions per month.",
-                interval: "month",
-                name: "Enterprise Plan",
-                price: 19.99,
-                priceId: process.env.STRIPE_ENTERPRISE_PRICE_ID,
-            },
+        enterprise: {
+            currency: "usd",
+            description: "100 new encryptions per month.",
+            interval: "month",
+            name: "Enterprise Plan",
+            price: 19.99,
         },
     },
     avalanche: {

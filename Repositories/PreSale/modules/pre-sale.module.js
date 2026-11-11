@@ -1,6 +1,3 @@
-const Stripe = require("stripe");
-const config = require("../../../Core/config");
-
 const Mailgun = require("../../../Core/mailgun");
 const IPFS = require("../../IPFS/modules/ipfs.module");
 
@@ -10,16 +7,6 @@ const { extractDomainAndName } = require("../../Tags/middlewares/tags.middleware
 const { isDomainActive } = require("../../Tags/config/supported-domains");
 const { isRemovedDomain } = require("../../../Core/removed-blockdag");
 const axios = require("axios");
-
-const testingStripeCards = {
-    4242424242424242: "tok_visa",
-    4000000000003220: "tok_mastercard",
-    378282246310005: "tok_amex",
-    // Add more test cards as needed
-    4000000000009999: "tok_visa",
-    4000000000000002: "tok_mastercard",
-    378282246310005: "tok_amex",
-};
 
 const templatesMap = {
     en: {
@@ -66,9 +53,6 @@ const sendReceiptEmail = async ({ email, amount, tokens, transactionId, date }) 
     }
 };
 
-// Initialize Stripe with the secret key from config
-const stripe = Stripe(config.stripe.secretKey);
-
 // Configuration for Pre-Sale
 const PRESALE_CONFIG = {
     tokenPrice: 0.05, // USD per token
@@ -86,7 +70,6 @@ const getBonusTier = (amount) => {
 
 const { getPresaleLicenseExtensionYears } = require("./presale-license.util");
 const {
-    RELEASE_SOURCE_VERIFIED_WEBHOOK,
     assertVerifiedReleaseSource,
     buildAtomicReleaseUpdate,
     isLicenseExtensionRecorded,
@@ -110,71 +93,6 @@ const calculateTokens = (usdAmount) => {
 };
 
 /**
- * Create a Stripe Checkout Session for ZNS Token Pre-Sale
- * @param {Object} params
- * @param {number} params.amount - Amount in USD
- * @param {string} params.email - Optional customer email
- * @param {string} params.zelfName - Required Zelf Name (tag) for token delivery
- * @param {string} params.solanaAddress - Optional Solana address for token delivery
- * @returns {Promise<Object>} The created session URL and ID
- */
-const createStripeSession = async ({ amount, email, zelfName, solanaAddress }) => {
-    try {
-        const frontendUrl = config.landingUrl;
-
-        // Calculate tokens server-side for security
-        const { totalTokens, bonusPercentage } = calculateTokens(amount);
-
-        const session = await stripe.checkout.sessions.create({
-            payment_method_types: ["card"],
-            line_items: [
-                {
-                    price_data: {
-                        currency: "usd",
-                        product_data: {
-                            name: "ZNS Token Pre-Sale",
-                            description: `${totalTokens.toLocaleString()} ZNS Tokens (${bonusPercentage > 0 ? bonusPercentage + "% Bonus Included" : "Base Allocation"})`,
-                            images: ["https://zelf.world/assets/images/zns-token.png"],
-                        },
-                        unit_amount: Math.round(amount * 100), // Stripe expects cents
-                    },
-                    quantity: 1,
-                },
-            ],
-            mode: "payment",
-            success_url: `${frontendUrl}/presale/success?session_id={CHECKOUT_SESSION_ID}&method=stripe`,
-            cancel_url: `${frontendUrl}/presale/checkout?canceled=true&method=stripe`,
-            customer_email: email,
-            metadata: {
-                type: "zns_presale",
-                tokens: totalTokens.toString(),
-                bonus: bonusPercentage.toString(),
-                zelfName: zelfName || "",
-                solanaAddress: solanaAddress || "",
-            },
-        });
-
-        return {
-            url: session.url,
-            sessionId: session.id,
-            calculated: {
-                amount,
-                tokens: totalTokens,
-                bonus: bonusPercentage,
-            },
-        };
-    } catch (error) {
-        console.error("Error creating Stripe session:", error);
-        throw error;
-    }
-};
-
-/**
- * Get Payment/Session Details and Confirm Transaction
- * @param {string} sessionIdOrCode
- * @returns {Promise<Object>}
- */
-/**
  * Check if a receipt exists in IPFS
  */
 const _checkIPFSRecord = async (sessionId) => {
@@ -184,36 +102,27 @@ const _checkIPFSRecord = async (sessionId) => {
 };
 
 /**
- * Verify payment status with Stripe
+ * Card checkout sessions are no longer confirmed on v3.
+ * Non-card codes stay unsupported (Coinbase Commerce was already removed).
  */
 const _verifyWithProvider = async (sessionIdOrCode) => {
-    let details = {};
-    let isPaid = false;
-
     if (sessionIdOrCode.startsWith("cs_")) {
-        // Stripe
-        const session = await stripe.checkout.sessions.retrieve(sessionIdOrCode);
-        isPaid = session.payment_status === "paid";
-
-        details = {
-            method: "stripe",
-            status: session.payment_status,
-            amount: session.amount_total / 100,
-            email: session.customer_details?.email || session.customer_email,
-            metadata: session.metadata,
-            currency: session.currency,
-        };
-    } else {
         return {
             isPaid: false,
             details: {
-                method: "unsupported",
-                status: "coinbase_removed",
+                method: "stripe",
+                status: "moved_to_v4",
             },
         };
     }
 
-    return { isPaid, details };
+    return {
+        isPaid: false,
+        details: {
+            method: "unsupported",
+            status: "coinbase_removed",
+        },
+    };
 };
 
 /**
@@ -609,78 +518,9 @@ const getPaymentDetails = async (sessionIdOrCode) => {
     return verification.details;
 };
 
-/**
- * Release tokens and extend the license only after the Stripe webhook signature has been verified
- * and the Checkout Session has been re-fetched as paid.
- */
-const releaseFromVerifiedStripeEvent = async (event) => {
-    const allowedTypes = new Set(["checkout.session.completed", "checkout.session.async_payment_succeeded"]);
-
-    if (!allowedTypes.has(event?.type)) {
-        return { status: "ignored" };
-    }
-
-    const eventSession = event.data?.object;
-    if (!eventSession?.id || eventSession.metadata?.type !== "zns_presale") {
-        return { status: "ignored" };
-    }
-
-    const session = await stripe.checkout.sessions.retrieve(eventSession.id);
-
-    if (session.metadata?.type !== "zns_presale" || session.payment_status !== "paid") {
-        return { status: "ignored", reason: "not_paid" };
-    }
-
-    let lockAcquired = false;
-
-    try {
-        await _acquireSessionLock(session.id);
-        lockAcquired = true;
-
-        const existingRecord = await _checkIPFSRecord(session.id);
-        const formatted = existingRecord ? _formatDetailsFromRecord(existingRecord) : null;
-
-        const details = {
-            method: "stripe",
-            status: session.payment_status,
-            amount: session.amount_total / 100,
-            email: session.customer_details?.email || session.customer_email || formatted?.email,
-            metadata: {
-                ...(session.metadata || {}),
-                tokensReleased: formatted?.metadata?.tokensReleased === true,
-                transactionSignature: formatted?.metadata?.transactionSignature || "",
-                licenseExtended: formatted?.metadata?.licenseExtended === true,
-                licenseExtensionYears: formatted?.metadata?.licenseExtensionYears || 0,
-                licenseExtensionExpiresAt: formatted?.metadata?.licenseExtensionExpiresAt || "",
-                licenseExtensionTag: formatted?.metadata?.licenseExtensionTag || "",
-                zelfName: session.metadata?.zelfName || formatted?.metadata?.zelfName || "",
-                solanaAddress: session.metadata?.solanaAddress || formatted?.metadata?.solanaAddress || "",
-            },
-            currency: session.currency || "USD",
-        };
-
-        const result = await _processPayment(session.id, details, true, existingRecord, {
-            source: RELEASE_SOURCE_VERIFIED_WEBHOOK,
-        });
-
-        return { status: "released", result };
-    } catch (error) {
-        if (error.code === "TOKENS_ALREADY_RELEASED") {
-            return { status: "already_released", code: "TOKENS_ALREADY_RELEASED" };
-        }
-        throw error;
-    } finally {
-        if (lockAcquired) {
-            await _releaseSessionLock(session.id);
-        }
-    }
-};
-
 module.exports = {
-    createStripeSession,
     calculateTokens,
     getPresaleLicenseExtensionYears,
     sendReceiptEmail,
     getPaymentDetails,
-    releaseFromVerifiedStripeEvent,
 };
