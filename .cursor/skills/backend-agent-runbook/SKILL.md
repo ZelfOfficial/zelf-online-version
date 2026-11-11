@@ -65,9 +65,8 @@ For a test file that expects another port, export that same `PORT` before starti
 ### Vault Legacy (inheritance plans)
 
 - Feature root: `Repositories/VaultLegacy/`.
-- Demo mode env: `LEGACY_DEMO_MODE`, `LEGACY_DEMO_LAWYER_ADDRESS` (see `.env.example`). Do not enable on production.
-- Heartbeat cron: `node Repositories/VaultLegacy/check-vaults.js`.
-- Mobile demo contract: `Repositories/VaultLegacy/DEMO-MOBILE.md`.
+- Liveness cron (grace-period and lawyer emails only): `node Repositories/VaultLegacy/check-vaults.js`.
+- Former demo endpoints under `/api/vault-legacy/demo/*` respond with HTTP 410.
 
 ### Docs work
 
