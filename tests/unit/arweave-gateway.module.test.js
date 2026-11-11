@@ -12,6 +12,7 @@ const {
 	isSingleTagLookupKey,
 	postGraphql,
 	postGraphqlToGateway,
+	fetchTxData,
 } = require("../../Repositories/Arweave/modules/arweave-gateway.module");
 
 describe("arweave-gateway.module", () => {
@@ -99,10 +100,45 @@ describe("arweave-gateway.module", () => {
 			});
 
 		const edges = await postGraphql("{ transactions { edges { node { id } } } }");
+		const gateways = getGraphqlGateways();
 		expect(edges).toHaveLength(1);
 		expect(axios.post).toHaveBeenCalledTimes(2);
-		expect(axios.post.mock.calls[0][0]).toBe("https://arweave.net/graphql");
-		expect(axios.post.mock.calls[1][0]).toBe("https://arweave-search.goldsky.com/graphql");
+		expect(axios.post.mock.calls[0][0]).toBe(`${gateways[0]}/graphql`);
+		expect(axios.post.mock.calls[1][0]).toBe(`${gateways[1]}/graphql`);
+	});
+
+	it("follows an arweave.net 302 when ar.io returns 404", async () => {
+		const payload = Buffer.from("png-bytes");
+
+		jest.spyOn(axios, "get").mockImplementation(async (url, options) => {
+			expect(options.maxRedirects).toBeGreaterThan(0);
+
+			if (String(url).startsWith("https://ar.io/")) {
+				const error = new Error("Request failed with status code 404");
+				error.response = { status: 404 };
+				throw error;
+			}
+
+			if (url === "https://arweave.net/txid") {
+				return {
+					status: 302,
+					headers: { location: "https://arweave.net/txid/data" },
+					data: Buffer.alloc(0),
+				};
+			}
+
+			if (url === "https://arweave.net/txid/data") {
+				return { status: 200, headers: {}, data: payload };
+			}
+
+			throw new Error(`unexpected url ${url}`);
+		});
+
+		await expect(fetchTxData("txid")).resolves.toBe(payload);
+		expect(axios.get).toHaveBeenCalledWith(
+			"https://arweave.net/txid",
+			expect.objectContaining({ maxRedirects: 5 })
+		);
 	});
 
 	it("postGraphql throws after all gateways fail", async () => {

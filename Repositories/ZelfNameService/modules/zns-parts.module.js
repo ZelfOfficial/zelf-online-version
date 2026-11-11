@@ -165,13 +165,18 @@ const removeExpiredRecords = async (records) => {
 };
 
 const formatIPFSRecord = async (ipfsRecord, foundInArweave) => {
+	const metadata = ipfsRecord?.metadata;
+	if (!metadata || typeof metadata !== "object") return null;
+
+	const recordName = metadata.name || metadata.zelfName || null;
+
 	const zelfNameObject = {
 		...ipfsRecord,
 		metadata: undefined,
 		publicData: {
-			name: ipfsRecord.metadata.name || ipfsRecord.metadata.zelfName,
+			name: recordName,
 		},
-		zelfName: ipfsRecord.metadata.name || ipfsRecord.metadata.zelfName,
+		zelfName: recordName,
 	};
 
 	Object.assign(zelfNameObject.publicData, ipfsRecord.metadata.keyvalues || ipfsRecord.metadata);

@@ -32,7 +32,10 @@ const searchZelfName = async (params, authUser) => {
 
 	if (searchResult.ipfs?.available) return searchResult.ipfs;
 
-	searchResult.ipfs = searchResult.ipfs;
+	const ipfsRows = Array.isArray(searchResult.ipfs) ? searchResult.ipfs : [];
+	const arweaveRows = Array.isArray(searchResult.arweave) ? searchResult.arweave : [];
+
+	if (ipfsRows.length || arweaveRows.length) searchResult.available = false;
 
 	return searchResult;
 
@@ -250,17 +253,28 @@ const _searchInIPFS = async (environment = "both", query, authUser, foundInArwea
  * @param {Array} searchResults - Raw Arweave search results
  * @returns {Array} Formatted Arweave records
  */
+const _arweaveRecordIsUsable = (zelfNameObject) =>
+	Boolean(zelfNameObject?.publicData) && typeof zelfNameObject.zelfProof === "string" && zelfNameObject.zelfProof.trim().length > 0;
+
 const _returnFormattedArweaveRecords = async (searchResults) => {
-	if (searchResults?.available) return [];
+	if (searchResults?.available || !Array.isArray(searchResults)) return [];
 
 	const zelfNames = [];
-
-	const now = moment();
 
 	const hideRecordsWithoutRegisteredAt = Boolean(searchResults.length >= 2);
 
 	for (let index = 0; index < searchResults.length; index++) {
-		const zelfNameObject = await ZNSPartsModule.formatArweaveRecord(searchResults[index]);
+		let zelfNameObject;
+
+		try {
+			zelfNameObject = await ZNSPartsModule.formatArweaveRecord(searchResults[index]);
+		} catch (exception) {
+			console.error({ arweaveRecordFormat: exception });
+			continue;
+		}
+
+		// A gateway miss leaves zelfProof null. Skipping that row must not throw or drop IPFS results.
+		if (!_arweaveRecordIsUsable(zelfNameObject)) continue;
 
 		if (hideRecordsWithoutRegisteredAt && !zelfNameObject.publicData.registeredAt) continue;
 
@@ -293,7 +307,16 @@ const _returnFormattedIPFSRecords = async (ipfsRecords, environment, foundInArwe
 	for (let index = 0; index < ipfsRecords.length; index++) {
 		const ipfsRecord = ipfsRecords[index];
 
-		const formattedIPFS = await ZNSPartsModule.formatIPFSRecord(ipfsRecord, foundInArweave);
+		let formattedIPFS;
+
+		try {
+			formattedIPFS = await ZNSPartsModule.formatIPFSRecord(ipfsRecord, foundInArweave);
+		} catch (exception) {
+			console.error({ ipfsRecordFormat: exception });
+			continue;
+		}
+
+		if (!formattedIPFS?.publicData) continue;
 
 		const expiresAt = parseLeaseDate(formattedIPFS.publicData.expiresAt).add(formattedIPFS.publicData.type === "mainnet" ? 45 : 0, "day");
 
@@ -311,10 +334,9 @@ const _returnFormattedIPFSRecords = async (ipfsRecords, environment, foundInArwe
 			continue;
 		}
 
-		if (
-			(environment === "hold" && ipfsRecord.metadata.keyvalues.type === "hold") ||
-			(environment === "mainnet" && (!ipfsRecord.metadata.keyvalues.type || ipfsRecord.metadata.keyvalues.type === "mainnet"))
-		) {
+		const recordType = ipfsRecord?.metadata?.keyvalues?.type;
+
+		if ((environment === "hold" && recordType === "hold") || (environment === "mainnet" && (!recordType || recordType === "mainnet"))) {
 			zelfNamesInIPFS.push(formattedIPFS);
 		}
 	}
