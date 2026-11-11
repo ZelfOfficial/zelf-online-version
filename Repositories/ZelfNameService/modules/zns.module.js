@@ -12,7 +12,7 @@ const moment = require("moment");
 const { parseLeaseDate } = require("../../Tags/modules/lease-date.util");
 const config = require("../../../Core/config");
 const { addReferralReward, addPurchaseReward } = require("./zns-token.module");
-const jwt = require("jsonwebtoken");
+const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const { createUnderName } = require("./undernames.module");
 const { confirmPayUniqueAddress } = require("../../purchase-zelf/modules/balance-checker.module");
 const ZNSPartsModule = require("./zns-parts.module");
@@ -340,12 +340,13 @@ const leaseZelfName = async (params, authUser) => {
 	return {
 		...zelfNameObject,
 		hasPassword: Boolean(password),
-		durationToken: jwt.sign(
+		durationToken: signToken(
 			{
 				zelfName,
 				exp: moment().add(12, "hour").unix(),
 			},
-			config.JWT_SECRET
+			config.JWT_SECRET,
+			{ typ: TOKEN_TYPES.duration }
 		),
 	};
 };
@@ -927,12 +928,13 @@ const leaseOffline = async (params, authUser) => {
 	return {
 		...zelfNameObject,
 		hasPassword: Boolean(_preview.passwordLayer === "WithPassword"),
-		durationToken: jwt.sign(
+		durationToken: signToken(
 			{
 				zelfName,
 				exp: moment().add(12, "hour").unix(),
 			},
-			config.JWT_SECRET
+			config.JWT_SECRET,
+			{ typ: TOKEN_TYPES.duration }
 		),
 	};
 };

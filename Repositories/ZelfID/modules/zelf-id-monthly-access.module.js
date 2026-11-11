@@ -10,6 +10,7 @@
  */
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
+const { signToken } = require("../../../Core/jwt-claims");
 const moment = require("moment");
 const mongoose = require("mongoose");
 
@@ -179,7 +180,7 @@ const quoteSecret = () => {
     return config.JWT_SECRET;
 };
 
-const signQuote = (payload) => jwt.sign(payload, quoteSecret());
+const signQuote = (payload) => signToken(payload, quoteSecret(), { typ: QUOTE_TYPE });
 
 const paymentOptions = (quote, spendable) => {
     const balance = Number.isFinite(Number(spendable)) ? Number(spendable) : 0;

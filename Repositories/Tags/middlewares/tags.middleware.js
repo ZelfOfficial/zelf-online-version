@@ -1,4 +1,5 @@
 const { string, validate, boolean, number, stringEnum, stringOptionalEmptyAsNull } = require("../../../Core/JoiUtils");
+const { verifySuperAdmin } = require("../../SuperAdmin/middlewares/verify-super-admin.middleware");
 const captchaService = require("../../../Core/captcha");
 const Session = require("../../Session/models/session.model");
 const { validateDomainName, isDomainActive } = require("../modules/domain-registry.module");
@@ -759,15 +760,7 @@ const referralRewardsValidation = async (ctx, next) => {
         return;
     }
 
-    // Check if user is super admin
-    const authUser = ctx.state.user;
-    if (!authUser.superAdminId) {
-        ctx.status = 403;
-        ctx.body = { error: "Unauthorized" };
-        return;
-    }
-
-    await next();
+    await verifySuperAdmin(ctx, next);
 };
 
 /**
@@ -786,15 +779,7 @@ const purchaseRewardsValidation = async (ctx, next) => {
         return;
     }
 
-    // Check if user is super admin
-    const authUser = ctx.state.user;
-    if (!authUser.superAdminId) {
-        ctx.status = 403;
-        ctx.body = { error: "Unauthorized" };
-        return;
-    }
-
-    await next();
+    await verifySuperAdmin(ctx, next);
 };
 
 /**

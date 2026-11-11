@@ -885,8 +885,17 @@ describe("GET /api/zelf-keys/dashboard/list verified owner", () => {
         expect(ctx.body.code).toBe("ERR_SESSION_REQUIRED");
     });
 
-    test.each(["staff", "staff_account", "lawyer", "lawyer_account"])("a %s login keeps dashboard access without a wallet session", async (accountType) => {
-        const { continued } = await runDashboard(Middleware.listAllDashboardValidation, { accountType }, { identifier: "alice.zelf" });
+    test.each([
+        ["staff", "staff"],
+        ["staff_account", "staff"],
+        ["lawyer", "lawyer"],
+        ["lawyer_account", "lawyer"],
+    ])("a %s login keeps dashboard access without a wallet session", async (accountType, typ) => {
+        const { continued } = await runDashboard(
+            Middleware.listAllDashboardValidation,
+            { accountType, typ, exp: Math.floor(Date.now() / 1000) + 3600 },
+            { identifier: "alice.zelf" }
+        );
         expect(continued).toBe(true);
     });
 });

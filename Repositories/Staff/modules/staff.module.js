@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const config = require("../../../Core/config");
+const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const moment = require("moment");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const zelfProofModule = require("../../ZelfProof/modules/zelf-proof.module");
@@ -134,7 +135,7 @@ const generateInvitation = async (data, authUser) => {
     }
 
     // Generate invitation JWT (expires in 1 hour)
-    const invitationToken = jwt.sign(
+    const invitationToken = signToken(
         {
             type: "staff_invitation",
             ownerEmail: authUser.email,
@@ -149,6 +150,7 @@ const generateInvitation = async (data, authUser) => {
             exp: moment().add(1, "hour").unix(),
         },
         config.JWT_SECRET,
+        { typ: TOKEN_TYPES.staffInvitation }
     );
 
     // Store pending invitation
@@ -379,7 +381,7 @@ const createFromInvitation = async (data) => {
         zelfProof,
         staffAccount,
         ipfsHash: staffAccount.cid,
-        token: jwt.sign(
+        token: signToken(
             {
                 email: invitation.staffEmail,
                 role: invitation.role,
@@ -388,6 +390,7 @@ const createFromInvitation = async (data) => {
                 exp: moment().add(30, "day").unix(),
             },
             config.JWT_SECRET,
+            { typ: TOKEN_TYPES.staff }
         ),
     };
 };
@@ -428,7 +431,7 @@ const auth = async (data) => {
         apiKey: decryptedAccount.metadata.apiKey,
         role: decryptedAccount.metadata.staffRole,
         ownerEmail: decryptedAccount.metadata.ownerEmail,
-        token: jwt.sign(
+        token: signToken(
             {
                 email,
                 role: decryptedAccount.metadata.staffRole,
@@ -437,6 +440,7 @@ const auth = async (data) => {
                 exp: moment().add(30, "day").unix(),
             },
             config.JWT_SECRET,
+            { typ: TOKEN_TYPES.staff }
         ),
     };
 };

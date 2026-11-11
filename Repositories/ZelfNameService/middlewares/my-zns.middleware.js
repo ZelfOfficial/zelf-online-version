@@ -1,4 +1,5 @@
 const { string, validate, boolean, number, stringEnum } = require("../../../Core/JoiUtils");
+const { TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const Session = require("../../Session/models/session.model");
 const moment = require("moment");
 const { validateDomainAndName } = require("../../Tags/middlewares/tags.middleware");
@@ -72,6 +73,12 @@ const renewValidation = async (ctx, next) => {
 	if (valid.error) {
 		ctx.status = 409;
 		ctx.body = { validationError: valid.error.message };
+		return;
+	}
+
+	if (ctx.state.user?.typ !== TOKEN_TYPES.quote) {
+		ctx.status = 401;
+		ctx.body = { validationError: "INVALID_TOKEN_TYPE", code: "INVALID_TOKEN_TYPE" };
 		return;
 	}
 

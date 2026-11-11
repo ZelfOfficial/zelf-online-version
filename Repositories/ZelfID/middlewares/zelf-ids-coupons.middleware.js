@@ -1,4 +1,5 @@
 const Joi = require("joi");
+const { verifySuperAdmin } = require("../../SuperAdmin/middlewares/verify-super-admin.middleware");
 
 const createSchema = Joi.object({
     code: Joi.string().trim().min(1).max(64).required(),
@@ -20,14 +21,7 @@ const createSchema = Joi.object({
     expiresAt: Joi.date().iso(),
 }).unknown(true);
 
-const requireSuperAdmin = async (ctx, next) => {
-    if (!ctx.state.user || !ctx.state.user.superAdminId) {
-        ctx.status = 403;
-        ctx.body = { error: "Super-admin access required", code: "SUPER_ADMIN_REQUIRED" };
-        return;
-    }
-    await next();
-};
+const requireSuperAdmin = verifySuperAdmin;
 
 const createValidation = async (ctx, next) => {
     const valid = createSchema.validate(ctx.request.body || {}, { abortEarly: false });

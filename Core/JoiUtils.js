@@ -143,6 +143,14 @@ const validate = (schemaObj, params, or = undefined) => {
     return schema.validate(params);
 };
 
+const validateStrict = (schemaObj, params) =>
+    Joi.object(schemaObj)
+        .options({
+            abortEarly: false,
+        })
+        .unknown(false)
+        .validate(params || {});
+
 const fileObject = () =>
     Joi.object({
         base64: Joi.string().required(),
@@ -210,5 +218,6 @@ module.exports = {
     symbol,
     urlSecure,
     validate,
+    validateStrict,
     zelfNameDuration_,
 };

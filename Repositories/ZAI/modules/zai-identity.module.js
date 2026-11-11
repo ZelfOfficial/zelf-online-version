@@ -4,6 +4,7 @@
  * See /workspace zAI contract §2.
  */
 const jwt = require("jsonwebtoken");
+const { signToken } = require("../../../Core/jwt-claims");
 const crypto = require("crypto");
 const RevokedToken = require("../models/zai-revoked-token.model");
 
@@ -74,7 +75,8 @@ const issueIdentityToken = (record, domain) => {
         if (!secret) return null;
         const sub = fullName(record, domain);
         if (!sub) return null;
-        return jwt.sign({ typ: "identity", sub, zid: recordId(record), addr: addressesOf(record), jti: crypto.randomUUID() }, secret, {
+        return signToken({ sub, zid: recordId(record), addr: addressesOf(record), jti: crypto.randomUUID() }, secret, {
+            typ: "identity",
             expiresIn: IDENTITY_TTL_SECONDS,
         });
     } catch (error) {
@@ -121,10 +123,11 @@ const exchangeForZaiToken = async (identityToken) => {
     const identity = await verifyIdentityToken(identityToken);
     const ttl = Math.max(1, Math.min(ZAI_TTL_SECONDS, identity.exp - Math.floor(Date.now() / 1000)));
     const jti = crypto.randomUUID();
-    const token = jwt.sign(
-        { typ: "zai", sub: identity.sub, zid: identity.zid, addr: identity.addr, scope: ["zai:chat"], parent_jti: identity.jti, jti },
+    const token = signToken(
+        { sub: identity.sub, zid: identity.zid, addr: identity.addr, scope: ["zai:chat"], parent_jti: identity.jti, jti },
         zaiSecret(),
         {
+            typ: "zai",
             expiresIn: ttl,
         }
     );

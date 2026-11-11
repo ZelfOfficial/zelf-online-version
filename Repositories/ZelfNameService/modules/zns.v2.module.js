@@ -13,7 +13,7 @@ const { decrypt, encrypt, preview, encryptQR } = require("../../Wallet/modules/e
 const OfflineProofModule = require("../../../Core/offline-proof");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const config = require("../../../Core/config");
-const jwt = require("jsonwebtoken");
+const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const { confirmPayUniqueAddress } = require("../../purchase-zelf/modules/balance-checker.module");
 const { addReferralReward, addPurchaseReward } = require("./zns-token.module");
 const { createUnderName } = require("./undernames.module");
@@ -155,12 +155,13 @@ const decryptZelfName = async (params, authUser) => {
 			...decryptedZelfProof.publicData,
 			...zelfNameObject.publicData,
 		},
-		durationToken: jwt.sign(
+		durationToken: signToken(
 			{
 				zelfName: zelfNameObject.publicData.zelfName,
 				exp: moment().add(1, "month").unix(),
 			},
-			config.JWT_SECRET
+			config.JWT_SECRET,
+			{ typ: TOKEN_TYPES.duration }
 		),
 		updatedIpfs: zelfNameObject.updatedIpfs,
 		updatedArweave: zelfNameObject.updatedArweave,
@@ -543,12 +544,13 @@ const leaseOffline = async (params, authUser) => {
 			...holdRecord,
 			zelfName,
 			preview: _preview,
-			durationToken: jwt.sign(
+			durationToken: signToken(
 				{
 					zelfName,
 					exp: moment().add(30, "day").unix(),
 				},
-				config.JWT_SECRET
+				config.JWT_SECRET,
+				{ typ: TOKEN_TYPES.duration }
 			),
 		};
 
@@ -595,12 +597,13 @@ const leaseOffline = async (params, authUser) => {
 
 	return {
 		...zelfNameObject,
-		durationToken: jwt.sign(
+		durationToken: signToken(
 			{
 				zelfName,
 				exp: moment().add(30, "day").unix(),
 			},
-			config.JWT_SECRET
+			config.JWT_SECRET,
+			{ typ: TOKEN_TYPES.duration }
 		),
 	};
 };
@@ -1025,12 +1028,13 @@ const _syncOfflineZelfName = async (zelfNameRecord, syncPublicData) => {
 		tagsToAdd,
 		...ipfs,
 		arweave,
-		durationToken: jwt.sign(
+		durationToken: signToken(
 			{
 				zelfName: zelfNameRecord.zelfName,
 				exp: moment().add(30, "day").unix(),
 			},
-			config.JWT_SECRET
+			config.JWT_SECRET,
+			{ typ: TOKEN_TYPES.duration }
 		),
 	};
 };

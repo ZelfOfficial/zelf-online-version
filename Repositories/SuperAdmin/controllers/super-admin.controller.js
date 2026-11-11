@@ -1,5 +1,15 @@
 const Module = require("../modules/super-admin.module");
 
+const writeError = (ctx, error) => {
+    const status = error.status || 500;
+    if (status >= 500) console.error(error);
+    ctx.status = status;
+    ctx.body = {
+        error: error.code || error.message,
+        code: error.code || "SUPER_ADMIN_ERROR",
+    };
+};
+
 const get = async (ctx) => {
     try {
         const data = await Module.get(ctx.request.params, ctx.state.user);
@@ -52,10 +62,7 @@ const auth = async (ctx) => {
 
         ctx.body = { data };
     } catch (error) {
-        console.error(error);
-        ctx.status = error.status || 500;
-
-        ctx.body = { error: error.message };
+        writeError(ctx, error);
     }
 };
 
@@ -64,9 +71,7 @@ const requestOtp = async (ctx) => {
         const data = await Module.requestOtp(ctx.request.body);
         ctx.body = { data };
     } catch (error) {
-        console.error(error);
-        ctx.status = error.status || 500;
-        ctx.body = { error: error.message };
+        writeError(ctx, error);
     }
 };
 
@@ -75,9 +80,7 @@ const verifyOtp = async (ctx) => {
         const data = await Module.verifyOtp(ctx.request.body);
         ctx.body = { data };
     } catch (error) {
-        console.error(error);
-        ctx.status = error.status || 500;
-        ctx.body = { error: error.message };
+        writeError(ctx, error);
     }
 };
 

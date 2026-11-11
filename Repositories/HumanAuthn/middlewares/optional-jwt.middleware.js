@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const config = require("../../../Core/config");
+const { isAcceptedAccessToken } = require("../../../Core/jwt-claims");
 
 /**
  * Extract JWT from request (mirrors server.js koa-jwt getToken).
@@ -41,7 +42,10 @@ const optionalJwt = async (ctx, next) => {
 		const token = extractToken(ctx);
 
 		if (token) {
-			ctx.state.user = jwt.verify(token, config.JWT_SECRET);
+			const decoded = jwt.verify(token, config.JWT_SECRET);
+			if (isAcceptedAccessToken(decoded, ctx)) {
+				ctx.state.user = decoded;
+			}
 		}
 	} catch (error) {
 		// Proceed without authenticated user

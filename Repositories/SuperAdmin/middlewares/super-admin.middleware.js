@@ -1,5 +1,12 @@
 const { string, validate, boolean, number, stringEnum } = require("../../../Core/JoiUtils");
 const configuration = require("../../../Core/config");
+const { assertSuperAdminOtpRateLimit } = require("../modules/super-admin-otp-rate-limit.module");
+
+const rejectOtpRateLimit = (ctx, error) => {
+	ctx.status = error.status || 429;
+	ctx.body = { error: error.code || "OTP_RATE_LIMITED", code: error.code || "OTP_RATE_LIMITED" };
+	if (error.retryAfterSeconds) ctx.set("Retry-After", String(error.retryAfterSeconds));
+};
 
 const schemas = {
 	get: {},
@@ -170,6 +177,13 @@ const authValidation = async (ctx, next) => {
 };
 
 const requestOtpValidation = async (ctx, next) => {
+	try {
+		assertSuperAdminOtpRateLimit(ctx.ip || ctx.request.ip, "request");
+	} catch (error) {
+		rejectOtpRateLimit(ctx, error);
+		return;
+	}
+
 	const valid = validate(schemas.requestOtp, ctx.request.body);
 
 	if (valid.error) {
@@ -182,6 +196,13 @@ const requestOtpValidation = async (ctx, next) => {
 };
 
 const verifyOtpValidation = async (ctx, next) => {
+	try {
+		assertSuperAdminOtpRateLimit(ctx.ip || ctx.request.ip, "verify");
+	} catch (error) {
+		rejectOtpRateLimit(ctx, error);
+		return;
+	}
+
 	const valid = validate(schemas.verifyOtp, ctx.request.body);
 
 	if (valid.error) {

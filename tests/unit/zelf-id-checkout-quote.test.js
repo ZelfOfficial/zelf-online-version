@@ -43,6 +43,9 @@ jest.mock("../../Repositories/Tags/modules/tags-search.module", () => ({
     })),
 }));
 
+const config = require("../../Core/config");
+if (!config.JWT_SECRET) config.JWT_SECRET = "test-jwt-secret-key-for-testing-only";
+
 const { getPaymentOptions } = require("../../Repositories/ZelfID/modules/zelf-ids-payment.module");
 const ZelfIdModule = require("../../Repositories/ZelfID/modules/zelf-id.module");
 

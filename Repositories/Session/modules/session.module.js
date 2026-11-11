@@ -3,8 +3,8 @@ let secretKey = "your-secret-key";
 let passphrase = "something-seom";
 const openpgp = require("openpgp");
 const Model = require("../models/session.model");
-const jwt = require("jsonwebtoken");
 const config = require("../../../Core/config");
+const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const PGPKeyModule = require("../../PGP/modules/pgp-keys.module");
 const MongoORM = require("../../../Core/mongo-orm");
 const moment = require("moment");
@@ -50,8 +50,8 @@ const insert = async (params) => {
 		identifier: params.identifier || params.clientIP,
 		isWebExtension: params.isWebExtension || false,
 		status: "active",
-		// Client tagName and type are stored for compatibility. They do not prove a face check.
-		tagName: params.tagName || null,
+		// A session is not tag-verified until a decrypt stamps verifiedTagName from the record.
+		tagName: null,
 		type: params.type || "general",
 		verifiedTagName: null,
 		verifiedAt: null,
@@ -70,16 +70,16 @@ const insert = async (params) => {
 	}
 
 	return {
-		token: jwt.sign(
+		token: signToken(
 			{
 				domain: session.domain || "zelf",
 				ethAddress: params.ethAddress || null,
 				identifier: session.identifier,
 				ip: session.clientIP,
 				session: session._id,
-				tagName: session.tagName || null,
 			},
-			config.JWT_SECRET
+			config.JWT_SECRET,
+			{ typ: TOKEN_TYPES.session, expiresIn: "10m" }
 		),
 		activatedAt: moment(session.activatedAt).utc().unix(),
 		expiresAt: moment(session.activatedAt).utc().add(10, "minutes").unix(),
@@ -298,9 +298,47 @@ const deleteSession = async (authUser) => {
 	return null;
 };
 
+const nameOnRecord = (record) => {
+	const publicData = record?.publicData || {};
+	if (typeof publicData.zelfName === "string" && publicData.zelfName.trim()) return publicData.zelfName.trim();
+	if (typeof publicData.tagName === "string" && publicData.tagName.trim()) return publicData.tagName.trim();
+	return "";
+};
+
+const zelfNameMismatch = () => {
+	const error = new Error("403:ZELF_NAME_MISMATCH");
+	error.status = 403;
+	error.code = "ZELF_NAME_MISMATCH";
+	error.clientCode = "ZELF_NAME_MISMATCH";
+	return error;
+};
+
+/**
+ * Stamp verifiedTagName from the decrypted record only.
+ * A requested name that does not match that record is rejected and nothing is stamped.
+ * @param {Object} authUser
+ * @param {Object} record decrypted wallet or tag (`publicData.zelfName`)
+ * @param {string} [requestedName] caller tagName / zelfName, if they sent one
+ * @param {string} [domain]
+ */
+const stampVerifiedFromRecord = async (authUser, record, requestedName, domain) => {
+	const resolvedDomain = domain || authUser?.domain || "zelf";
+	const recordName = nameOnRecord(record);
+
+	if (requestedName != null && String(requestedName).trim() !== "") {
+		const requested = normalizeZelfName(requestedName, resolvedDomain);
+		const actual = normalizeZelfName(recordName, resolvedDomain);
+		if (!actual.zelfName || requested.zelfName !== actual.zelfName) {
+			throw zelfNameMismatch();
+		}
+	}
+
+	return markSessionIdentityVerified(authUser, recordName, resolvedDomain);
+};
+
 /**
  * Stamp the current session after a successful face check (and master password when the wallet has one).
- * The name stored is the normalized tag, not whatever the client sent at session create.
+ * The name stored is the normalized tag taken from the decrypted record.
  * @param {Object} authUser
  * @param {string} tagName
  * @param {string} [domain]
@@ -343,6 +381,8 @@ module.exports = {
 	walletDecrypt,
 	deleteSession,
 	markSessionIdentityVerified,
+	stampVerifiedFromRecord,
+	nameOnRecord,
 	IDENTITY_VERIFIED_WINDOW_MS,
 	normalizeZelfName,
 };

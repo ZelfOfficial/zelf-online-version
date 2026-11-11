@@ -10,6 +10,7 @@ const ZNSPartsModule = require("../../ZelfNameService/modules/zns-parts.module")
 const solanaModule = require("../../Solana/modules/solana-scrapping.module");
 const { getBalance } = require("../../bitcoin/modules/bitcoin-scrapping.module");
 const jwt = require("jsonwebtoken");
+const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const secretKey = config.signedData.key;
 
 const templatesMap = {
@@ -222,7 +223,7 @@ const checkoutPayUniqueAddress = async (network, amountToSend, selectedAddress) 
 		transactionStatus = false;
 	}
 
-	const confirmationData = signRecordData({ amountDetected, selectedAddress }, secretKey);
+	const confirmationData = signRecordData({ amountDetected, selectedAddress }, secretKey, TOKEN_TYPES.purchase);
 
 	return {
 		transactionDescription,
@@ -388,9 +389,9 @@ const get = async (params) => {
 	return await MongoORM.buildQuery(queryParams, Model, null, []);
 };
 
-const signRecordData = (recordData, secretKey) => {
+const signRecordData = (recordData, secretKey, typ = TOKEN_TYPES.record) => {
 	try {
-		const token = jwt.sign(recordData, secretKey);
+		const token = signToken(recordData, secretKey, { typ });
 		return token;
 	} catch (error) {
 		return { success: false, error: error.message };

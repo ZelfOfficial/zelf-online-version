@@ -203,9 +203,9 @@ const decryptWallet = async (params, authUser) => {
 
 	let zelfProof = params.zelfProof;
 
-	const zelfName = params.zelfName;
+	const requestedName = params.zelfName;
 
-	if (!zelfProof && zelfName) {
+	if (!zelfProof && requestedName) {
 		// TODO
 	}
 
@@ -252,7 +252,20 @@ const decryptWallet = async (params, authUser) => {
 	}
 
 	const SessionModule = require("../../Session/modules/session.module");
-	await SessionModule.markSessionIdentityVerified(authUser, zelfName || decryptedWallet?.publicData?.zelfName, params.domain);
+	const recordName = decryptedWallet?.publicData?.zelfName || decryptedWallet?.publicData?.tagName || "";
+	if (requestedName != null && String(requestedName).trim() !== "") {
+		const domain = params.domain || authUser?.domain || "zelf";
+		const requested = SessionModule.normalizeZelfName(requestedName, domain);
+		const actual = SessionModule.normalizeZelfName(recordName, domain);
+		if (!actual.zelfName || requested.zelfName !== actual.zelfName) {
+			const error = new Error("403:ZELF_NAME_MISMATCH");
+			error.status = 403;
+			error.code = "ZELF_NAME_MISMATCH";
+			error.clientCode = "ZELF_NAME_MISMATCH";
+			throw error;
+		}
+	}
+	await SessionModule.markSessionIdentityVerified(authUser, recordName, params.domain);
 
 	return {
 		...decryptedWallet,
@@ -384,7 +397,7 @@ const importWallet = async (params, authUser) => {
 
 	const saved = await _saveImportedWallet(wallet, params, dataToEncrypt, password, authUser);
 	const SessionModule = require("../../Session/modules/session.module");
-	await SessionModule.markSessionIdentityVerified(authUser, zelfName, params.domain);
+	await SessionModule.markSessionIdentityVerified(authUser, dataToEncrypt.publicData.zelfName, params.domain);
 	return saved;
 };
 

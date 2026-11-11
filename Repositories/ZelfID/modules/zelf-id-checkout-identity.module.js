@@ -89,6 +89,7 @@ const mapDecryptError = (error) => {
 
 /**
  * Current server stamp for this session, or null when there is none or the window has closed.
+ * Reads `verifiedTagName` on the session document only.
  * @param {Object} authUser
  * @returns {Promise<string|null>} normalized `name.domain`
  */

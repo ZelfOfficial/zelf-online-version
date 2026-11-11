@@ -35,7 +35,7 @@ const SessionModule = require("../../Session/modules/session.module");
 const QRZelfProofExtractor = require("./qr-zelfproof-extractor.module");
 const ArweaveModule = require("../../Arweave/modules/arweave.module");
 const { unPinFiles, unpinContinuationSiblings } = require("./tags-ipfs.module");
-const jwt = require("jsonwebtoken");
+const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 
 /**
  * Generate domain-specific hold domain
@@ -275,11 +275,13 @@ const decryptTag = async (params, authUser) => {
     const healedHasPassword = healDecryptedTagPassword(tagObject, password);
 
     const SessionModule = require("../../Session/modules/session.module");
-    await SessionModule.markSessionIdentityVerified(
-        authUser,
-        tagObject.publicData?.tagName || tagObject.publicData?.zelfName || tagName,
-        domain
-    );
+    const decryptedRecord = {
+        publicData: {
+            ...(tagObject.publicData || {}),
+            ...(decryptedZelfProof.publicData || {}),
+        },
+    };
+    await SessionModule.stampVerifiedFromRecord(authUser, decryptedRecord, tagName, domain);
 
     const { mnemonic, zkProof, solanaSecretKey } = decryptedZelfProof.metadata;
 
@@ -340,12 +342,13 @@ const decryptTag = async (params, authUser) => {
         ...tagObject,
         domain,
         pgp: { encryptedMessage, privateKey },
-        durationToken: jwt.sign(
+        durationToken: signToken(
             {
                 tagName: tagObject.publicData[tagKey] || tagObject.publicData.tagName || tagObject.publicData.zelfName,
                 exp: moment().add(1, "month").unix(),
             },
-            config.JWT_SECRET
+            config.JWT_SECRET,
+            { typ: TOKEN_TYPES.duration }
         ),
         metadata:
             config.env === "development"

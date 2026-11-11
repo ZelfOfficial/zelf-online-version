@@ -1,4 +1,5 @@
 const { string, validate, boolean, stringEnum, object, array, stringOrNumber } = require("../../../Core/JoiUtils");
+const { TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const { errorHandler } = require("../../../Core/http-handler");
 const PlanLimits = require("../modules/zelf-key-plan-limits.module");
 const Session = require("../../Session/models/session.model");
@@ -508,8 +509,13 @@ const listAllValidation = async (ctx, next) => {
 // Staff and lawyer tokens are signed by the server at login with their account type.
 const DASHBOARD_PRIVILEGED_ACCOUNTS = new Set(["staff", "staff_account", "lawyer", "lawyer_account"]);
 
-const isDashboardPrivileged = (authUser = {}) =>
-	DASHBOARD_PRIVILEGED_ACCOUNTS.has(authUser.accountType || authUser.publicData?.accountType || "");
+const isDashboardPrivileged = (authUser = {}) => {
+	const accountType = authUser.accountType || authUser.publicData?.accountType || "";
+	if (!DASHBOARD_PRIVILEGED_ACCOUNTS.has(accountType)) return false;
+	if (authUser.typ === TOKEN_TYPES.staff && String(accountType).startsWith("staff")) return true;
+	if (authUser.typ === TOKEN_TYPES.lawyer && String(accountType).startsWith("lawyer")) return true;
+	return !authUser.typ && Number.isFinite(authUser.exp);
+};
 
 /**
  * Dashboard list validation - requires identifier (user.domain format).
@@ -616,9 +622,8 @@ const requireZelfIdentity = (ctx) => {
 };
 
 /**
- * The session must carry a current server stamp for the same normalized wallet as the token
- * (and, when `options.requestedIdentifier` is provided, for the queried `user.domain`).
- * Used by /limits, /summary, and by reads that return item metadata (website, username, type).
+ * Ownership is the server stamp `verifiedTagName` written after a matching decrypt.
+ * The JWT tagName and the session's client tagName are not proof of that wallet.
  */
 const requireVerifiedWallet = async (ctx, options = {}) => {
 	const authUser = ctx.state.user;
