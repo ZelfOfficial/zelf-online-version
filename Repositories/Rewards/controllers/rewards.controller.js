@@ -55,9 +55,18 @@ const firstTransactionReward = async (ctx) => {
 
         ctx.body = data;
     } catch (error) {
+        if (error?.clientCode || (typeof error?.code === "string" && error.code.startsWith("ERR_"))) {
+            const _exception = errorHandler(error, ctx);
+
+            ctx.status = _exception.status;
+
+            ctx.body = { message: _exception.message, code: _exception.code };
+            return;
+        }
+
         const _exception = errorHandler(error, ctx);
 
-        ctx.status = error.status || 500;
+        ctx.status = error.status || _exception.status || 500;
 
         ctx.body = { error: error.message };
     }
