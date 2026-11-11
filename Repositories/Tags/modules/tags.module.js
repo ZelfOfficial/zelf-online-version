@@ -10,7 +10,7 @@ const { createStellarWallet } = require("../../Wallet/modules/stellar");
 const { createPolkadotWallet, createKusamaWallet } = require("../../Wallet/modules/polkadot-kusama");
 const { createTonWallet } = require("../../Wallet/modules/ton");
 const { decrypt, preview } = require("../../ZelfProof/modules/zelf-proof.module");
-const OfflineProofModule = require("../../Mina/offline-proof");
+
 const config = require("../../../Core/config");
 const { confirmPayUniqueAddress } = require("../../purchase-zelf/modules/balance-checker.module");
 const { initTagUpdates, updateTags } = require("./sync-tag-records.module");
@@ -145,12 +145,12 @@ const leaseTag = async (params, authUser) => {
             config.env === "production"
                 ? undefined
                 : {
-                      // for development porposes so we can visualize the arweave private key and the mnemonic for testing.
-                      mnemonic,
-                      arweavePrivateKey: arweave.privateKey,
-                      stellarSecretKey: stellar.secretKey,
-                      substrateSecretKey: polkadot.secretKey,
-                  },
+                    // for development porposes so we can visualize the arweave private key and the mnemonic for testing.
+                    mnemonic,
+                    arweavePrivateKey: arweave.privateKey,
+                    stellarSecretKey: stellar.secretKey,
+                    substrateSecretKey: polkadot.secretKey,
+                },
     };
 };
 
@@ -285,12 +285,12 @@ const decryptTag = async (params, authUser) => {
         metadata:
             config.env === "development"
                 ? {
-                      mnemonic,
-                      zkProof,
-                      solanaSecretKey,
-                      arweavePrivateKey: arweave.privateKey,
-                      substrateSecretKey: (await createPolkadotWallet(mnemonic)).secretKey,
-                  }
+                    mnemonic,
+                    zkProof,
+                    solanaSecretKey,
+                    arweavePrivateKey: arweave.privateKey,
+                    substrateSecretKey: (await createPolkadotWallet(mnemonic)).secretKey,
+                }
                 : undefined,
     };
 };
@@ -493,7 +493,7 @@ const _createWalletsFromPhrase = async (params) => {
     const kusama = await createKusamaWallet(_mnemonic);
     const ton = await createTonWallet(_mnemonic);
 
-    const zkProof = await OfflineProofModule.createProof(_mnemonic);
+    const zkProof = null;
     const arweave = await ArweaveModule.generateWalletFromMnemonic(_mnemonic);
 
     return {

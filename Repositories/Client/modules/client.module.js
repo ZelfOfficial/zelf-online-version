@@ -5,7 +5,6 @@ const moment = require("moment");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const zelfProofModule = require("../../ZelfProof/modules/zelf-proof.module");
 const { generateMnemonic } = require("../../Wallet/modules/helpers");
-const OfflineProofModule = require("../../Mina/offline-proof");
 const axios = require("axios");
 const sharp = require("sharp");
 const { createEthWallet } = require("../../Wallet/modules/eth");
@@ -141,7 +140,7 @@ const create = async (data) => {
 
 	const apiKey = `zk_${crypto.randomBytes(12).toString("hex").slice(0, 24)}`;
 
-	const zkProof = await OfflineProofModule.createProof(apiKey);
+	const zkProof = null;
 
 	const mnemonic = generateMnemonic(12);
 
@@ -155,7 +154,6 @@ const create = async (data) => {
 		faceBase64: data.faceBase64,
 		metadata: {
 			apiKey,
-			zkProof,
 			mnemonic,
 		},
 		password: data.masterPassword || undefined,

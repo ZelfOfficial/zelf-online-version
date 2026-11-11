@@ -6,7 +6,6 @@ const { createSolanaWallet } = require("../../Wallet/modules/solana");
 const { createBTCWallet } = require("../../Wallet/modules/btc");
 const SessionModule = require("../../Session/modules/session.module");
 const { encrypt, decrypt, preview, encryptQR } = require("../../Wallet/modules/encryption");
-const OfflineProofModule = require("../../Mina/offline-proof");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const moment = require("moment");
 const config = require("../../../Core/config");
@@ -246,7 +245,7 @@ const _createWalletsFromPhrase = async (params, authUser) => {
 	const eth = createEthWallet(_mnemonic);
 	const btc = createBTCWallet(_mnemonic);
 	const solana = await createSolanaWallet(_mnemonic);
-	const zkProof = await OfflineProofModule.createProof(_mnemonic);
+	const zkProof = null;
 
 	return { eth, btc, solana, zkProof, mnemonic: _mnemonic, face, password };
 };
@@ -263,7 +262,7 @@ const leaseZelfName = async (params, authUser) => {
 
 	const referralZelfNameObject = await _validateReferral(referralZelfName, authUser);
 
-	const { eth, btc, solana, zkProof, mnemonic, face, password } = await _createWalletsFromPhrase(params, authUser);
+	const { eth, btc, solana, mnemonic, face, password } = await _createWalletsFromPhrase(params, authUser);
 
 	const zelfNameObject = {};
 
@@ -277,7 +276,6 @@ const leaseZelfName = async (params, authUser) => {
 		},
 		metadata: {
 			mnemonic,
-			zkProof,
 		},
 		faceBase64: face,
 		password,
@@ -403,7 +401,7 @@ const _createReceivingWallets = async (zelfNameObject) => {
 	const btc = createBTCWallet(mnemonic);
 	const solana = await createSolanaWallet(mnemonic);
 
-	const zkProof = await OfflineProofModule.createProof(mnemonic);
+	const zkProof = null;
 
 	// save it now in ipfs and arweave
 	const paymentName = `${zelfNameObject.zelfName}`.replace(".zelf", ".zelfpay");
@@ -418,7 +416,6 @@ const _createReceivingWallets = async (zelfNameObject) => {
 		},
 		metadata: {
 			mnemonic,
-			zkProof,
 		},
 		faceBase64: jsonfile.faceBase64,
 		password: jsonfile.password,
@@ -427,7 +424,6 @@ const _createReceivingWallets = async (zelfNameObject) => {
 		addServerPassword: true,
 	};
 
-	const zelfProof = await encrypt(dataToEncrypt);
 	const image = await encryptQR(dataToEncrypt);
 
 	const payload = {
@@ -435,7 +431,6 @@ const _createReceivingWallets = async (zelfNameObject) => {
 		name: paymentName,
 		metadata: {
 			hasPassword: zelfNameObject.hasPassword,
-			zelfProof,
 			type: "mainnet",
 			ethAddress: eth.address,
 			solanaAddress: solana.address,
@@ -453,7 +448,6 @@ const _createReceivingWallets = async (zelfNameObject) => {
 
 	const arweaveRecord = await ArweaveModule.zelfNameRegistration(image, {
 		hasPassword: "true",
-		zelfProof,
 		publicData: {
 			...dataToEncrypt.publicData,
 			zelfName: paymentName,

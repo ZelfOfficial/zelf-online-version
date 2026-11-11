@@ -7,20 +7,19 @@ module.exports = (server) => {
     require("../Repositories/dataAnalytics/routes/dataAnalytics.route")(server);
     require("../Repositories/Arweave/routes/ar-io-arns.routes")(server);
     //B
-    require("../Repositories/bnb/routes/binance-smart-chain.route")(server);
+
     require("../Repositories/binance/routes/binance.route")(server);
     require("../Repositories/bitcoin/routes/bitcoin-scrapping.route")(server);
     require("../Repositories/base/routes/base.routes")(server);
     require("../Repositories/Blogs/routes/blog-protected.routes")(server);
     //C
-    require("../Repositories/cardano/routes/cardano-scrapping.route")(server);
     require("../Repositories/Client/routes/client.route")(server);
     //D
     //E
     require("../Repositories/etherscan/routes/etherscan.route")(server);
     require("../Repositories/etherscan/routes/etherscan-scrapping.route")(server);
     //F
-    require("../Repositories/fantom/routes/fantom-scrapping.route")(server);
+
     //G
     //H
     require("../Repositories/HumanAuthn/routes/human-authn-protected.route")(server);

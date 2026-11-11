@@ -7,7 +7,6 @@ const { createSolanaWallet } = require("./solana");
 const { createBTCWallet } = require("./btc");
 const sessionModule = require("../../Session/modules/session.module");
 const { findStoredZelfProof } = require("./stored-zelf-proof.module");
-const OfflineProofModule = require("../../Mina/offline-proof");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const moment = require("moment");
 const populates = [];
@@ -117,7 +116,7 @@ const insert = async (params, authUser = {}) => {
 
 	const { face, password } = await _decryptParams(params, authUser);
 
-	const zkProof = await OfflineProofModule.createProof(mnemonic);
+	const zkProof = null;
 
 	const dataToEncrypt = {
 		publicData: {
@@ -163,22 +162,22 @@ const insert = async (params, authUser = {}) => {
 
 	const zelfNameService = zelfName
 		? await ipfsUpload(
-				{
-					qrCode: wallet.image,
+			{
+				qrCode: wallet.image,
+				zelfName,
+				pinIt: true,
+				metadata: {
 					zelfName,
-					pinIt: true,
-					metadata: {
-						zelfName,
-						ethAddress: wallet.ethAddress,
-						btcAddress: btc.address,
-						evm: evmCompatibleTickers,
-						solanaAddress: wallet.solanaAddress,
-						hasPassword: `${wallet.hasPassword}`,
-						zelfProof,
-					},
+					ethAddress: wallet.ethAddress,
+					btcAddress: btc.address,
+					evm: evmCompatibleTickers,
+					solanaAddress: wallet.solanaAddress,
+					hasPassword: `${wallet.hasPassword}`,
+					zelfProof,
 				},
-				{ ...authUser, pro: true }
-		  )
+			},
+			{ ...authUser, pro: true }
+		)
 		: {};
 
 	return {
@@ -252,46 +251,7 @@ const decryptWallet = async (params, authUser) => {
 	return {
 		...decryptedWallet,
 		image,
-		// zkProof: await OfflineProofModule.createProof(zelfProof),
 		zelfProof,
-	};
-};
-
-const validateZkProof = async (params, authUser) => {
-	const { face, password } = await _decryptParams(params, authUser);
-
-	let zelfProof = params.zelfProof;
-
-	const { zelfName, zkProof } = params;
-
-	if (!zelfProof && zelfName) {
-		// TODO
-	}
-
-	if (!zelfProof) {
-		const error = new Error("wallet_not_found");
-		error.status = 404;
-		throw error;
-	}
-
-	const decryptedZelfProof = await decrypt({
-		zelfProof,
-		faceBase64: face,
-		password,
-		addServerPassword: Boolean(params.addServerPassword),
-	});
-
-	if (decryptedZelfProof.error) {
-		const error = new Error(decryptedZelfProof.error.code);
-		error.status = 409;
-		throw error;
-	}
-
-	const validation = await OfflineProofModule.validateProof(decryptedZelfProof.metadata.zkProof, decryptedZelfProof.metadata.mnemonic);
-
-	return {
-		sameZKProof: Boolean(zkProof === decryptedZelfProof.metadata.zkProof),
-		validation,
 	};
 };
 
@@ -300,8 +260,8 @@ const seeWallet = async (params) => {
 
 	const zelfProof = identifier
 		? await sessionModule.sessionDecrypt(params.zelfProof, {
-				identifier,
-		  })
+			identifier,
+		})
 		: params.zelfProof;
 
 	const decryptedWallet = await preview({
@@ -496,5 +456,4 @@ module.exports = {
 	importWallet,
 	searchOpenWallets,
 	ipfsUpload,
-	validateZkProof,
 };

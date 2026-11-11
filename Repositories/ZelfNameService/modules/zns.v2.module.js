@@ -10,7 +10,6 @@ const { createSolanaWallet } = require("../../Wallet/modules/solana");
 const { createBTCWallet } = require("../../Wallet/modules/btc");
 const { generateSuiWalletFromMnemonic } = require("../../Wallet/modules/sui");
 const { decrypt, encrypt, preview, encryptQR } = require("../../Wallet/modules/encryption");
-const OfflineProofModule = require("../../Mina/offline-proof");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const config = require("../../../Core/config");
 const jwt = require("jsonwebtoken");
@@ -36,7 +35,7 @@ const leaseZelfName = async (params, authUser) => {
 
 	const { face, password } = decryptedParams;
 
-	const { eth, btc, solana, sui, zkProof, mnemonic } = await _createWalletsFromPhrase({
+	const { eth, btc, solana, sui, mnemonic } = await _createWalletsFromPhrase({
 		...params,
 		mnemonic: decryptedParams.mnemonic,
 	});
@@ -157,11 +156,10 @@ const decryptZelfName = async (params, authUser) => {
 		domain: nameDomain,
 	});
 
-	const { mnemonic, zkProof, solanaSecretKey } = decryptedZelfProof.metadata;
+	const { mnemonic, solanaSecretKey } = decryptedZelfProof.metadata;
 
 	const { encryptedMessage, privateKey, tagsToAdd } = await initTagUpdates(zelfNameObject, {
 		mnemonic,
-		zkProof,
 		solanaSecretKey,
 		password,
 	});
@@ -189,7 +187,7 @@ const decryptZelfName = async (params, authUser) => {
 	return {
 		hasPassword: Boolean(password),
 		image: zelfNameObject.zelfProofQRCode,
-		metadata: config.env === "development" ? { mnemonic, zkProof, solanaSecretKey } : undefined,
+		metadata: config.env === "development" ? { mnemonic, solanaSecretKey } : undefined,
 		pgp: { encryptedMessage, privateKey },
 		url: zelfNameObject.url,
 		zelfName: zelfNameObject.publicData.zelfName,
@@ -330,14 +328,12 @@ const _createWalletsFromPhrase = async (params) => {
 	const btc = createBTCWallet(_mnemonic);
 	const solana = await createSolanaWallet(_mnemonic);
 	const sui = await generateSuiWalletFromMnemonic(_mnemonic);
-	const zkProof = await OfflineProofModule.createProof(_mnemonic);
 
 	return {
 		eth,
 		btc,
 		solana,
 		sui,
-		zkProof,
 		mnemonic: _mnemonic,
 	};
 };
