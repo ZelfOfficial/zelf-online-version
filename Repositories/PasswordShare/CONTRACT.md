@@ -14,6 +14,8 @@ https://zelf.world/share/<id>#<base64url key>
 
 CORS is app-wide `Access-Control-Allow-Origin: *` (`server.js`). `https://zelf.world` and `http://localhost:3009` can call the public routes without cookies. Do not send `credentials: "include"`.
 
+Password-share responses also send `Access-Control-Expose-Headers: Retry-After`. That header is limited to these routes. A cross-origin `429` includes `Retry-After` (seconds), and the landing page can read it for the countdown. App-wide CORS does not expose it.
+
 Success bodies are the objects below. They are not wrapped in `{ data }`.
 
 Error bodies are `{ "code": "<UPPER_SNAKE>", "message": "<same code>" }` plus the HTTP status in the table. A missing or invalid session on an owner route is the existing JWT 401: `{ "error": "Protected resource, use Authorization header to get access" }`.
@@ -131,7 +133,7 @@ When `remainingViews` reaches 0 the ciphertext and IV are deleted. A second conc
 | 404 | `SHARE_NOT_FOUND` | Unknown id, revoked, or consumed. These cases use the same code |
 | 410 | `SHARE_EXPIRED` | The row is past `expiresAt` and has not been reaped. Revoked rows stay `404` |
 | 413 | `SHARE_TOO_LARGE` | Decoded ciphertext is larger than 16384 bytes |
-| 429 | `PASSWORD_SHARE_RATE_LIMITED` | Create, metadata, or reveal exceeded the per-minute cap. `Retry-After` is set |
+| 429 | `PASSWORD_SHARE_RATE_LIMITED` | Create, metadata, or reveal exceeded the per-minute cap. `Retry-After` is set and listed in `Access-Control-Expose-Headers` |
 | 500 | `SHARE_UNAVAILABLE` | The database write or read failed |
 
 Rate limits (per minute, in-memory, override with env): create `PASSWORD_SHARE_CREATE_RATE_LIMIT_PER_MINUTE` (default 30, keyed by session `identifier`), metadata `PASSWORD_SHARE_METADATA_RATE_LIMIT_PER_MINUTE` (default 60, per IP), reveal `PASSWORD_SHARE_REVEAL_RATE_LIMIT_PER_MINUTE` (default 20, per IP).

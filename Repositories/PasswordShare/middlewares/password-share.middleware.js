@@ -6,6 +6,26 @@ const { assertPasswordShareRateLimit } = require("../modules/password-share-rate
  * ciphertext, so drop that copy before a later logger or error reporter can
  * see it. The parsed fields the handler needs stay in place.
  */
+/**
+ * Browsers hide Retry-After from cross-origin JavaScript unless the response
+ * lists it here. Scoped to these routes so the landing countdown can read a 429.
+ * Must run before rateLimit: that middleware answers 429 without calling next().
+ */
+const exposeRetryAfter = async (ctx, next) => {
+	const current = ctx.response.get("Access-Control-Expose-Headers");
+	const names = String(current || "")
+		.split(",")
+		.map((part) => part.trim())
+		.filter(Boolean);
+
+	if (!names.some((name) => name.toLowerCase() === "retry-after")) {
+		names.push("Retry-After");
+	}
+
+	ctx.set("Access-Control-Expose-Headers", names.join(", "));
+	await next();
+};
+
 const discardRawBody = async (ctx, next) => {
 	const request = ctx.request;
 	if (request) {
@@ -38,5 +58,6 @@ const rateLimit = (kind) => async (ctx, next) => {
 
 module.exports = {
 	discardRawBody,
+	exposeRetryAfter,
 	rateLimit,
 };

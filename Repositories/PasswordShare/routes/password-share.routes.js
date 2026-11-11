@@ -11,9 +11,9 @@ const Middleware = require("../middlewares/password-share.middleware");
 module.exports = (server) => {
 	const PATH = config.basePath("/password-shares");
 
-	server.post(PATH, Middleware.rateLimit("create"), Middleware.discardRawBody, Controller.create);
+	server.post(PATH, Middleware.exposeRetryAfter, Middleware.rateLimit("create"), Middleware.discardRawBody, Controller.create);
 
-	server.get(PATH, Middleware.discardRawBody, Controller.list);
+	server.get(PATH, Middleware.exposeRetryAfter, Middleware.discardRawBody, Controller.list);
 
-	server.delete(`${PATH}/:id`, Middleware.discardRawBody, Controller.revoke);
+	server.delete(`${PATH}/:id`, Middleware.exposeRetryAfter, Middleware.discardRawBody, Controller.revoke);
 };
