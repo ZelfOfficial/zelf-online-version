@@ -28,13 +28,8 @@ module.exports = (server) => {
         Controller.encryptQRCode
     );
 
-    server.post(
-        `${PATH}/decrypt`,
-        OptionalJwtMiddleware.optionalJwt,
-        PaymentMiddleware.paymentRequired,
-        Middleware.decryptValidation,
-        Controller.decrypt
-    );
+    // Retired on v3. Respond before optional JWT, payment, and body validation.
+    server.post(`${PATH}/decrypt`, Controller.decrypt);
 
     server.post(
         `${PATH}/preview`,
