@@ -28,6 +28,7 @@ const newSessionDocument = (params) => ({
 	clientIP: params.clientIP,
 	domain: params.domain || "zelf",
 	ethAddress: params.ethAddress || null,
+	// Keep the client identifier. Callers compare it with the JWT and request the session public key with the same value.
 	identifier: params.identifier || params.clientIP,
 	isWebExtension: params.isWebExtension || false,
 	status: "active",
@@ -95,36 +96,123 @@ const get = async (params, authUser = {}) => {
 	return await MongoORM.buildQuery(queryParams, Model, null, populates);
 };
 
+const sameId = (left, right) => left != null && right != null && String(left) === String(right);
+
+/** killSession is sent as 1 by the extension. */
+const isKillSession = (value) => value === true || value === 1 || value === "1" || value === "true";
+
 /**
- * @param {*} params
+ * JWT for this request, or null when the header is missing or does not verify.
+ * An invalid header is not treated as a session.
+ * @param {string|undefined|null} authorization
+ * @returns {Object|null}
  */
-const insert = async (params) => {
-	const queryParams = {
-		findOne: true,
-	};
+const claimsFromAuthorization = (authorization) => {
+	if (typeof authorization !== "string" || !authorization.trim()) return null;
 
-	queryParams.where_clientIP = params.clientIP;
+	let token = authorization.trim();
 
-	// tagName / verifiedTagName / zelfName / identity are not lookup keys.
-	if (params.identifier) queryParams["?where_identifier"] = params.identifier;
+	if (token.startsWith("Bearer ") || token.startsWith("JWT ")) {
+		token = token.split(" ")[1] || "";
+	} else {
+		const indexOfToken = token.indexOf("ey");
+		if (indexOfToken > 0) token = token.substring(indexOfToken);
+	}
 
-	let existingSession = await get(queryParams);
+	if (!token) return null;
 
-	if (existingSession) {
-		if (params.killSession) {
-			try {
-				await existingSession.deleteOne();
-			} catch (_) {
-				// session was already deleted by a concurrent request, which is fine
-			}
+	try {
+		const decoded = jwt.verify(token, config.JWT_SECRET, { algorithms: ["HS256"] });
+		if (!decoded || typeof decoded !== "object" || !decoded.session) return null;
+		return decoded;
+	} catch (_error) {
+		return null;
+	}
+};
 
-			existingSession = null;
-		} else {
-			return sessionTokenResponse(existingSession, existingSession.ethAddress || null);
+/**
+ * Claims to use for session reuse. A present Authorization header is the only source;
+ * an invalid header does not fall back to another user object.
+ * @param {string|undefined|null} authorization
+ * @param {Object|null} [authUser]
+ * @returns {Object|null}
+ */
+const presentedSessionClaims = (authorization, authUser = null) => {
+	if (typeof authorization === "string" && authorization.trim()) {
+		return claimsFromAuthorization(authorization);
+	}
+
+	if (authUser && typeof authUser === "object" && authUser.session) return authUser;
+
+	return null;
+};
+
+/**
+ * Reuse a stored session only when the caller presents a JWT for that session id
+ * and the request identifier is the identifier stored on it.
+ * Otherwise the result is a new document that does not copy verification.
+ * killSession removes a session only in the reuse case.
+ * @param {Object} params
+ * @param {Object|null} claims
+ * @param {Object|null} ownedSession session loaded by claims.session, or null
+ */
+const prepareSessionInsert = (params, claims, ownedSession) => {
+	const requestedIdentifier = params.identifier || params.clientIP;
+	const owns =
+		Boolean(claims?.session) &&
+		Boolean(ownedSession) &&
+		sameId(claims.session, ownedSession._id) &&
+		ownedSession.identifier === requestedIdentifier;
+
+	if (isKillSession(params.killSession)) {
+		if (!owns) {
+			return { action: "reject", status: 401, code: "SESSION_TOKEN_REQUIRED" };
+		}
+
+		return { action: "replace", session: ownedSession, document: newSessionDocument(params) };
+	}
+
+	if (owns) {
+		return { action: "refresh", session: ownedSession };
+	}
+
+	return { action: "create", document: newSessionDocument(params) };
+};
+
+/**
+ * @param {Object} params
+ * @param {Object|null} [authUser] verified session claims, when the caller already checked the JWT
+ */
+const insert = async (params, authUser = null) => {
+	const claims = authUser && authUser.session ? authUser : null;
+
+	// Reject the delete before any lookup so a request without a token does not read or remove a session.
+	if (isKillSession(params.killSession) && !claims) {
+		throw namedError(401, "SESSION_TOKEN_REQUIRED");
+	}
+
+	await Model.ensureNonUniqueIdentifierIndex();
+
+	const ownedSession = claims?.session ? await Model.findById(claims.session) : null;
+	const plan = prepareSessionInsert(params, claims, ownedSession);
+
+	if (plan.action === "reject") {
+		throw namedError(plan.status, plan.code);
+	}
+
+	if (plan.action === "refresh") {
+		return sessionTokenResponse(plan.session, plan.session.ethAddress || null);
+	}
+
+	if (plan.action === "replace") {
+		try {
+			await plan.session.deleteOne();
+		} catch (_error) {
+			// session was already deleted by a concurrent request, which is fine
 		}
 	}
 
-	const session = new Model(newSessionDocument(params));
+	const session = new Model(plan.document);
 
 	try {
 		await session.save();
@@ -132,8 +220,13 @@ const insert = async (params) => {
 		console.error({
 			exception,
 			identifier: params.clientIP,
-			...session,
 		});
+
+		if (exception && (exception.code === 11000 || exception.code === 11001)) {
+			throw namedError(409, "SESSION_IDENTIFIER_IN_USE");
+		}
+
+		throw exception;
 	}
 
 	return sessionTokenResponse(session, params.ethAddress || null);
@@ -325,7 +418,15 @@ const walletDecrypt = async (content, walletScopeKey, password, legacyIdentifier
  * @author Miguel Trevino
  */
 const deleteSession = async (authUser) => {
-	return await Model.deleteMany({ identifier: authUser.identifier });
+	if (authUser?.session) {
+		return await Model.deleteOne({ _id: authUser.session });
+	}
+
+	if (authUser?.identifier) {
+		return await Model.deleteMany({ identifier: authUser.identifier });
+	}
+
+	return null;
 };
 
 const nameOnRecord = (record) => {
@@ -493,6 +594,10 @@ const readVerifiedTagName = async (authUser) => {
 module.exports = {
 	get,
 	insert,
+	claimsFromAuthorization,
+	presentedSessionClaims,
+	prepareSessionInsert,
+	sessionTokenResponse,
 	getPublicKey,
 	decryptContent,
 	encryptContent,

@@ -70,13 +70,19 @@ const create = async (ctx) => {
 			return;
 		}
 
-		const data = await Module.insert({ ...ctx.request.body, clientIP: clientIp }, ctx.state.user);
+		const claims = Module.presentedSessionClaims(ctx.get("authorization"), ctx.state.user);
+		const data = await Module.insert({ ...ctx.request.body, clientIP: clientIp }, claims);
 
 		ctx.body = { data };
 	} catch (error) {
 		console.error({ error });
 
 		ctx.status = error.status || 500;
+
+		if (error.clientCode) {
+			ctx.body = { error: error.clientCode, code: error.clientCode };
+			return;
+		}
 
 		ctx.body = { error: error.message };
 	}
