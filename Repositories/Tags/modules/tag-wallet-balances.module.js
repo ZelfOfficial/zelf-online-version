@@ -2,7 +2,6 @@ const etherscanModule = require("../../etherscan/modules/etherscan.module");
 const bitcoinScrapingModule = require("../../bitcoin/modules/bitcoin-scrapping.module");
 const solanaScrapingModule = require("../../Solana/modules/solana-scrapping.module");
 const avalancheScrapingModule = require("../../Avalanche/modules/avalanche-scrapping.module");
-const tonScrapingModule = require("../../TON/modules/ton-scrapping.module");
 
 const EVM_ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
 
@@ -110,11 +109,6 @@ const getTagWalletBalances = async (params, options = {}) => {
             ? skip.has("avax")
                 ? Promise.resolve(SKIPPED)
                 : withOptionalTimeout(avalancheScrapingModule.getBalance({ id: evm }), networkTimeoutMs, "avax")
-            : Promise.resolve(null),
-        ton
-            ? skip.has("ton")
-                ? Promise.resolve(SKIPPED)
-                : withOptionalTimeout(tonScrapingModule.getAddress({ id: ton }), networkTimeoutMs, "ton")
             : Promise.resolve(null),
     ]);
 

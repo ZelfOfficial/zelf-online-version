@@ -24,8 +24,6 @@ module.exports = (server) => {
     //N
     //O
     //P
-    require("../Repositories/PreSale/routes/pre-sale.routes")(server);
-
     //Q
     //R
     /** JSON-RPC proxy: no JWT; IP limits via Repositories/RPCCaller. */
@@ -33,12 +31,12 @@ module.exports = (server) => {
     //S
     require("../Repositories/SuperAdmin/routes/super-admin.route")(server);
     require("../Repositories/Session/routes/session.route")(server);
-    require("../Repositories/Stripe/routes/stripe.routes")(server);
+
     require("../Repositories/Subscribers/routes/subscriber.route")(server);
-    require("../Repositories/ZelfKeysSubscription/routes/zelf-keys-subscription.routes")(server);
+
     require("../Repositories/Staff/routes/unprotected-staff.route")(server);
     //T
-    require("../Repositories/TON/routes/ton-unprotected.route")(server);
+
     //U
     //V
     require("../Repositories/VaultLegacy/routes/vault-legacy.routes")(server);

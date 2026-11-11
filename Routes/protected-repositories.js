@@ -54,14 +54,9 @@ module.exports = (server) => {
     require("../Repositories/sui/routes/sui-scrapping.route")(server);
     require("../Repositories/Solana/routes/solana-scrapping.route")(server);
     require("../Repositories/Solana/routes/solana-payment.route")(server);
-    require("../Repositories/ZelfKeysSubscription/routes/zelf-keys-subscription-protected.routes")(server);
-    require("../Repositories/SubscriptionPlan/routes/subscription-plan.route")(server);
     require("../Repositories/Staff/routes/staff.route")(server);
     require("../Repositories/Stellar/routes/stellar-scrapping.route")(server);
     //T
-    require("../Repositories/TON/routes/ton-scrapping.route")(server);
-    require("../Repositories/TON/routes/ton-payment.route")(server);
-    require("../Repositories/tron/routes/tron-scrapping.route")(server);
     require("../Repositories/Tags/routes/tags.routes")(server);
     require("../Repositories/Tags/routes/zelf-ids.routes")(server);
     require("../Repositories/Tags/routes/my-tags.routes")(server);
