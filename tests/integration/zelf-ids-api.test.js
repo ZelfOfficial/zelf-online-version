@@ -812,7 +812,7 @@ describe("Zelf IDs API Integration Tests", () => {
             expect(response.body.data).toHaveProperty("btc");
             expect(response.body.data).toHaveProperty("sol");
             expect(response.body.data).toHaveProperty("avax");
-            expect(response.body.data).toHaveProperty("bdag");
+            expect(response.body.data).not.toHaveProperty("bdag");
             expect(response.body.data.eth).toHaveProperty("unit", "ETH");
             expect(response.body.data.eth).toHaveProperty("value");
         });

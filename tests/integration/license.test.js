@@ -748,14 +748,12 @@ describe("License API Integration Tests - Real Server", () => {
 
 			// Check if specific domains exist in the map
 			expect(response.body.data).toHaveProperty("zelf");
-			expect(response.body.data).toHaveProperty("bdag");
+			expect(response.body.data).not.toHaveProperty("bdag");
 
 			// Validate specific domain properties
 			expect(response.body.data.zelf.name).toBe("zelf");
 			expect(response.body.data.zelf.type).toBe("license");
 			expect(response.body.data.zelf.owner).toBe("miguel@zelf.world");
-
-			expect(response.body.data.bdag.name).toBe("bdag");
 		});
 
 		it("should fail to get domains without authentication", async () => {
@@ -811,7 +809,7 @@ describe("License API Integration Tests - Real Server", () => {
 			expect(response.body.data.tags.payment.currencies).toContain("BTC");
 			expect(response.body.data.tags.payment.currencies).toContain("ETH");
 			expect(response.body.data.tags.payment.currencies).toContain("USDC");
-			expect(response.body.data.tags.payment.currencies).toContain("BDAG");
+			expect(response.body.data.tags.payment.currencies).not.toContain("BDAG");
 			expect(response.body.data.tags.payment.currencies).toContain("ZNS");
 			expect(response.body.data.tags.payment.currencies).toContain("AVAX");
 			expect(response.body.data.metadata).toHaveProperty("version", "1.0.0");

@@ -184,7 +184,7 @@ describe("tx-notifications address validation", () => {
         const checksummed = getAddress(wallet.address);
         expect(valid("ethereum", checksummed).key).toBe(checksummed.toLowerCase());
         expect(valid("bsc", checksummed.toLowerCase()).key).toBe(checksummed.toLowerCase());
-        for (const network of ["polygon", "avalanche", "blockdag"]) expect(valid(network, checksummed)).not.toBeNull();
+        for (const network of ["polygon", "avalanche", "bsc"]) expect(valid(network, checksummed)).not.toBeNull();
 
         const letters = [...checksummed.slice(2)].map((c, i) => [c, i]).filter(([c]) => /[a-fA-F]/.test(c));
         const [letter, index] = letters[0];

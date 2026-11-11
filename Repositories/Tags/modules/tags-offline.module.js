@@ -1,6 +1,6 @@
 const { getDomainConfig } = require("../config/supported-domains");
 const { assertDomainOfferedForNewNames } = require("../../ZelfID/modules/zelf-id-plan.module");
-const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
+const { assertSupportedDomain } = require("../../../Core/unsupported-networks");
 const { assertTagAvailable } = require("./tag-availability");
 const { _findDuplicatedTag, _validateReferral, previewZelfProof, searchTag } = require("./tags.module");
 const TagsPartsModule = require("./tags-parts.module");
@@ -221,6 +221,7 @@ const leaseOfflineTag = async (params, authUser) => {
     let zelfProofQRCode = params.zelfProofQRCode;
     let zelfProof = params.zelfProof;
 
+    assertSupportedDomain(domain);
     const domainConfig = getDomainConfig(domain);
     // Address sync updates an existing record. A new offline lease still requires plan prices.
     if (domainConfig && !sync) assertDomainOfferedForNewNames(domainConfig);
@@ -229,7 +230,6 @@ const leaseOfflineTag = async (params, authUser) => {
 
     if (!sync) {
         await _findDuplicatedTag(tagName, domain, domainConfig);
-        assertDomainAcceptsNewUse(domain);
     }
 
     const referralTagObject = await _validateReferral(referralTagName, authUser, domainConfig, { enforceLimit: !sync });

@@ -1,7 +1,6 @@
 const config = require("../../../Core/config");
 const aptos = require("./aptos.adapter");
 const bitcoin = require("./bitcoin.adapter");
-const blockdag = require("./blockdag.adapter");
 const solana = require("./solana.adapter");
 const stellar = require("./stellar.adapter");
 const sui = require("./sui.adapter");
@@ -53,7 +52,6 @@ const buildRegistry = () => ({
     polygon: evmAdapter("polygon"),
     avalanche: evmAdapter("avalanche"),
     bsc: createEvmRpcAdapter("bsc"),
-    blockdag,
     solana,
     bitcoin,
     ton,
@@ -75,7 +73,6 @@ const concurrencyFor = (network) => {
         polygon: 3,
         avalanche: 3,
         bsc: 3,
-        blockdag: 2,
         bitcoin: 2,
         ton: config.ton?.apiKey ? 3 : 1,
         aptos: 3,

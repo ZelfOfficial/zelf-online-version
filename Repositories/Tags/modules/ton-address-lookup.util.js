@@ -12,7 +12,7 @@ const tonAddressLookupValues = (value) => {
     ])];
 };
 
-const EVM_ADDRESS_KEYS = new Set(["ethAddress", "evmAddress", "avalancheAddress", "blockDAGAddress"]);
+const EVM_ADDRESS_KEYS = new Set(["ethAddress", "evmAddress", "avalancheAddress"]);
 
 /**
  * Registry stores and filters are exact-match, and records hold the EIP-55 checksum.

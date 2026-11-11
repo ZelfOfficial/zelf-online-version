@@ -1,9 +1,10 @@
 const config = require("../../../Core/config");
+const { isUnsupportedDomain } = require("../../../Core/unsupported-networks");
 const gateway = require("../../Arweave/modules/arweave-gateway.module");
 
 const NAME_PATTERN = /^[a-z0-9-]{1,63}$/;
 
-/** "name", "name.zelf" or "name.bdag" -> { tagName, domain } */
+/** "name" or "name.zelf" -> { tagName, domain } */
 const parseZelfName = (raw) => {
 	const [tagName, domain = "zelf"] = String(raw || "").trim().toLowerCase().split(".");
 	if (!NAME_PATTERN.test(tagName || "") || !NAME_PATTERN.test(domain)) return null;
@@ -24,6 +25,11 @@ module.exports = (server) => {
 		if (!parsed) {
 			ctx.status = 400;
 			ctx.body = { error: "invalid_zelf_name" };
+			return;
+		}
+		if (isUnsupportedDomain(parsed.domain)) {
+			ctx.status = 400;
+			ctx.body = { code: "UNSUPPORTED_DOMAIN", message: "UNSUPPORTED_DOMAIN" };
 			return;
 		}
 		const zelfName = `${parsed.tagName}.${parsed.domain}`;

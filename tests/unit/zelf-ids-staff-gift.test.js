@@ -12,7 +12,7 @@ const licensed = (durations) => ({ licensePlanDurations: (plan) => (plan === "pr
 
 const deps = (over = {}) => {
     const d = {
-        resolveAuthorizedDomain: jest.fn().mockResolvedValue({ domain: "bdag" }),
+        resolveAuthorizedDomain: jest.fn().mockResolvedValue({ domain: "zelf" }),
         getDomainConfig: () => licensed(["1", "2"]),
         ZelfIdModule: { searchTag: jest.fn().mockResolvedValue({ available: false, tagObject: { publicData: { origin: "android" }, url: "u", cid: "c" } }) },
         Offline: { leaseOffline: jest.fn().mockResolvedValue({ provenance: { version: "3", type: "offline" } }), detectProofProvenance },
@@ -22,7 +22,7 @@ const deps = (over = {}) => {
     };
     return d;
 };
-const body = { tagName: "bas", domain: "bdag", plan: "premium", duration: "1", reason: "r", zelfProof: "p" };
+const body = { tagName: "bas", domain: "zelf", plan: "premium", duration: "1", reason: "r", zelfProof: "p" };
 
 describe("staff gift", () => {
     test("rejects non-staff and read-only staff", async () => {
@@ -49,7 +49,7 @@ describe("staff gift", () => {
         const d = deps();
         d.ZelfIdModule.searchTag.mockResolvedValueOnce({ available: true });
         const out = await giftZelfId(body, staff, d);
-        expect(d.Offline.leaseOffline).toHaveBeenCalledWith(expect.objectContaining({ preserveProvenance: true, tagName: "bas.bdag" }), staff);
+        expect(d.Offline.leaseOffline).toHaveBeenCalledWith(expect.objectContaining({ preserveProvenance: true, tagName: "bas.zelf" }), staff);
         expect(out.action).toBe("rebuilt_and_gifted");
     });
     test("existing name with preserveProvenance relabels from the proof", async () => {

@@ -2,7 +2,7 @@
 	"info": {
 		"_postman_id": "tags-api-collection",
 		"name": "Tags API - Multi-Domain System",
-		"description": "Complete API collection for the multi-domain tags system supporting .zelf, .avax, .btc, .tech, .bdag and custom domains",
+		"description": "Complete API collection for the multi-domain tags system supporting .zelf, .avax, .btc, .tech and custom domains",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
 		"version": "1.0.0"
 	},
@@ -753,7 +753,7 @@
 					"",
 					"// Set domain if not specified",
 					"if (!pm.variables.get('domain')) {",
-					"    const domains = ['zelf', 'avax', 'btc', 'tech', 'bdag'];",
+					"    const domains = ['zelf', 'avax', 'btc', 'tech'];",
 					"    pm.variables.set('domain', domains[Math.floor(Math.random() * domains.length)]);",
 					"}"
 				]

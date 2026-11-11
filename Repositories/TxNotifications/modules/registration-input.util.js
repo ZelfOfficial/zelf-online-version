@@ -1,4 +1,5 @@
 const { invalidRequest } = require("./tx-notifications-errors");
+const { isUnsupportedChain } = require("../../../Core/unsupported-networks");
 const { parseIssuedAt } = require("./registration-signature.util");
 const { isSupportedNetwork, isWatchedNetwork } = require("./networks");
 const { validateNetworkAddress, watchKey } = require("./address-validation.util");
@@ -72,14 +73,14 @@ const parseRegistrationBody = (body) => {
 
 /**
  * Validates every address of a supported network (400 names the network, never
- * the address). Unknown network keys are ignored so an app that adds a network
- * before the server does keeps working; they are still part of the signed text.
+ * the address). Unknown network keys, and chains this API no longer serves, are ignored
+ * so an app that still sends them keeps working. They stay part of the signed text.
  */
 const resolveAddresses = (addresses) => {
     const resolved = [];
 
     for (const network of Object.keys(addresses).sort()) {
-        if (!isSupportedNetwork(network)) continue;
+        if (isUnsupportedChain(network) || !isSupportedNetwork(network)) continue;
 
         const normalized = validateNetworkAddress(network, addresses[network]);
         if (!normalized) throw invalidRequest(`addresses.${network} is not a valid ${network} address`);

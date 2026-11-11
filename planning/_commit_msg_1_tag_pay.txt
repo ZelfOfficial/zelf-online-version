@@ -1,6 +1,6 @@
-feat(tags): multi-chain EVM tag pay (BSC, Ethereum, Polygon, Base, BlockDAG)
+feat(tags): multi-chain EVM tag pay (BSC, Ethereum, Polygon, Base)
 
-Add ZelfBscPay, ZelfEthPay, ZelfPolygonPay, ZelfBasePay, and ZelfBlockDagPay under checkoutContracts with npm deploy scripts. Normalize constructor token/treasury addresses for ethers v6; BlockDAG compiles via solc standard-json with evmVersion paris to avoid PUSH0 on older RPCs.
+Add ZelfBscPay, ZelfEthPay, ZelfPolygonPay, and ZelfBasePay under checkoutContracts with npm deploy scripts. Normalize constructor token/treasury addresses for ethers v6.
 
 Extend Core/config.js and tag payment/verification for per-chain contract addresses, stablecoins, RPC URLs, and chain IDs. Add chain-specific tag pay verify modules. License schema accepts BNB, POL, and BASE payment currencies.
 

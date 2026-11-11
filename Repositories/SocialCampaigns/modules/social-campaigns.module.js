@@ -284,11 +284,11 @@ const validateX = async (email, tagName, domain, screenshot, xUsername, authUser
 	// Get X accounts from config
 	const xAccounts = socialAccountsConfig.x.accounts;
 
-	if (!xAccounts || xAccounts.length === 0) throw new Error("500:x_accounts_not_configured");
+	if (!xAccounts || xAccounts.length === 0) throw new Error("400:social_accounts_not_configured");
 
 	// Always validate against configured accounts from the screenshot
 	// xUsername is optional - if provided, we'll use it for reference, but Gemini AI will detect from screenshot
-	// The screenshot should show the user following @blockdag8990 (Liza's account)
+	// The screenshot should show the user following a configured account.
 	let accountsToValidate = xAccounts;
 
 	// If xUsername is provided, verify it matches one of the configured accounts (optional validation)
@@ -384,7 +384,7 @@ const validateLinkedIn = async (email, tagName, domain, screenshot, linkedInUser
 	const linkedInAccounts = socialAccountsConfig.linkedin.accounts;
 
 	if (!linkedInAccounts || linkedInAccounts.length === 0) {
-		throw new Error("500:linkedin_accounts_not_configured");
+		throw new Error("400:social_accounts_not_configured");
 	}
 
 	// Always validate against configured accounts from the screenshot

@@ -96,7 +96,7 @@ describe("Preview Tags API Integration Tests - Real Server", () => {
 		it("should return validation error when tagName is missing", async () => {
 			const previewData = {
 				// tagName is intentionally missing
-				domain: "bdag",
+				domain: "zelf",
 				os: "DESKTOP",
 			};
 
@@ -132,7 +132,7 @@ describe("Preview Tags API Integration Tests - Real Server", () => {
 		it("should return validation error when os is missing", async () => {
 			const previewData = {
 				tagName: `t${Date.now().toString().slice(-6)}`,
-				domain: "bdag",
+				domain: "zelf",
 				// os is intentionally missing
 			};
 
@@ -150,7 +150,7 @@ describe("Preview Tags API Integration Tests - Real Server", () => {
 		it("should return unauthorized error when JWT token is missing", async () => {
 			const previewData = {
 				tagName: `t${Date.now().toString().slice(-6)}`,
-				domain: "bdag",
+				domain: "zelf",
 				os: "DESKTOP",
 			};
 
@@ -165,7 +165,7 @@ describe("Preview Tags API Integration Tests - Real Server", () => {
 		});
 
 		it("should handle different domain types", async () => {
-			const domains = ["zelf", "bdag"];
+			const domains = ["zelf"];
 
 			for (const domain of domains) {
 				const previewData = {
@@ -200,7 +200,7 @@ describe("Preview Tags API Integration Tests - Real Server", () => {
 			for (const os of osTypes) {
 				const previewData = {
 					tagName: `t${Date.now().toString().slice(-6)}${os}`,
-					domain: "bdag",
+					domain: "zelf",
 					os: os,
 				};
 
@@ -236,7 +236,7 @@ describe("Preview Tags API Integration Tests - Real Server", () => {
 			expect(response.body).toHaveProperty("validationError");
 		});
 
-		it("should return 200 with eth, btc, sol, avax, bdag keys when querying a valid ETH address", async () => {
+		it("should return 200 with eth, btc, sol, and avax keys when querying a valid ETH address", async () => {
 			const response = await request(API_BASE_URL)
 				.get("/api/tags/wallet-balances")
 				.set("Origin", "https://test.example.com")
@@ -248,7 +248,7 @@ describe("Preview Tags API Integration Tests - Real Server", () => {
 			expect(response.body.data).toHaveProperty("btc");
 			expect(response.body.data).toHaveProperty("sol");
 			expect(response.body.data).toHaveProperty("avax");
-			expect(response.body.data).toHaveProperty("bdag");
+			expect(response.body.data).not.toHaveProperty("bdag");
 			expect(response.body.data.eth).toHaveProperty("unit", "ETH");
 			expect(response.body.data.eth).toHaveProperty("value");
 		});

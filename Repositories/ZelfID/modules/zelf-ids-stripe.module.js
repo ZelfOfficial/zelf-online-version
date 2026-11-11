@@ -158,7 +158,7 @@ const resolveQuotedUsd = (tokenDecoded) => {
     }
 
     const prices = tokenDecoded?.prices || {};
-    for (const key of ["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE", "BDAG"]) {
+    for (const key of ["ETH", "SOL", "BTC", "AVAX", "BNB", "POL", "BASE", "TON"]) {
         const n = Number(prices[key]?.price);
         if (Number.isFinite(n) && n > 0) {
             return n;

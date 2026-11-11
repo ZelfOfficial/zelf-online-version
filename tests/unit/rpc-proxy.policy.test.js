@@ -29,7 +29,6 @@ const ENV_KEYS = [
     "EXTENSION_ARBITRUM_RPC_URL",
     "EXTENSION_OPTIMISM_RPC_URL",
     "EXTENSION_BASE_RPC_URL",
-    "EXTENSION_BLOCKDAG_RPC_URL",
     "EXTENSION_SOLANA_RPC_URL",
     "RPC_PROXY_MAX_BODY_BYTES",
     "RPC_PROXY_MAX_BATCH",
@@ -46,7 +45,6 @@ const chainCases = [
     ["arbitrum", "EXTENSION_ARBITRUM_RPC_URL", "eth_chainId", []],
     ["optimism", "EXTENSION_OPTIMISM_RPC_URL", "eth_chainId", []],
     ["base", "EXTENSION_BASE_RPC_URL", "eth_chainId", []],
-    ["blockdag", "EXTENSION_BLOCKDAG_RPC_URL", "eth_blockNumber", []],
     ["solana", "EXTENSION_SOLANA_RPC_URL", "getBalance", ["11111111111111111111111111111111"]],
 ];
 

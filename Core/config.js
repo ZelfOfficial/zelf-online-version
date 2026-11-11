@@ -351,7 +351,6 @@ const configuration = {
         processId: process.env.ARNS_PROCESS_ID,
         solanaMint: process.env.ARNS_SOLANA_MINT || "5mwShV7zD67vCRzSXeJg9Gmvni7akqHTst59iA9PwGwu",
         index_transaction_id: process.env.ARNS_INDEX_TRANSACTION_ID,
-        blockdag_transaction_id: process.env.ARNS_BLOCKDAG_TRANSACTION_ID || "Ogwi27vfS0RZGXG-rFrv9vh8xIbXkvw2s-sl-O4NZKk",
         socials_transaction_id: process.env.ARNS_SOCIALS_TRANSACTION_ID || "08JtrJB_nf9giHatY2VRGdbu1z4FoSVybGJoOrBFBkY",
     },
     walrus: {
@@ -723,7 +722,7 @@ const configuration = {
     /**
      * JWT-only RPC proxy for the wallet extension.
      * Paid chains fail closed until EXTENSION_* (or the documented alias) is set.
-     * Public-chain defaults remain for Arbitrum, Optimism, Base, and BlockDAG.
+     * Public-chain defaults remain for Arbitrum, Optimism, and Base.
      */
     extension: {
         rpc: {
@@ -783,7 +782,6 @@ const configuration = {
         suiGraphqlUrl: (process.env.SUI_GRAPHQL_URL || "https://graphql.mainnet.sui.io/graphql").trim(),
         stellarHorizonUrl: (process.env.STELLAR_HORIZON_URL || "https://horizon.stellar.org").trim().replace(/\/$/, ""),
         bitcoinEsploraUrls: csvOrDefault(process.env.BITCOIN_ESPLORA_URLS, ["https://mempool.space/api", "https://blockstream.info/api"]),
-        blockdagScanApiUrl: (process.env.BLOCKDAG_SCAN_API_URL || "https://api.bdagscan.com/v1/api").trim().replace(/\/$/, ""),
         /** Extra EVM JSON-RPC endpoints (CSV) tried before the configured chain RPC and the public fallback. */
         evmRpcUrls: {
             ethereum: splitCsv(process.env.TX_WATCHER_ETHEREUM_RPC_URLS),
@@ -791,18 +789,6 @@ const configuration = {
             avalanche: splitCsv(process.env.TX_WATCHER_AVALANCHE_RPC_URLS),
             bsc: splitCsv(process.env.TX_WATCHER_BSC_RPC_URLS),
         },
-    },
-    /** ZelfBlockDagPay.sol — native BDAG tag checkout only */
-    blockdag: {
-        defaultCollectionAddress: process.env.BLOCKDAG_DEFAULT_COLLECTION_ADDRESS || null,
-        factoryAddress: process.env.BLOCKDAG_FACTORY_ADDRESS || "0x7c6a168455C94092f8d51aBC515B73f4Ed9813a6",
-        // Public RPC only — dapps-rpc.bdagscan.com is blocked/unreachable from prod and local.
-        mainRpcUrl: process.env.BLOCKDAG_MAIN_RPC_URL || process.env.BLOCKDAG_RPC_URL || "https://rpc.bdagscan.com",
-        rpcUrl: process.env.BLOCKDAG_RPC_URL || "https://rpc.bdagscan.com",
-        chainId: Number(process.env.BLOCKDAG_CHAIN_ID) || 1404,
-        tagPayContractAddress: (process.env.BLOCKDAG_TAG_PAY_CONTRACT_ADDRESS || "").trim(),
-        tagPayConfirmations: Math.max(1, Number(process.env.BLOCKDAG_TAG_PAY_CONFIRMATIONS) || 1),
-        nowNodesAPIKey: process.env.BLOCKDAG_NOW_NODES_API_KEY,
     },
     /**
      * Face anti-abuse: attempt lockout, in-house PoW, capture nonces (#192 / #193).

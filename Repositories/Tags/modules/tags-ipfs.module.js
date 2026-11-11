@@ -271,7 +271,7 @@ const _formatSearchResults = (result) => {
  * True if a pin belongs to the licensed domain. Metadata `domain` is set on many
  * pins but `.zelfpay` / similar often omit it while `name` / zelfName carry the suffix.
  * @param {Object} row - formatted record from _formatRecord
- * @param {string} domainLower - e.g. "zelf", "bdag"
+ * @param {string} domainLower - e.g. "zelf"
  */
 const _rowBelongsToDomain = (row, domainLower) => {
 	const metaDomain = String(row.publicData?.domain || "").toLowerCase();

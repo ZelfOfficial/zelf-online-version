@@ -134,6 +134,10 @@ const userKeyFrom = (authUser) => {
 };
 
 const forwardRequest = async ({ chain, chainId, method, params = [], origin, purpose, rpcId }, meta = {}, options = {}) => {
+    const { isUnsupportedChain } = require("../../../Core/unsupported-networks");
+    if (isUnsupportedChain(chain) || isUnsupportedChain(chainId)) {
+        throw fail(400, "UNSUPPORTED_CHAIN", "UNSUPPORTED_CHAIN");
+    }
     const maps = buildChainMaps(options.useExtensionRpc ? extensionChains() : legacyChains());
     const resolvedChain = resolveChain({ chain, chainId }, maps);
 

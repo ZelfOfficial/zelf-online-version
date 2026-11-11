@@ -47,7 +47,6 @@ const EVM_TOKENS = Object.freeze({
         ["0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", "BTCB", 18],
         ["0x2170Ed0880ac9A755fd29B2688956BD959F933F8", "ETH", 18],
     ]),
-    blockdag: evm([]),
 });
 
 const SOLANA_MINTS = Object.freeze({

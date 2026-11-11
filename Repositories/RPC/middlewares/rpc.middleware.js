@@ -1,5 +1,6 @@
 const { array, any, jsonRpcParams, string, stringOrNumber, validate } = require("../../../Core/JoiUtils");
 const config = require("../../../Core/config");
+const { rejectIfUnsupportedChain } = require("../../../Core/unsupported-networks");
 const { maxBatch, maxBodyBytes } = require("../../../Core/rpc-upstreams");
 
 const RESERVED_CHAIN_PATH = new Set(["chains", "request"]);
@@ -139,6 +140,7 @@ const validateJsonRpcBody = (ctx) => {
 
 /** JWT extension proxy: uses config.extension.rpc.chains (same JSON-RPC body as public /api/rpc/:chainKey). */
 const jsonRpcValidationExtension = async (ctx, next) => {
+    if (rejectIfUnsupportedChain(ctx, ctx.params?.chainKey)) return;
     if (measuredBodyBytes(ctx.request.body) > maxBodyBytes() || Number(ctx.get("content-length") || 0) > maxBodyBytes()) {
         tooLargeBody(ctx, true);
         return;
@@ -168,6 +170,7 @@ const jsonRpcValidationExtension = async (ctx, next) => {
 };
 
 const jsonRpcValidation = async (ctx, next) => {
+    if (rejectIfUnsupportedChain(ctx, ctx.params?.chainKey)) return;
     if (measuredBodyBytes(ctx.request.body) > maxBodyBytes() || Number(ctx.get("content-length") || 0) > maxBodyBytes()) {
         tooLargeBody(ctx, true);
         return;

@@ -25,4 +25,4 @@ From the repo root you can also run:
 npm run contracts:compile
 ```
 
-BlockDAG NFT contracts live under `Repositories/BlockDAG/smart-contracts/` (separate package). Avalanche ZelfKey NFT tooling lives under `Avalanche/`.
+Avalanche ZelfKey NFT tooling lives under `Avalanche/`.

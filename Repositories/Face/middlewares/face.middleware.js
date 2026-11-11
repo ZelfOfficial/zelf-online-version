@@ -81,7 +81,7 @@ const wrapGate = (action) => async (ctx, next) => {
     }
 };
 
-/** Run face security only when `faceBase64` is present (e.g. BlockDAG zelf wallet auth). */
+/** Run face security only when `faceBase64` is present. */
 const gateIfFace = (action) => async (ctx, next) => {
     const face = ctx.request.body?.faceBase64;
     if (face == null || String(face).trim() === "") {

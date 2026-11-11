@@ -56,7 +56,7 @@ describe("arweave-gateway.module", () => {
 
 	it("builds arns undername urls", () => {
 		expect(buildArnsUndernameUrl("migueltrevino", "zelf")).toBe("https://migueltrevino_zelf.ar.io");
-		expect(buildArnsUndernameUrl("migueltrevino", "bdag")).toBe("https://migueltrevino_bdag_zelf.ar.io");
+		expect(buildArnsUndernameUrl("migueltrevino", "avax")).toBe("https://migueltrevino_avax_zelf.ar.io");
 	});
 
 	it("detects single-tag lookup keys", () => {

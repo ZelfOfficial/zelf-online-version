@@ -5,6 +5,7 @@ const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const config = require("../../../Core/config");
 const { codedError } = require("../../../Core/http-handler");
+const { assertSupportedChain, assertSupportedDomain } = require("../../../Core/unsupported-networks");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const { coerceInitiatedAtUnix } = require("../../Tags/modules/tag-pay-session-tx.util");
 const {
@@ -239,6 +240,8 @@ const confirmCouponFreeCheckout = async (tagName, domain, tokenDecoded, domainCo
 };
 
 const verifyPaymentConfirmation = async (tagName, domain, network, token, identity = {}) => {
+    assertSupportedDomain(domain);
+    if (network) assertSupportedChain(network);
     const tokenDecoded = jwt.verify(token, config.JWT_SECRET);
     const domainConfig = getDomainConfig(domain);
 
@@ -296,7 +299,6 @@ const verifyPaymentConfirmation = async (tagName, domain, network, token, identi
         SOL: tokenDecoded.paymentAddress.solanaAddress,
         BTC: tokenDecoded.paymentAddress.btcAddress,
         AVAX: tokenDecoded.paymentAddress.avalancheAddress || tokenDecoded.paymentAddress.ethAddress,
-        BDAG: tokenDecoded.paymentAddress?.blockdagAddress || tokenDecoded.paymentAddress?.ethAddress,
     };
 
     const paymentConfirmation = await confirmPayUniqueAddress(network, addressMapping[network], amountToPay, { initiatedAtUnix });

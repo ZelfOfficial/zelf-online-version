@@ -8,7 +8,7 @@ const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const ZelfIdModule = require("./zelf-id.module");
 const ZelfIdPartsModule = require("./zelf-id-parts.module");
 const { getBareName, assertDomainOfferedForNewNames } = require("./zelf-id-plan.module");
-const { assertDomainAcceptsNewUse } = require("../../../Core/deprecated-networks");
+const { assertSupportedDomain } = require("../../../Core/unsupported-networks");
 const { expandStoredExtraParams } = require("../../Tags/modules/tags-addresses.module");
 const {
     normalizeTagName,
@@ -79,6 +79,7 @@ const leaseOffline = async (params, authUser) => {
     let zelfProof = params.zelfProof;
     let zelfProofQRCode = params.zelfProofQRCode;
 
+    assertSupportedDomain(domain);
     const domainConfig = getDomainConfig(domain);
     if (!domainConfig) throw new Error(`409:unsupported_domain`);
     // Address sync updates an existing record. New offline leases still require plan prices.
@@ -184,7 +185,6 @@ const leaseOffline = async (params, authUser) => {
     }
 
     await ZelfIdModule._findDuplicatedTag(tagName, domain, domainConfig);
-    assertDomainAcceptsNewUse(domain);
 
     const referralTagObject = await ZelfIdModule._validateReferral(referralTagName, authUser, domainConfig, { enforceLimit: true });
     const decrypted = await ZelfIdPartsModule.decryptParams({ password: params.password, removePGP: params.removePGP }, authUser);

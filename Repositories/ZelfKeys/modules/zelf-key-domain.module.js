@@ -61,6 +61,8 @@ const loadDomainSnapshot = async (domain, IPFS) => {
  * @param {Object} jwt authenticated user
  */
 const listDomainKeys = async (query = {}, jwt, deps = {}) => {
+    const { assertSupportedDomain } = require("../../../Core/unsupported-networks");
+    if (query.domain) assertSupportedDomain(query.domain);
     const IPFS = deps.IPFS || require("../../../Core/ipfs");
     const resolveAuthorizedDomain =
         deps.resolveAuthorizedDomain || require("../../License/modules/license-domain-access.module").resolveAuthorizedDomain;

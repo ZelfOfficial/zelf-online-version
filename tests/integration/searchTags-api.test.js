@@ -155,9 +155,9 @@ describe("Search Tags API Integration Tests - Real Server", () => {
 			expect(response.body.code).toBe("DOMAIN_NOT_OFFERED");
 		});
 
-		it("should return validation error for BDAG domain name length", async () => {
+		it("should reject a removed domain", async () => {
 			const searchParams = {
-				tagName: `bdaguser${Date.now()}.bdag`,
+				tagName: `removed${Date.now()}`,
 				domain: "bdag",
 				os: "DESKTOP",
 			};
@@ -168,9 +168,8 @@ describe("Search Tags API Integration Tests - Real Server", () => {
 				.set("Authorization", `Bearer ${authToken}`)
 				.query(searchParams);
 
-			expect(response.status).toBe(409);
-			expect(response.body).toHaveProperty("validationError");
-			expect(response.body.validationError).toContain("20 characters");
+			expect(response.status).toBe(400);
+			expect(response.body.code).toBe("UNSUPPORTED_DOMAIN");
 		});
 
 		it("should accept .zelfpay tagName with registry domain=zelf (not treat zelfpay as TLD)", async () => {

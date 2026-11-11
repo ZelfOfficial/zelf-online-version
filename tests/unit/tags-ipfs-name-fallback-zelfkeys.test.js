@@ -14,7 +14,7 @@ jest.mock("../../Repositories/Tags/modules/domain-registry.module", () => ({
 const IPFS = require("../../Core/ipfs");
 const TagsIPFSModule = require("../../Repositories/Tags/modules/tags-ipfs.module");
 
-const domainConfig = { name: "bdag", tags: { storage: { keyPrefix: "tagName" } } };
+const domainConfig = { name: "avax", tags: { storage: { keyPrefix: "tagName" } } };
 
 const pin = (name, keyvalues) => ({
     id: `id_${name}`,
@@ -31,33 +31,33 @@ describe("Tags IPFS get: name fallback", () => {
         // No record under the storage key nor zelfName: only the Pinata name matches.
         IPFS.filter.mockImplementation(async (property) => {
             if (property !== "name") return [];
-            return [pin("bas.bdag_H9M36", { type: "credit_card", zelfName: "bas.bdag" })];
+            return [pin("bas.avax_H9M36", { type: "credit_card", zelfName: "bas.avax" })];
         });
 
-        const result = await TagsIPFSModule.get({ tagName: "bas.bdag", domainConfig });
+        const result = await TagsIPFSModule.get({ tagName: "bas.avax", domainConfig });
 
-        expect(IPFS.filter).toHaveBeenCalledWith("name", "bas.bdag", { throwOnError: true });
+        expect(IPFS.filter).toHaveBeenCalledWith("name", "bas.avax", { throwOnError: true });
         expect(result).toEqual([]);
     });
 
     it.each(["password", "notes", "credit_card", "contact", "zotp"])("skips Zelf Keys type %s", async (type) => {
-        IPFS.filter.mockImplementation(async (property) => (property === "name" ? [pin("bas.bdag_AB12C", { type })] : []));
+        IPFS.filter.mockImplementation(async (property) => (property === "name" ? [pin("bas.avax_AB12C", { type })] : []));
 
-        await expect(TagsIPFSModule.get({ tagName: "bas.bdag", domainConfig })).resolves.toEqual([]);
+        await expect(TagsIPFSModule.get({ tagName: "bas.avax", domainConfig })).resolves.toEqual([]);
     });
 
     it("keeps a legacy tag pin found only by name", async () => {
         IPFS.filter.mockImplementation(async (property) => {
             if (property !== "name") return [];
             return [
-                pin("bas.bdag_H9M36", { type: "credit_card" }),
-                pin("bas.bdag.hold", { type: "hold", ethAddress: "0x9632", extraParams: JSON.stringify({ expiresAt: "2027-10-01 00:00:00" }) }),
+                pin("bas.avax_H9M36", { type: "credit_card" }),
+                pin("bas.avax.hold", { type: "hold", ethAddress: "0x9632", extraParams: JSON.stringify({ expiresAt: "2027-10-01 00:00:00" }) }),
             ];
         });
 
-        const result = await TagsIPFSModule.get({ tagName: "bas.bdag", domainConfig });
+        const result = await TagsIPFSModule.get({ tagName: "bas.avax", domainConfig });
 
         expect(result).toHaveLength(1);
-        expect(result[0].name).toBe("bas.bdag.hold");
+        expect(result[0].name).toBe("bas.avax.hold");
     });
 });

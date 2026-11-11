@@ -18,7 +18,6 @@ jest.mock("../../Repositories/bitcoin/modules/bitcoin-scrapping.module", () => (
 jest.mock("../../Repositories/etherscan/modules/etherscan-scrapping.module", () => ({}));
 jest.mock("../../Repositories/Solana/modules/solana-scrapping.module", () => ({}));
 jest.mock("../../Repositories/Avalanche/modules/avalanche-scrapping.module", () => ({}));
-jest.mock("../../Repositories/BlockDAG/modules/blockdag.module", () => ({}));
 jest.mock("../../Core/mailgun", () => ({ sendCustomEmail: jest.fn() }));
 jest.mock("../../Repositories/Tags/modules/tags-payment.module", () => ({}));
 jest.mock("../../Repositories/Tags/modules/tag-pay-session-tx.util", () => ({}));

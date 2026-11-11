@@ -7,6 +7,7 @@ const TagsOfflineModule = require("../modules/tags-offline.module");
 const TagsSearchModule = require("../modules/tags-search.module");
 const { getAllSupportedDomains } = require("../modules/domain-registry.module");
 const { filterOfferedDomains } = require("../modules/domain.class");
+const { isUnsupportedDomain } = require("../../../Core/unsupported-networks");
 const { errorHandler } = require("../../../Core/http-handler");
 const configuration = require("../../../Core/config");
 const ZelfProofModule = require("../../ZelfProof/modules/zelf-proof.module");
@@ -19,7 +20,7 @@ const { runMonthlyAccess } = require("../../ZelfID/modules/zelf-id-monthly-acces
  * Keep full pin name (e.g. user.zelfpay) for IPFS lookup; middleware only supplies registry TLD + local name.
  * @param {string|undefined} rawTagName - tagName from query/body
  * @param {string|null|undefined} extractedName
- * @param {string|null|undefined} extractedDomain - registry domain (zelf, bdag, …)
+ * @param {string|null|undefined} extractedDomain - registry domain (zelf, …)
  */
 const resolveFullTagNameForRequest = (rawTagName, extractedName, extractedDomain) => {
     const raw = rawTagName != null && rawTagName !== "" ? String(rawTagName).trim() : "";
@@ -412,6 +413,11 @@ const getDomains = async (ctx, next) => {
 
 const getDomain = async (ctx, next) => {
     const { domain } = ctx.request.params;
+    if (isUnsupportedDomain(domain)) {
+        ctx.status = 400;
+        ctx.body = { code: "UNSUPPORTED_DOMAIN", message: "UNSUPPORTED_DOMAIN" };
+        return;
+    }
     const {
         loadOfficialLicenses,
         parseIncludeThemeSettings,

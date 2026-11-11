@@ -8,7 +8,7 @@ const mongoose = require("mongoose");
 const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
 const { limitsForPlan, planError, resolveEntitlement, upgradePlans } = require("../../ZelfKeys/modules/zelf-key-plan-limits.module");
 const Activation = require("../models/zelf-id-chain-activation.model");
-const { deprecatedUseError, isDeprecatedChain } = require("../../../Core/deprecated-networks");
+const { assertSupportedChain } = require("../../../Core/unsupported-networks");
 
 const EVM_CHAINS = [
     { chain: "ethereum", aliases: ["eth", "evm"] },
@@ -19,7 +19,6 @@ const EVM_CHAINS = [
     { chain: "optimism", aliases: ["op"] },
     { chain: "arbitrum", aliases: ["arb"] },
     { chain: "fantom", aliases: ["ftm", "sonic"] },
-    { chain: "blockdag", aliases: ["bdag"] },
     { chain: "aurora", aliases: [] },
 ];
 
@@ -56,6 +55,7 @@ const chainKey = (value) =>
 const lookupChain = (value) => CHAIN_BY_KEY.get(chainKey(value)) || null;
 
 const requireChain = (value) => {
+    assertSupportedChain(value);
     const spec = lookupChain(value);
     if (!spec) {
         throw planError(409, "ERR_CHAIN_UNKNOWN", "Chain is not supported", { chain: chainKey(value) || value });
@@ -175,7 +175,6 @@ const presentChain = (spec, { publicData, activated, limits }) => {
         active,
         allowed: !spec.nonEvm || limits.nonEvmChains || active,
     };
-    if (isDeprecatedChain(spec.chain)) row.deprecated = true;
     return row;
 };
 
@@ -230,13 +229,6 @@ const activateChain = async (authUser, chain, options = {}) => {
     const entitlement = await resolveEntitlement(authUser, options);
     const limits = limitsForPlan(entitlement.plan, entitlement.domainConfig);
     const addressPresent = hasAddress(entitlement.publicData, spec);
-
-    // A first activation of a closed chain is refused. An address already on the
-    // name, or a chain recorded earlier, keeps the previous success response.
-    if (isDeprecatedChain(spec.chain) && !addressPresent) {
-        const activated = await loadActivatedChains(entitlement.identity.zelfName);
-        if (!activated.has(spec.chain)) throw deprecatedUseError({ chain: spec.chain });
-    }
 
     if (!spec.nonEvm || addressPresent) {
         return {
