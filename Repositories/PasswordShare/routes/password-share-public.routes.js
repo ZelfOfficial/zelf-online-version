@@ -10,12 +10,25 @@ const Middleware = require("../middlewares/password-share.middleware");
  * (`Access-Control-Allow-Origin: *`). The landing site at config.landingUrl
  * (production `https://zelf.world`, development `http://localhost:3009`)
  * can call these routes without cookies. The decryption key is the URL
- * fragment and is not part of the request.
+ * fragment and is not part of the request. These routes also expose
+ * Retry-After so the landing page can read a 429 countdown cross-origin.
  */
 module.exports = (server) => {
 	const PATH = config.basePath("/password-shares");
 
-	server.get(`${PATH}/:id`, Middleware.rateLimit("metadata"), Middleware.discardRawBody, Controller.metadata);
+	server.get(
+		`${PATH}/:id`,
+		Middleware.exposeRetryAfter,
+		Middleware.rateLimit("metadata"),
+		Middleware.discardRawBody,
+		Controller.metadata
+	);
 
-	server.post(`${PATH}/:id/reveal`, Middleware.rateLimit("reveal"), Middleware.discardRawBody, Controller.reveal);
+	server.post(
+		`${PATH}/:id/reveal`,
+		Middleware.exposeRetryAfter,
+		Middleware.rateLimit("reveal"),
+		Middleware.discardRawBody,
+		Controller.reveal
+	);
 };

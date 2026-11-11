@@ -107,6 +107,7 @@ describe("password shares API", () => {
 		expect(first.status).toBe(200);
 		expect(second.status).toBe(200);
 		expect(first.headers["access-control-allow-origin"]).toBe("*");
+		expect(String(first.headers["access-control-expose-headers"] || "").toLowerCase()).toContain("retry-after");
 		expect(first.body).toEqual({
 			id: created.id,
 			expiresAt: created.expiresAt,
@@ -248,6 +249,23 @@ describe("password shares API", () => {
 		expect(revealed.status).toBe(410);
 		expect(revealed.body.code).toBe("SHARE_EXPIRED");
 		expect(JSON.stringify(revealed.body)).not.toContain(body.ciphertext);
+	});
+
+	it("exposes Retry-After on a cross-origin 429", async () => {
+		const id = crypto.randomBytes(32).toString("base64url");
+		let limited = null;
+
+		// Default reveal cap is 20/minute per IP. Earlier cases in this file already spend some of it.
+		for (let attempt = 0; attempt < 30 && !limited; attempt += 1) {
+			const response = await request(API_BASE_URL).post(`${PATH}/${id}/reveal`).set("Origin", LANDING_ORIGIN).send({});
+			if (response.status === 429) limited = response;
+		}
+
+		expect(limited).not.toBeNull();
+		expect(limited.body).toEqual({ code: "PASSWORD_SHARE_RATE_LIMITED", message: "PASSWORD_SHARE_RATE_LIMITED" });
+		expect(Number(limited.headers["retry-after"])).toBeGreaterThan(0);
+		expect(limited.headers["access-control-allow-origin"]).toBe("*");
+		expect(String(limited.headers["access-control-expose-headers"] || "").toLowerCase()).toContain("retry-after");
 	});
 
 	it("unknown ids are SHARE_NOT_FOUND", async () => {
