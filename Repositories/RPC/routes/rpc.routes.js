@@ -20,7 +20,6 @@ module.exports = (server) => {
     //   /api/rpc/arbitrum    (chainId 42161)
     //   /api/rpc/optimism    (chainId 10)
     //   /api/rpc/base        (chainId 8453)
-    //   /api/rpc/blockdag    (chainId 1404)
     //
     // Non-EVM (not proxied here — handled by dedicated Repositories):
     //   Solana   → Repositories/Solana  (config.solana.rpcUrl)

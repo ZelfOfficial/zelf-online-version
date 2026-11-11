@@ -2,7 +2,6 @@ const { ArweaveSigner, ANT } = require("@ar.io/sdk");
 const config = require("../../../Core/config");
 
 const mappingOfSites = {
-	bdag: config.arns.blockdag_transaction_id,
 	zelf: config.arns.index_transaction_id,
 };
 
@@ -28,7 +27,7 @@ const initAnt = () => {
 };
 
 /**
- * Map ANT record key to domain (zelf, bdag, …).
+ * Map ANT record key to domain (zelf, and any other suffix still registered in mappingOfSites).
  * @param {string} recordKey
  * @returns {string}
  */

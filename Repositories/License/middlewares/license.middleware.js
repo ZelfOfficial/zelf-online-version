@@ -54,7 +54,7 @@ const schemas = {
 						)
 						.default({}),
 					currencies: array()
-						.items(stringEnum(["BTC", "ETH", "SOL", "USDC", "USDT", "BDAG", "AVAX", "BNB", "POL", "BASE", "ZNS"]))
+						.items(stringEnum(["BTC", "ETH", "SOL", "USDC", "USDT", "AVAX", "BNB", "POL", "BASE", "ZNS"]))
 						.optional(),
 					discounts: object({
 						yearly: number().min(0).max(1).default(0.1),

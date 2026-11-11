@@ -146,7 +146,7 @@ describe("Search By Domain API Integration Tests - Real Server", () => {
 		});
 
 		it("should search for tags in different domains", async () => {
-			const domains = ["zelf", "avax", "bdag"];
+			const domains = ["zelf", "avax"];
 
 			for (const domain of domains) {
 				const searchParams = {

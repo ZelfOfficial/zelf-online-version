@@ -155,24 +155,6 @@ describe("Search Tags API Integration Tests - Real Server", () => {
 			expect(response.body).toHaveProperty("data");
 		});
 
-		it("should return validation error for BDAG domain name length", async () => {
-			const searchParams = {
-				tagName: `bdaguser${Date.now()}.bdag`,
-				domain: "bdag",
-				os: "DESKTOP",
-			};
-
-			const response = await request(API_BASE_URL)
-				.get("/api/tags/search")
-				.set("Origin", "https://test.example.com")
-				.set("Authorization", `Bearer ${authToken}`)
-				.query(searchParams);
-
-			expect(response.status).toBe(409);
-			expect(response.body).toHaveProperty("validationError");
-			expect(response.body.validationError).toContain("20 characters");
-		});
-
 		it("should accept .zelfpay tagName with registry domain=zelf (not treat zelfpay as TLD)", async () => {
 			const searchParams = {
 				tagName: `zelfpaysearch${Date.now()}.zelfpay`,

@@ -41,14 +41,14 @@
 			"description": "Test creating a lifetime tag in the tech domain ($0.75 base, 40% lifetime discount)"
 		},
 		{
-			"name": "Enterprise Domain Tag",
-			"domain": "bdag",
-			"tagName": "enterpriseuser",
+			"name": "Tech Domain Tag",
+			"domain": "tech",
+			"tagName": "techuser",
 			"duration": "yearly",
-			"paymentMethod": "enterprise",
+			"paymentMethod": "crypto",
 			"currency": "USD",
-			"expectedPrice": 350,
-			"description": "Test creating a tag in the enterprise bdag domain ($5.00 base, 30% yearly discount)"
+			"expectedPrice": 75,
+			"description": "Test creating a tag in the tech domain"
 		}
 	],
 	"holdDomainTests": [

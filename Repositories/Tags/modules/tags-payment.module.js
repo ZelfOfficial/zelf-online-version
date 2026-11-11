@@ -12,6 +12,7 @@ const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const { keccak256, solidityPacked, parseUnits, getAddress } = require("ethers");
 const { usdcAtomicFromUsd, stableAtomicFromUsd } = require("./tag-pay-usdc.util");
 const config = require("../../../Core/config");
+const { isRemovedChain, isRemovedDomain } = require("../../../Core/removed-blockdag");
 const WalrusModule = require("../../Walrus/modules/walrus.module");
 const TagsArweaveModule = require("./tags-arweave.module");
 const { generateQRFromZelfProof, QRZelfProofExtractor } = require("./qr-zelfproof-extractor.module");
@@ -99,6 +100,14 @@ const isTagPayReducedFeeClientHeaderHonored = () => {
  * @returns {Object} - Validation result
  */
 const validateCurrency = (domain, currency) => {
+    if (isRemovedDomain(domain)) {
+        return { valid: false, error: "UNSUPPORTED_DOMAIN", status: 400, code: "UNSUPPORTED_DOMAIN" };
+    }
+
+    if (isRemovedChain(currency)) {
+        return { valid: false, error: "UNSUPPORTED_CHAIN", status: 400, code: "UNSUPPORTED_CHAIN" };
+    }
+
     const domainConfig = getDomainConfig(domain);
 
     if (!domainConfig) {
@@ -190,7 +199,6 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         BNB: null,
         POL: null,
         BASE: null,
-        BDAG: null,
         TON: null,
     };
 
@@ -258,12 +266,6 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         (networks?.base?.enabled && networks?.base?.nativeCurrency?.enabled && networks?.base?.nativeCurrency?.code === "BASE")
     ) {
         prices.BASE = await calculateCryptoValue("ETH", billableUsdPrice);
-    }
-
-    // BDAG — BlockDAG EVM (chainId in config.blockdag). Native BDAG only here.
-    // Do not add prices.BDAG_USDC / BDAG_USDT or JWT usdc/usdt for tag pay until those assets exist on BlockDAG.
-    if (networks?.blockdag?.enabled && networks?.blockdag?.nativeCurrency?.enabled && networks?.blockdag?.nativeCurrency?.code === "BDAG") {
-        prices.BDAG = await calculateCryptoValue("BDAG", billableUsdPrice);
     }
 
     // TON — The Open Network native TON
@@ -685,32 +687,6 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         }
     }
 
-    if (prices.BDAG && config.blockdag.tagPayContractAddress) {
-        try {
-            const initiatedAtUnix = BigInt(returnData.initiatedAt);
-            const paymentId = keccak256(
-                solidityPacked(["string", "string", "uint256"], ["ZELF_BLOCKDAG_PAY_v1", returnData.tagName, initiatedAtUnix]),
-            );
-            let expectedWeiBn = bdagExpectedWeiFromUsd(billableUsdPrice, prices.BDAG.tokenPriceString);
-            if (devAmountFraction != null && expectedWeiBn < 1n) {
-                expectedWeiBn = 1n;
-            }
-            if (expectedWeiBn <= 0n) {
-                throw new Error("expectedWei_bdag_non_positive");
-            }
-            const contractAddr = getAddress(config.blockdag.tagPayContractAddress);
-            returnData.smartContractBDAG = {
-                paymentId,
-                expectedWei: expectedWeiBn.toString(),
-                chainId: config.blockdag.chainId,
-                contractAddress: contractAddr,
-            };
-            delete returnData.paymentAddress.ethAddress;
-        } catch (e) {
-            console.warn("smartContractBDAG not attached:", e?.message || e);
-        }
-    }
-
     // typ "quote" is accepted as Authorization only on POST /api/my-zelf-name/renew.
     const signedDataPrice = signToken(returnData, config.JWT_SECRET, { typ: TOKEN_TYPES.quote, expiresIn: "2h" });
 
@@ -805,39 +781,13 @@ const polNativeDisplayAmountFromWei = (weiBn) => {
     return Number(quantized) / 10 ** POL_NATIVE_DISPLAY_DECIMALS;
 };
 
-/**
- * Canonical native BDAG wei: floor(usd_18dec * WAD / bdagUsdPerToken_18dec).
- * @param {string|number} usdPrice
- * @param {string} bdagUsdPerTokenStr — BDAG price in USD as decimal string
- * @returns {bigint}
- */
-const bdagExpectedWeiFromUsd = (usdPrice, bdagUsdPerTokenStr) => {
-    const usdScaled = parseUnits(decimalStringForParseUnits(usdPrice), 18);
-    const pxScaled = parseUnits(decimalStringForParseUnits(bdagUsdPerTokenStr), 18);
-    if (pxScaled === 0n) {
-        throw new Error("bdag_usd_price_zero");
-    }
-    return (usdScaled * WAD) / pxScaled;
-};
-
 const calculateCryptoValue = async (token = "ETH", price_) => {
     try {
-        // Special handling for tokens not available on Binance
-        const FALLBACK_PRICES = {
-            BDAG: "0.05", // string to avoid IEEE 754 noise in decimalStringForParseUnits
-        };
+        if (isRemovedChain(token)) return null;
 
-        let tokenPrice;
-
-        // Check if token has a fallback price
-        if (FALLBACK_PRICES[token]) {
-            tokenPrice = FALLBACK_PRICES[token];
-        } else {
-            // Fetch from Binance
-            const { price } = await getTickerPrice({ symbol: `${token}` });
-            if (!price) throw new Error(`Unable to fetch ${token} price`);
-            tokenPrice = price;
-        }
+        const { price } = await getTickerPrice({ symbol: `${token}` });
+        if (!price) throw new Error(`Unable to fetch ${token} price`);
+        const tokenPrice = price;
 
         const cryptoValue = price_ / tokenPrice;
         const tokenPriceString = decimalStringForParseUnits(tokenPrice);

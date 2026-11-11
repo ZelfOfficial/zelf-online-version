@@ -1,5 +1,6 @@
 const { array, any, jsonRpcParams, string, stringOrNumber, validate } = require("../../../Core/JoiUtils");
 const config = require("../../../Core/config");
+const { rejectRemovedChain } = require("../../../Core/removed-blockdag");
 
 const RESERVED_CHAIN_PATH = new Set(["chains", "request"]);
 
@@ -45,6 +46,7 @@ const requestValidation = async (ctx, next) => {
     }
 
     ctx.request.body = valid.value;
+    if (rejectRemovedChain(ctx, ctx.request.body.chain, ctx.request.body.chainId)) return;
     await next();
 };
 
@@ -115,6 +117,8 @@ const jsonRpcValidationExtension = async (ctx, next) => {
         return;
     }
 
+    if (rejectRemovedChain(ctx, chainKey)) return;
+
     if (!validateJsonRpcBody(ctx)) {
         return;
     }
@@ -139,6 +143,8 @@ const jsonRpcValidation = async (ctx, next) => {
         ctx.body = { error: "not_found" };
         return;
     }
+
+    if (rejectRemovedChain(ctx, chainKey)) return;
 
     if (!validateJsonRpcBody(ctx)) {
         return;

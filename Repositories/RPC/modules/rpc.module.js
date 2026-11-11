@@ -1,4 +1,5 @@
 const config = require("../../../Core/config");
+const { isRemovedChain, unsupportedChainError } = require("../../../Core/removed-blockdag");
 const { getCleanInstance } = require("../../../Core/axios");
 const RpcLog = require("../models/rpc-log.model");
 const RpcCallerModule = require("../../RPCCaller/modules/rpc-caller.module");
@@ -121,6 +122,8 @@ const resolveUpstreamMethodName = (normalized, originalMethod) => {
 };
 
 const forwardRequest = async ({ chain, chainId, method, params = [], origin, purpose, rpcId }, meta = {}, options = {}) => {
+    if (isRemovedChain(chain, chainId)) throw unsupportedChainError();
+
     const maps = options.useExtensionRpc ? getExtensionMaps() : defaultMaps;
     const resolvedChain = resolveChain({ chain, chainId }, maps);
 

@@ -7,6 +7,7 @@ describe("rpc.module", () => {
         expect(Array.isArray(chains)).toBe(true);
         expect(chains.some((chain) => chain.chain === "ethereum" && chain.chainId === 1)).toBe(true);
         expect(chains.some((chain) => chain.chain === "sui" && chain.chainId === 101)).toBe(true);
+        expect(chains.some((chain) => chain.chain === "blockdag" || chain.chainId === 1404)).toBe(false);
     });
 
     it("rejects blocked subscription methods", async () => {
@@ -30,6 +31,30 @@ describe("rpc.module", () => {
             })
         ).rejects.toMatchObject({
             status: 400,
+        });
+    });
+
+    it("rejects a retired chain with UNSUPPORTED_CHAIN", async () => {
+        await expect(
+            Module.forwardRequest({
+                chain: "blockdag",
+                method: "eth_blockNumber",
+                params: [],
+            })
+        ).rejects.toMatchObject({
+            status: 400,
+            clientCode: "UNSUPPORTED_CHAIN",
+        });
+
+        await expect(
+            Module.forwardRequest({
+                chainId: 1404,
+                method: "eth_blockNumber",
+                params: [],
+            })
+        ).rejects.toMatchObject({
+            status: 400,
+            clientCode: "UNSUPPORTED_CHAIN",
         });
     });
 });

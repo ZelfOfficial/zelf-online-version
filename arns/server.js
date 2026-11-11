@@ -1,6 +1,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const { isRemovedHostname } = require("../Core/removed-blockdag");
 
 const PORT = 3000;
 const BASE_DIR = __dirname;
@@ -29,10 +30,13 @@ const server = http.createServer((req, res) => {
 	// Remove query string and decode URI
 	let filePath = decodeURIComponent(new URL(req.url, `http://${req.headers.host}`).pathname);
 
-	// Check if this is a BlockDAG domain
 	const hostname = req.headers.host || "";
-	const isBdagDomain = hostname.includes("_bdag") || hostname.includes(".bdag") || (hostname === "localhost" && req.url.includes("domain=bdag"));
-	
+	if (isRemovedHostname(hostname, req.url)) {
+		res.writeHead(400, { "Content-Type": "application/json" });
+		res.end(JSON.stringify({ message: "UNSUPPORTED_DOMAIN", code: "UNSUPPORTED_DOMAIN" }));
+		return;
+	}
+
 	// Check if this is a social links domain (e.g., liza_socials_zelf.arweave.net)
 	const isSocialLinksDomain = hostname.includes("_socials_") || (hostname === "localhost" && req.url.includes("domain=socials"));
 
@@ -46,9 +50,6 @@ const server = http.createServer((req, res) => {
 		// Serve social links index if it's a social links domain
 		if (isSocialLinksDomain) {
 			filePath = "/socialLinks/index.html";
-		} else if (isBdagDomain) {
-			// Serve BlockDAG index if it's a BlockDAG domain
-			filePath = "/blockDAG/index.html";
 		} else {
 			filePath = "/index.html";
 		}
@@ -57,11 +58,6 @@ const server = http.createServer((req, res) => {
 	// If requesting root index but it's a social links domain, redirect to social links
 	if (filePath === "/index.html" && isSocialLinksDomain) {
 		filePath = "/socialLinks/index.html";
-	}
-
-	// If requesting root index but it's a BlockDAG domain, redirect to BlockDAG
-	if (filePath === "/index.html" && isBdagDomain && !isSocialLinksDomain) {
-		filePath = "/blockDAG/index.html";
 	}
 
 	// Remove leading slash and resolve path

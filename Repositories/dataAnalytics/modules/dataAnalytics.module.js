@@ -3,7 +3,7 @@ const instance = getCleanInstance(30000);
 const Model = require("../models/dataAnalytics.model");
 const moment = require("moment");
 const axios = require("axios");
-const { fetchBDAGPrice } = require("../../BlockDAG/modules/blockdag.module");
+const { isRemovedChain, unsupportedChainError } = require("../../../Core/removed-blockdag");
 
 let _binanceInstance = null;
 
@@ -11,6 +11,8 @@ let _binanceInstance = null;
  * @param {*} params
  */
 const getAssetDetails = async (params) => {
+	if (isRemovedChain(params.asset)) throw unsupportedChainError();
+
 	try {
 		const { symbol, network, idAseet } = await idAseet_(params.asset);
 
@@ -92,6 +94,7 @@ const getAssetDetails = async (params) => {
 
 		return response;
 	} catch (error) {
+		if (error?.clientCode === "UNSUPPORTED_CHAIN") throw error;
 		error = new Error("asset_not_found");
 		error.status = 404;
 		throw error;
@@ -164,6 +167,7 @@ const getChart = async (data) => {
 	const { interval, limit, startDate, endDate } = data;
 
 	let { asset } = data;
+	if (isRemovedChain(asset)) throw unsupportedChainError();
 	let _limit = limit;
 	let _endDate = null;
 	let _startDate = null;
@@ -179,28 +183,6 @@ const getChart = async (data) => {
 	}
 
 	if (asset === "USDT") asset = "USDC";
-
-	if (asset === "BDAG") {
-		const price = parseFloat(await fetchBDAGPrice());
-		const limitNum = Math.min(parseInt(_limit || limit || 60, 10) || 60, 500);
-		const intervalMs = { "1m": 60000, "1h": 3600000, "4h": 14400000, "6h": 21600000, "1d": 86400000 }[interval] || 86400000;
-		const klinesMap = [];
-		const now = Date.now();
-		for (let i = limitNum - 1; i >= 0; i--) {
-			const time = (now - i * intervalMs) / 1000;
-			klinesMap.push({
-				index: klinesMap.length,
-				time,
-				open: price,
-				high: price,
-				low: price,
-				close: price,
-				dateTime: moment.unix(time).format("YYYY-MM-DD HH:mm:ss"),
-				type: "uptrend",
-			});
-		}
-		return klinesMap;
-	}
 
 	const klines = await getKLines(
 		`${asset}USDT`,

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * List IPFS pins whose Pinata name matches a "pay" suffix (e.g. `.zelfpay`, `.bdagpay`),
- * then check native balances on ETH, BTC, SOL, AVAX, and BDAG using the same logic as
+ * List IPFS pins whose Pinata name matches a "pay" suffix (e.g. `.zelfpay`, `.avaxpay`),
+ * then check native balances on ETH, BTC, SOL, and AVAX using the same logic as
  * GET /api/tags/wallet-balances (Repositories/Tags/modules/tag-wallet-balances.module.js).
  *
  * Prerequisites:
@@ -15,17 +15,17 @@
  * Usage:
  *   node scripts/audit-ipfs-pay-tags-balances.js
  *   node scripts/audit-ipfs-pay-tags-balances.js --domains=zelf --maxPins=2000 --out=./report.json
- *   node scripts/audit-ipfs-pay-tags-balances.js --domains=zelf,bdag --name=.zelfpay --concurrency=2 --delayMs=300
+ *   node scripts/audit-ipfs-pay-tags-balances.js --domains=zelf,avax --name=.zelfpay --concurrency=2 --delayMs=300
  *
  * Options:
- *   --domains=zelf,bdag     Registry domains to scan (default: zelf,bdag)
+ *   --domains=zelf,avax     Registry domains to scan (default: zelf)
  *   --name=SUBSTRING        Pinata name filter (default: .{domain}pay per domain)
  *   --maxPins=N             Max pins to fetch per domain from Pinata (default: 5000, maps to IPFS.filter safety cap)
  *   --out=PATH              Output JSON file (default: ./ipfs-pay-tags-balances-audit.json)
  *   --concurrency=N         Parallel balance lookups (default: 2)
  *   --delayMs=N             Pause between batches in ms (default: 250)
  *   --networkTimeoutMs=N    Per-network HTTP cap in ms (default: 18000). Use 0 for no cap (can wait ~30s+ on BTC).
- *   --skipNetworks=a,b      Skip balance sources: eth,btc,sol,avax,bdag (e.g. skip slow BTC: --skipNetworks=btc)
+ *   --skipNetworks=a,b      Skip balance sources: eth,btc,sol,avax,ton (e.g. skip slow BTC: --skipNetworks=btc)
  */
 
 require("dotenv").config();
@@ -43,7 +43,7 @@ const {
 
 function parseArgs(argv) {
     const out = {
-        domains: ["zelf", "bdag"],
+        domains: ["zelf"],
         name: null,
         maxPins: 5000,
         outFile: path.join(process.cwd(), "ipfs-pay-tags-balances-audit.json"),
@@ -248,7 +248,7 @@ async function main() {
                     },
                 );
 
-                for (const key of ["eth", "btc", "sol", "avax", "bdag"]) {
+                for (const key of ["eth", "btc", "sol", "avax", "ton"]) {
                     const slot = balances[key];
                     const info = interpretSlot(slot);
                     entry.networks[key] = {
@@ -294,7 +294,7 @@ async function main() {
             btc: allRecords.filter((r) => r.networks.btc?.hasBalance).length,
             sol: allRecords.filter((r) => r.networks.sol?.hasBalance).length,
             avax: allRecords.filter((r) => r.networks.avax?.hasBalance).length,
-            bdag: allRecords.filter((r) => r.networks.bdag?.hasBalance).length,
+            ton: allRecords.filter((r) => r.networks.ton?.hasBalance).length,
         },
     };
 

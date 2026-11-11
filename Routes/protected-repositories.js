@@ -7,8 +7,6 @@ module.exports = (server) => {
     require("../Repositories/dataAnalytics/routes/dataAnalytics.route")(server);
     require("../Repositories/Arweave/routes/ar-io-arns.routes")(server);
     //B
-    require("../Repositories/BlockDAG/routes/blockdag.routes")(server);
-    require("../Repositories/BlockDAG/routes/blockdag-nft.routes")(server);
     require("../Repositories/bnb/routes/binance-smart-chain.route")(server);
     require("../Repositories/binance/routes/binance.route")(server);
     require("../Repositories/bitcoin/routes/bitcoin-scrapping.route")(server);

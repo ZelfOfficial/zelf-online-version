@@ -1,3 +1,4 @@
+const { isRemovedRecordKey } = require("../../../Core/removed-blockdag");
 const { buildArnsUndernameUrl } = require("./arweave-gateway.module");
 const {
 	initAnt,
@@ -15,7 +16,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const listRecordsForMigration = async () => {
 	const ant = initAnt();
 	const records = await ant.getRecords();
-	const keys = Object.keys(records || {}).sort();
+	const keys = Object.keys(records || {})
+		.filter((recordKey) => !isRemovedRecordKey(recordKey))
+		.sort();
 
 	return keys.map((recordKey) => {
 		const current = records[recordKey];

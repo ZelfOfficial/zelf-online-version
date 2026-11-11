@@ -184,7 +184,6 @@ const configuration = {
     arns: {
         processId: process.env.ARNS_PROCESS_ID,
         index_transaction_id: process.env.ARNS_INDEX_TRANSACTION_ID,
-        blockdag_transaction_id: process.env.ARNS_BLOCKDAG_TRANSACTION_ID || "9Kz-HCKRaWmM5fAc9A2q7sJbUIRAGQ5X9GDKdI7l76Q",
     },
     walrus: {
         network: process.env.WALRUS_NETWORK || "testnet",
@@ -530,14 +529,6 @@ const configuration = {
                 chainId: Number(process.env.BASE_CHAIN_ID) || 8453,
                 rpcUrl: process.env.RPC_PROXY_BASE_URL || process.env.BASE_RPC_URL || "https://mainnet.base.org",
             },
-            blockdag: {
-                chainId: Number(process.env.BLOCKDAG_CHAIN_ID) || 1404,
-                rpcUrl:
-                    process.env.RPC_PROXY_BLOCKDAG_URL ||
-                    process.env.BLOCKDAG_MAIN_RPC_URL ||
-                    process.env.BLOCKDAG_RPC_URL ||
-                    "https://rpc.bdagscan.com",
-            },
             /** Sui: chainId is a logical Zelf id for /api/rpc/chains (not an EVM chain id). */
             sui: {
                 chainId: Number(process.env.SUI_CHAIN_ID) || 101,
@@ -605,15 +596,6 @@ const configuration = {
                         process.env.BASE_RPC_URL ||
                         "https://mainnet.base.org",
                 },
-                blockdag: {
-                    chainId: Number(process.env.BLOCKDAG_CHAIN_ID) || 1404,
-                    rpcUrl:
-                        process.env.EXTENSION_BLOCKDAG_RPC_URL ||
-                        process.env.RPC_PROXY_BLOCKDAG_URL ||
-                        process.env.BLOCKDAG_MAIN_RPC_URL ||
-                        process.env.BLOCKDAG_RPC_URL ||
-                        "https://rpc.bdagscan.com",
-                },
                 /** Solana: logical chainId for /api/protected/rpc/chains only (distinct from Sui 101 in public rpc). */
                 solana: {
                     chainId: Number(process.env.SOLANA_PROXY_CHAIN_ID) || 102,
@@ -656,18 +638,6 @@ const configuration = {
             624749820726878: process.env.TCC_WHATSAPP_API_KEY || "",
             ...parseWhatsAppExtraApiKeys(),
         },
-    },
-    /** ZelfBlockDagPay.sol — native BDAG tag checkout only */
-    blockdag: {
-        defaultCollectionAddress: process.env.BLOCKDAG_DEFAULT_COLLECTION_ADDRESS || null,
-        factoryAddress: process.env.BLOCKDAG_FACTORY_ADDRESS || "0x7c6a168455C94092f8d51aBC515B73f4Ed9813a6",
-        // Public RPC only — dapps-rpc.bdagscan.com is blocked/unreachable from prod and local.
-        mainRpcUrl: process.env.BLOCKDAG_MAIN_RPC_URL || process.env.BLOCKDAG_RPC_URL || "https://rpc.bdagscan.com",
-        rpcUrl: process.env.BLOCKDAG_RPC_URL || "https://rpc.bdagscan.com",
-        chainId: Number(process.env.BLOCKDAG_CHAIN_ID) || 1404,
-        tagPayContractAddress: (process.env.BLOCKDAG_TAG_PAY_CONTRACT_ADDRESS || "").trim(),
-        tagPayConfirmations: Math.max(1, Number(process.env.BLOCKDAG_TAG_PAY_CONFIRMATIONS) || 1),
-        nowNodesAPIKey: process.env.BLOCKDAG_NOW_NODES_API_KEY,
     },
 };
 

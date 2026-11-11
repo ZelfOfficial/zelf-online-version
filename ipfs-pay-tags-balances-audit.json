@@ -2,8 +2,7 @@
   "generatedAt": "2026-03-22T06:20:52.461Z",
   "options": {
     "domains": [
-      "zelf",
-      "bdag"
+      "zelf"
     ],
     "nameOverride": null,
     "maxPins": 5000,
@@ -12,10 +11,6 @@
   },
   "domainFetch": {
     "zelf": {
-      "error": "Domain not supported",
-      "pins": 0
-    },
-    "bdag": {
       "error": "Domain not supported",
       "pins": 0
     }
@@ -28,8 +23,7 @@
       "eth": 0,
       "btc": 0,
       "sol": 0,
-      "avax": 0,
-      "bdag": 0
+      "avax": 0
     }
   },
   "records": []

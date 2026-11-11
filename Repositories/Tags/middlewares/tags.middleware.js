@@ -3,6 +3,7 @@ const { verifySuperAdmin } = require("../../SuperAdmin/middlewares/verify-super-
 const captchaService = require("../../../Core/captcha");
 const Session = require("../../Session/models/session.model");
 const { validateDomainName, isDomainActive } = require("../modules/domain-registry.module");
+const { isRemovedDomain, rejectRemovedDomain } = require("../../../Core/removed-blockdag");
 
 const schemas = {
     search: {
@@ -124,7 +125,7 @@ const normalizeRegistryDomain = (d) => {
 
 /**
  * Extract domain from tag name or use provided domain parameter
- * Registry TLD is e.g. zelf / bdag; pin names may use .zelfpay / .bdagpay (not separate domains).
+ * Registry TLD is e.g. zelf / avax; pin names may use .zelfpay / .avaxpay (not separate domains).
  * @param {string} tagName - Full tag name (e.g., "username.avax", "user.zelfpay")
  * @param {string} domain - Domain parameter from request
  * @returns {Object} - { domain, name } — domain is always the licensed/registry TLD for validation
@@ -175,8 +176,26 @@ const extractDomainAndName = (tagName, domain) => {
  * @param {string} name - Tag name without domain
  * @returns {Object} - Validation result
  */
+const respondToDomainValidation = (ctx, domainValidation) => {
+    if (domainValidation.status === 400) {
+        ctx.status = 400;
+        ctx.body = {
+            message: domainValidation.code || domainValidation.error,
+            code: domainValidation.code || domainValidation.error,
+        };
+        return;
+    }
+
+    ctx.status = 409;
+    ctx.body = { validationError: domainValidation.error };
+};
+
 const validateDomainAndName = async (domain, name) => {
     if (!domain) return { valid: false, error: "Domain is required" };
+
+    if (isRemovedDomain(domain)) {
+        return { valid: false, error: "UNSUPPORTED_DOMAIN", status: 400, code: "UNSUPPORTED_DOMAIN" };
+    }
 
     // Check if domain is active
     const isActive = await isDomainActive(domain);
@@ -228,8 +247,7 @@ const getValidation = async (ctx, next) => {
         const domainValidation = await validateDomainAndName(extractedDomain, name);
 
         if (!domainValidation.valid) {
-            ctx.status = 409;
-            ctx.body = { validationError: domainValidation.error };
+            respondToDomainValidation(ctx, domainValidation);
             return;
         }
 
@@ -263,6 +281,8 @@ const getValidation = async (ctx, next) => {
 
 const searchByDomainValidation = async (ctx, next) => {
     const { domain, storage, name } = ctx.request.query;
+
+    if (rejectRemovedDomain(ctx, domain)) return;
 
     const valid = validate(schemas.searchByDomain, {
         domain,
@@ -307,8 +327,7 @@ const leaseValidation = async (ctx, next) => {
     const domainValidation = await validateDomainAndName(extractedDomain, name);
 
     if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
+        respondToDomainValidation(ctx, domainValidation);
         return;
     }
 
@@ -362,8 +381,7 @@ const leaseRecoveryValidation = async (ctx, next) => {
     const domainValidation = await validateDomainAndName(extractedDomain, name);
 
     if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
+        respondToDomainValidation(ctx, domainValidation);
         return;
     }
 
@@ -415,8 +433,7 @@ const leaseOfflineValidation = async (ctx, next) => {
     const domainValidation = await validateDomainAndName(extractedDomain, name);
 
     if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
+        respondToDomainValidation(ctx, domainValidation);
         return;
     }
 
@@ -481,8 +498,7 @@ const leaseConfirmationValidation = async (ctx, next) => {
     const domainValidation = await validateDomainAndName(extractedDomain, name);
 
     if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
+        respondToDomainValidation(ctx, domainValidation);
         return;
     }
 
@@ -521,8 +537,7 @@ const previewValidation = async (ctx, next) => {
     const domainValidation = await validateDomainAndName(extractedDomain, name);
 
     if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
+        respondToDomainValidation(ctx, domainValidation);
         return;
     }
 
@@ -650,8 +665,7 @@ const decryptValidation = async (ctx, next) => {
     const domainValidation = await validateDomainAndName(extractedDomain, name);
 
     if (!domainValidation.valid) {
-        ctx.status = 409;
-        ctx.body = { validationError: domainValidation.error };
+        respondToDomainValidation(ctx, domainValidation);
         return;
     }
 
@@ -770,8 +784,7 @@ const updateValidation = async (ctx, next) => {
         const domainValidation = await validateDomainAndName(extractedDomain, name);
 
         if (!domainValidation.valid) {
-            ctx.status = 409;
-            ctx.body = { validationError: domainValidation.error };
+            respondToDomainValidation(ctx, domainValidation);
             return;
         }
 
@@ -823,6 +836,7 @@ const walletBalancesValidation = async (ctx, next) => {
 };
 
 module.exports = {
+    respondToDomainValidation,
     getValidation,
     searchByDomainValidation,
     leaseValidation,

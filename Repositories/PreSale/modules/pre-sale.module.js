@@ -8,6 +8,7 @@ const ZNSTokenModule = require("../../ZelfNameService/modules/zns-token.module")
 const MyTagsModule = require("../../Tags/modules/my-tags.module");
 const { extractDomainAndName } = require("../../Tags/middlewares/tags.middleware");
 const { isDomainActive } = require("../../Tags/config/supported-domains");
+const { isRemovedDomain } = require("../../../Core/removed-blockdag");
 const axios = require("axios");
 
 const testingStripeCards = {
@@ -260,6 +261,10 @@ const _extendTagLicenseForPresale = async (zelfName, amountUSD) => {
     const { domain, name } = extractDomainAndName(zelfName.trim());
     if (!domain || !name) {
         return emptyResult("invalid_zelf_name");
+    }
+
+    if (isRemovedDomain(domain)) {
+        return emptyResult("UNSUPPORTED_DOMAIN");
     }
 
     if (!isDomainActive(domain)) {

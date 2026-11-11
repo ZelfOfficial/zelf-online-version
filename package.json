@@ -33,13 +33,11 @@
         "status:check": "node scripts/run-status-check.js",
         "status:check:zelf-ids": "node scripts/run-status-check.js --suite=zelf-ids",
         "audit:ipfs-pay-balances": "node scripts/audit-ipfs-pay-tags-balances.js",
-        "repair:blockdag-nft-index": "node scripts/reconcile-blockdag-nft-index.js",
         "deploy:checkout-avax": "node checkoutContracts/scripts/deploy-zelf-avalanche-pay.js",
         "deploy:checkout-bsc": "node checkoutContracts/scripts/deploy-zelf-bsc-pay.js",
         "deploy:checkout-eth": "node checkoutContracts/scripts/deploy-zelf-eth-pay.js",
         "deploy:checkout-polygon": "node checkoutContracts/scripts/deploy-zelf-polygon-pay.js",
-        "deploy:checkout-base": "node checkoutContracts/scripts/deploy-zelf-base-pay.js",
-        "deploy:checkout-blockdag": "node checkoutContracts/scripts/deploy-zelf-blockdag-pay.js"
+        "deploy:checkout-base": "node checkoutContracts/scripts/deploy-zelf-base-pay.js"
     },
     "name": "zelf-wallet",
     "description": "zelf wallet backend",
