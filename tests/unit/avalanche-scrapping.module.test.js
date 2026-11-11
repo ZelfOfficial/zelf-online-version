@@ -351,5 +351,194 @@ describe("getTokens", () => {
 			total: 0,
 			tokens: [],
 		});
+		expect(JSON.stringify(mockInstanceGet.mock.calls)).not.toMatch(/oklink/i);
+	});
+
+	it("merges Routescan and Glacier holdings, deduped by contract address", async () => {
+		mockInstanceGet.mockImplementation(async (url, options) => {
+			const action = options?.params?.action;
+			if (action === "addresstokenbalance") {
+				return {
+					data: {
+						status: "1",
+						message: "OK",
+						result: [
+							{
+								TokenAddress: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+								TokenName: "USD Coin",
+								TokenSymbol: "USDC",
+								TokenQuantity: "2000000",
+								TokenDivisor: "6",
+								TokenPriceUSD: "1",
+							},
+						],
+					},
+				};
+			}
+			if (String(url).includes("glacier-api.avax.network")) {
+				return {
+					data: {
+						erc20TokenBalances: [
+							{
+								address: "0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e",
+								balance: "2000000",
+								decimals: 6,
+								name: "USD Coin Glacier",
+								symbol: "USDC",
+								ercType: "ERC-20",
+								logoUri: "https://cdn.example/usdc.png",
+								balanceValue: { value: 9 },
+								price: { value: 1 },
+							},
+							{
+								address: "0x6e84a6216eA6dACC71eE8E6b0a5B7322EEbC0fDd",
+								balance: "4000000000000000000",
+								decimals: 18,
+								name: "JoeToken",
+								symbol: "JOE",
+								ercType: "ERC-20",
+								logoUri: "https://cdn.example/joe.png",
+								balanceValue: { value: 20 },
+								price: { value: 5 },
+							},
+						],
+					},
+				};
+			}
+			if (String(url).includes("cdn.routescan.io")) {
+				return { data: { erc20Count: 2, erc721Count: 1, erc1155Count: 0 } };
+			}
+			throw new Error(`unexpected url ${url}`);
+		});
+
+		const result = await getTokens({ id: TEST_ADDRESS }, { page: "0", show: "10" });
+
+		expect(Object.keys(result)).toEqual(["balance", "total", "tokens"]);
+		expect(result.total).toBe(2);
+		expect(result.balance).toBe("22");
+		expect(result.tokens.map((entry) => entry.symbol)).toEqual(["USDC", "JOE"]);
+		expect(result.tokens[0]).toMatchObject({
+			name: "USD Coin",
+			address: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+			_fiatBalance: "2",
+			_price: 1,
+			image: "",
+			tokenType: "ERC-20",
+		});
+		expect(result.tokens[1]).toMatchObject({
+			name: "JoeToken",
+			_fiatBalance: "20",
+			_price: 5,
+			image: "https://cdn.example/joe.png",
+			fiatBalance: 20,
+		});
+		expect(mockInstanceGet).toHaveBeenCalledWith(
+			"https://api.routescan.io/v2/network/mainnet/evm/43114/etherscan/api",
+			expect.objectContaining({ timeout: 8000, params: expect.objectContaining({ action: "addresstokenbalance" }) })
+		);
+		expect(mockInstanceGet).toHaveBeenCalledWith(
+			expect.stringContaining("glacier-api.avax.network"),
+			expect.objectContaining({ timeout: 8000 })
+		);
+		expect(JSON.stringify(mockInstanceGet.mock.calls)).not.toMatch(/oklink/i);
+		expect(mockAxiosGet).not.toHaveBeenCalled();
+	});
+
+	it("keeps the other provider when Routescan or Glacier fails", async () => {
+		mockInstanceGet.mockImplementation(async (url, options) => {
+			if (options?.params?.action === "addresstokenbalance") {
+				return {
+					data: {
+						status: "1",
+						message: "OK",
+						result: [
+							{
+								TokenAddress: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+								TokenName: "USD Coin",
+								TokenSymbol: "USDC",
+								TokenQuantity: "2000000",
+								TokenDivisor: "6",
+								TokenPriceUSD: "1",
+							},
+						],
+					},
+				};
+			}
+			if (String(url).includes("glacier-api.avax.network") || String(url).includes("cdn.routescan.io")) {
+				throw new Error("glacier down");
+			}
+			throw new Error(`unexpected url ${url}`);
+		});
+
+		const routescanOnly = await getTokens({ id: TEST_ADDRESS }, { page: "0", show: "10" });
+
+		expect(routescanOnly.total).toBe(1);
+		expect(routescanOnly.balance).toBe("2");
+		expect(routescanOnly.tokens[0]).toMatchObject({
+			symbol: "USDC",
+			_fiatBalance: "2",
+			_price: 1,
+			image: "",
+		});
+
+		mockInstanceGet.mockImplementation(async (url, options) => {
+			const action = options?.params?.action;
+			if (action === "addresstokenbalance" || action === "tokentx" || action === "tokenbalance") {
+				throw new Error("routescan_tokens_down");
+			}
+			if (String(url).includes("erc20-holdings")) {
+				throw new Error("routescan_holdings_unavailable");
+			}
+			if (String(url).includes("glacier-api.avax.network")) {
+				return {
+					data: {
+						erc20TokenBalances: [
+							{
+								address: "0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e",
+								balance: "2000000",
+								decimals: 6,
+								name: "USD Coin",
+								symbol: "USDC",
+								ercType: "ERC-20",
+								logoUri: "https://cdn.example/usdc.png",
+								balanceValue: { value: 2 },
+								price: { value: 1 },
+							},
+							{
+								address: "0x6e84a6216eA6dACC71eE8E6b0a5B7322EEbC0fDd",
+								balance: "1000000000000000000",
+								decimals: 18,
+								name: "JoeToken",
+								symbol: "JOE",
+								ercType: "ERC-20",
+								logoUri: "https://cdn.example/joe.png",
+								balanceValue: { value: 20 },
+								price: { value: 5 },
+							},
+						],
+					},
+				};
+			}
+			if (String(url).includes("cdn.routescan.io")) {
+				throw new Error("counts down");
+			}
+			throw new Error(`unexpected url ${url}`);
+		});
+
+		const glacierOnly = await getTokens({ id: TEST_ADDRESS }, { page: "0", show: "10" });
+
+		expect(glacierOnly.balance).toBe("22");
+		expect(glacierOnly.tokens.map((entry) => entry.symbol)).toEqual(["USDC", "JOE"]);
+		expect(glacierOnly.tokens[0]).toMatchObject({
+			_fiatBalance: "2",
+			_price: 1,
+			image: "https://cdn.example/usdc.png",
+		});
+		expect(glacierOnly.tokens[1]).toMatchObject({
+			_fiatBalance: "20",
+			_price: 5,
+			image: "https://cdn.example/joe.png",
+		});
+		expect(JSON.stringify(mockInstanceGet.mock.calls)).not.toMatch(/oklink/i);
 	});
 });
