@@ -1,8 +1,8 @@
 const Model = require("../models/super-admin.model");
 const MongoORM = require("../../../Core/mongo-orm");
 const crypto = require("crypto");
-const jwt = require("jsonwebtoken");
 const config = require("../../../Core/config");
+const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const moment = require("moment");
 const Mailgun = require("../../../Core/mailgun");
 
@@ -69,19 +69,24 @@ const auth = async (data, authUser) => {
         findOne: true,
     });
 
-    if (!superAdmin) throw new Error("404");
+    if (!superAdmin) throw new Error("404:SUPER_ADMIN_NOT_FOUND");
+
+    if (superAdmin.disabled === true || superAdmin.active === false || superAdmin.status === "banned" || superAdmin.status === "inactive") {
+        throw new Error("403:SUPER_ADMIN_INACTIVE");
+    }
 
     const isKeyValid = await superAdmin.isValidApiKey(apiKey);
 
-    if (!isKeyValid) throw new Error("403");
+    if (!isKeyValid) throw new Error("403:SUPER_ADMIN_FORBIDDEN");
 
     return {
-        token: jwt.sign(
+        token: signToken(
             {
-                superAdminId: superAdmin._id,
-                exp: moment().add(365, "day").unix(),
+                tokenVersion: Number(superAdmin.tokenVersion || 0),
+                exp: moment().add(12, "hours").unix(),
             },
-            config.JWT_SECRET
+            config.JWT_SECRET,
+            { typ: TOKEN_TYPES.superAdmin, superAdminId: superAdmin._id }
         ),
     };
 };
@@ -161,12 +166,13 @@ const verifyOtp = async (data) => {
     await superAdmin.save();
 
     return {
-        token: jwt.sign(
+        token: signToken(
             {
-                superAdminId: superAdmin._id,
-                exp: moment().add(12, "hours").unix(), // 12 hours as stated
+                tokenVersion: Number(superAdmin.tokenVersion || 0),
+                exp: moment().add(12, "hours").unix(),
             },
-            config.JWT_SECRET
+            config.JWT_SECRET,
+            { typ: TOKEN_TYPES.superAdmin, superAdminId: superAdmin._id }
         ),
     };
 };

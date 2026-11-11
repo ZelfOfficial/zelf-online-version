@@ -1,5 +1,9 @@
 import jwt from "jsonwebtoken";
+import { createRequire } from "module";
 import configuration from "../Core/config.js";
+
+const require = createRequire(import.meta.url);
+const { signToken, TOKEN_TYPES } = require("../Core/jwt-claims");
 
 /**
  * Sign and lock price data for a specific duration
@@ -16,7 +20,8 @@ const lockPriceData = (priceData, durationMinutes = 30) => {
 			lockDuration: durationMinutes,
 		};
 
-		const token = jwt.sign(lockData, configuration.JWT_SECRET, {
+		const token = signToken(lockData, configuration.JWT_SECRET, {
+			typ: TOKEN_TYPES.priceLock,
 			expiresIn: `${durationMinutes}m`,
 		});
 
@@ -86,7 +91,7 @@ const verifyLockedPrice = (token) => {
  */
 const signRecordData = (recordData) => {
 	try {
-		const token = jwt.sign(recordData, configuration.JWT_SECRET);
+		const token = signToken(recordData, configuration.JWT_SECRET, { typ: TOKEN_TYPES.record });
 		return token;
 	} catch (error) {
 		console.error("Error signing record data:", error);

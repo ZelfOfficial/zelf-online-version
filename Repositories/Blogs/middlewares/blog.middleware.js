@@ -1,4 +1,5 @@
 const { string, validate, boolean, array, any } = require("../../../Core/JoiUtils");
+const { verifySuperAdmin } = require("../../SuperAdmin/middlewares/verify-super-admin.middleware");
 
 const SUPPORTED_LOCALES = ["en", "es", "fr", "ja", "ko", "pt", "zh", "zh-TW"];
 
@@ -31,15 +32,6 @@ const schemas = {
         canonicalSlug: string(),
         locale: string(),
     },
-};
-
-const verifySuperAdmin = async (ctx, next) => {
-    if (!ctx.state.user || !ctx.state.user.superAdminId) {
-        ctx.status = 403;
-        ctx.body = { error: "Forbidden: Super Admin access required" };
-        return;
-    }
-    await next();
 };
 
 const createValidation = async (ctx, next) => {

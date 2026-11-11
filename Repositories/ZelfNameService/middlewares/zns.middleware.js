@@ -1,4 +1,5 @@
 const { string, validate, boolean, number, stringEnum } = require("../../../Core/JoiUtils");
+const { verifySuperAdmin } = require("../../SuperAdmin/middlewares/verify-super-admin.middleware");
 const captchaService = require("../../../Core/captcha");
 const config = require("../../../Core/config");
 const Session = require("../../Session/models/session.model");
@@ -600,17 +601,7 @@ const revenueCatWebhookValidation = async (ctx, next) => {
 };
 
 const referralRewardsValidation = async (ctx, next) => {
-    const { superAdminId } = ctx.state.user;
-
-    if (!superAdminId) {
-        ctx.status = 403;
-
-        ctx.body = { error: "Unauthorized" };
-
-        return;
-    }
-
-    await next();
+    await verifySuperAdmin(ctx, next);
 };
 
 const updateValidation = async (ctx, next) => {
