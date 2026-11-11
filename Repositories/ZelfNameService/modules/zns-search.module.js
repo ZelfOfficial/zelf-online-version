@@ -31,7 +31,10 @@ const searchZelfName = async (params, authUser) => {
 
 	if (searchResult.ipfs?.available) return searchResult.ipfs;
 
-	searchResult.ipfs = searchResult.ipfs;
+	const ipfsRows = Array.isArray(searchResult.ipfs) ? searchResult.ipfs : [];
+	const arweaveRows = Array.isArray(searchResult.arweave) ? searchResult.arweave : [];
+
+	if (ipfsRows.length || arweaveRows.length) searchResult.available = false;
 
 	return searchResult;
 
@@ -138,53 +141,104 @@ const _searchInWalrus = async (params, query) => {
 	}
 };
 
+const NAME_INDEX_KEYS = ["tagName", "zelfName"];
+const ZELF_KEYS_RECORD_TYPES = new Set(["password", "notes", "note", "credit_card", "payment-card", "contact", "zotp"]);
+
+const _pinIdentity = (row) => String(row?.cid || row?.ipfs_pin_hash || row?.ipfsHash || row?.id || "");
+
+const _isZelfKeysPin = (row) => {
+	const type = String(row?.publicData?.type || row?.metadata?.keyvalues?.type || row?.keyvalues?.type || "").toLowerCase();
+	return ZELF_KEYS_RECORD_TYPES.has(type);
+};
+
+const _fileNameMatchesTag = (row, tagName) => {
+	const lower = String(tagName || "").toLowerCase();
+	const name = String(row?.name || "").toLowerCase();
+	if (!lower || !name) return false;
+
+	return name === lower || name === `${lower}.hold` || name === `${lower}.png` || name.startsWith(`${lower}_`) || name.startsWith(`${lower}.`);
+};
+
+const _dedupePins = (rows) => {
+	const seen = new Set();
+	const unique = [];
+
+	for (const row of rows) {
+		if (!row || _isZelfKeysPin(row)) continue;
+		const id = _pinIdentity(row) || `${row.name || ""}:${row.publicData?.tagName || row.publicData?.zelfName || ""}`;
+		if (seen.has(id)) continue;
+		seen.add(id);
+		unique.push(row);
+	}
+
+	return unique;
+};
+
+/**
+ * Tags search tries the license key (tagName), then zelfName, then the Pinata file name.
+ * A Zelf ID pin often has tagName and no zelfName key, so a zelfName-only query misses it.
+ */
+const _lookupPinsByTagName = async (tagName, authUser) => {
+	const found = [];
+	let failures = 0;
+
+	for (const key of NAME_INDEX_KEYS) {
+		try {
+			const rows = await IPFSModule.get({ key, value: tagName, throwOnError: true }, authUser);
+			if (Array.isArray(rows)) found.push(...rows);
+		} catch (exception) {
+			failures += 1;
+			console.error({ znsNameLookup: key, exception });
+		}
+	}
+
+	try {
+		const byName = await IPFSModule.get({ zelfName: tagName, throwOnError: true }, authUser);
+		if (Array.isArray(byName)) found.push(...byName.filter((row) => _fileNameMatchesTag(row, tagName)));
+	} catch (exception) {
+		failures += 1;
+		console.error({ znsNameLookup: "name", exception });
+	}
+
+	return {
+		rows: _dedupePins(found),
+		failed: failures === NAME_INDEX_KEYS.length + 1,
+	};
+};
+
+const _isZelfNameQuery = (query) => !query?.key || query.key === "zelfName" || query.key === "tagName";
+
 /**
  * Retrieve records from IPFS based on environment
  * @param {Array} ipfsRecords - Array to store IPFS records
  * @param {String} environment - Environment type (hold, mainnet, both)
  * @param {Object} query - Query object
  * @param {Object} authUser - Authenticated user object
+ * @returns {Promise<{ failed: boolean }>}
  */
 const _retriveFromIPFSByEnvironment = async (ipfsRecords, environment, query, authUser) => {
-	switch (environment) {
-		case "hold":
-			ipfsRecords.push(
-				...(await IPFSModule.get(
-					{
-						key: query.key || "zelfName",
-						value: `${query.value || query.zelfName}.hold`,
-					},
-					authUser
-				))
-			);
-			break;
-		case "mainnet":
-			ipfsRecords.push(...(await IPFSModule.get(query, authUser)));
-			break;
-
-		default:
-			try {
-				ipfsRecords.push(...(await IPFSModule.get(query, authUser)));
-			} catch (exception) {
-				console.error({ mainNetIPFSError: exception });
-			}
-
-			try {
-				ipfsRecords.push(
-					...(await IPFSModule.get(
-						{
-							key: query.key || "zelfName",
-							value: `${query.value || query.zelfName}.hold`,
-						},
-						authUser
-					))
-				);
-			} catch (exception) {
-				console.error({ holdIPFSError: exception });
-			}
-
-			break;
+	if (!_isZelfNameQuery(query)) {
+		try {
+			const rows = await IPFSModule.get({ ...query, throwOnError: true }, authUser);
+			if (Array.isArray(rows)) ipfsRecords.push(...rows);
+			return { failed: false };
+		} catch (exception) {
+			console.error({ mainNetIPFSError: exception });
+			return { failed: true };
+		}
 	}
+
+	const value = query.value || query.zelfName;
+	const names = environment === "hold" ? [`${value}.hold`] : environment === "mainnet" ? [value] : [value, `${value}.hold`];
+	let failures = 0;
+
+	for (const name of names) {
+		const found = await _lookupPinsByTagName(name, authUser);
+		if (found.failed) failures += 1;
+		ipfsRecords.push(...found.rows);
+	}
+
+	return { failed: failures === names.length && ipfsRecords.length === 0 };
 };
 
 /**
@@ -206,9 +260,12 @@ const _searchInIPFS = async (environment = "both", query, authUser, foundInArwea
 	try {
 		let ipfsRecords = [];
 
-		await _retriveFromIPFSByEnvironment(ipfsRecords, environment, query, authUser);
+		const lookup = await _retriveFromIPFSByEnvironment(ipfsRecords, environment, query, authUser);
 
 		if (!ipfsRecords.length) {
+			// A failed Pinata read is not "this name is free".
+			if (lookup?.failed) return foundInArweave ? [] : { ipfs: [] };
+
 			return zelfName && zelfName.includes(".zelf")
 				? {
 						price,
@@ -221,26 +278,15 @@ const _searchInIPFS = async (environment = "both", query, authUser, foundInArwea
 
 		const zelfNames = await _returnFormattedIPFSRecords(ipfsRecords, environment, foundInArweave);
 
-		if (!zelfNames.length) {
-			const error = new Error("not_found_in_arweave");
-			error.status = 404;
-			throw error;
-		}
+		// An Arweave miss is not an IPFS miss. Returning [] from the catch used to drop
+		// every pin that had already been fetched when formatting produced no rows.
+		if (!zelfNames.length) return foundInArweave ? [] : { ipfs: [] };
 
 		return foundInArweave ? zelfNames : { ipfs: zelfNames };
 	} catch (exception) {
 		console.error({ _searchInIPFS_exception: exception });
 
-		return foundInArweave
-			? []
-			: query.key === "zelfName"
-			? {
-					price,
-					reward,
-					zelfName,
-					available: true,
-			  }
-			: null;
+		return foundInArweave ? [] : { ipfs: [] };
 	}
 };
 
@@ -249,8 +295,11 @@ const _searchInIPFS = async (environment = "both", query, authUser, foundInArwea
  * @param {Array} searchResults - Raw Arweave search results
  * @returns {Array} Formatted Arweave records
  */
+const _arweaveRecordIsUsable = (zelfNameObject) =>
+	Boolean(zelfNameObject?.publicData) && typeof zelfNameObject.zelfProof === "string" && zelfNameObject.zelfProof.trim().length > 0;
+
 const _returnFormattedArweaveRecords = async (searchResults) => {
-	if (searchResults?.available) return [];
+	if (searchResults?.available || !Array.isArray(searchResults)) return [];
 
 	const zelfNames = [];
 
@@ -259,7 +308,17 @@ const _returnFormattedArweaveRecords = async (searchResults) => {
 	const hideRecordsWithoutRegisteredAt = Boolean(searchResults.length >= 2);
 
 	for (let index = 0; index < searchResults.length; index++) {
-		const zelfNameObject = await ZNSPartsModule.formatArweaveRecord(searchResults[index]);
+		let zelfNameObject;
+
+		try {
+			zelfNameObject = await ZNSPartsModule.formatArweaveRecord(searchResults[index]);
+		} catch (exception) {
+			console.error({ arweaveRecordFormat: exception });
+			continue;
+		}
+
+		// A gateway miss leaves zelfProof null. Skipping that row must not throw or drop IPFS results.
+		if (!_arweaveRecordIsUsable(zelfNameObject)) continue;
 
 		if (hideRecordsWithoutRegisteredAt && !zelfNameObject.publicData.registeredAt) continue;
 
@@ -287,33 +346,32 @@ const _returnFormattedArweaveRecords = async (searchResults) => {
 const _returnFormattedIPFSRecords = async (ipfsRecords, environment, foundInArweave) => {
 	const zelfNamesInIPFS = [];
 
-	const now = moment();
-
 	for (let index = 0; index < ipfsRecords.length; index++) {
 		const ipfsRecord = ipfsRecords[index];
 
-		const formattedIPFS = await ZNSPartsModule.formatIPFSRecord(ipfsRecord, foundInArweave);
+		let formattedIPFS;
 
-		const expiresAt = moment(formattedIPFS.publicData.expiresAt).add(formattedIPFS.publicData.type === "mainnet" ? 45 : 0, "day");
-
-		const isExpired = now.isAfter(expiresAt);
-
-		if (isExpired) {
-			ipfsRecord.ipfs_pin_hash ? await IPFSModule.unPinFiles([ipfsRecord.ipfs_pin_hash]) : "do nothing";
-
+		try {
+			formattedIPFS = await ZNSPartsModule.formatIPFSRecord(ipfsRecord, foundInArweave);
+		} catch (exception) {
+			console.error({ ipfsRecordFormat: exception });
 			continue;
 		}
 
-		if (environment === "both") {
+		if (!formattedIPFS?.publicData) continue;
+
+		// Tags search treats any stored pin as taken. Dropping an expired lease here
+		// made that same name look missing on ZNS v2.
+		if (environment === "both" || !environment) {
 			zelfNamesInIPFS.push(formattedIPFS);
 
 			continue;
 		}
 
-		if (
-			(environment === "hold" && ipfsRecord.metadata.keyvalues.type === "hold") ||
-			(environment === "mainnet" && (!ipfsRecord.metadata.keyvalues.type || ipfsRecord.metadata.keyvalues.type === "mainnet"))
-		) {
+		const recordType =
+			formattedIPFS.publicData?.type || ipfsRecord?.metadata?.keyvalues?.type || ipfsRecord?.publicData?.type || ipfsRecord?.keyvalues?.type;
+
+		if ((environment === "hold" && recordType === "hold") || (environment === "mainnet" && (!recordType || recordType === "mainnet"))) {
 			zelfNamesInIPFS.push(formattedIPFS);
 		}
 	}

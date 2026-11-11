@@ -10,6 +10,7 @@ const {
 	isSingleTagLookupKey,
 	postGraphql,
 	postGraphqlToGateway,
+	fetchTxData,
 } = require("../../Repositories/Arweave/modules/arweave-gateway.module");
 
 describe("arweave-gateway.module", () => {
@@ -84,6 +85,32 @@ describe("arweave-gateway.module", () => {
 		expect(axios.post).toHaveBeenCalledTimes(2);
 		expect(axios.post.mock.calls[0][0]).toBe("https://arweave.net/graphql");
 		expect(axios.post.mock.calls[1][0]).toBe("https://zigza.xyz/graphql");
+	});
+
+	it("follows an arweave.net 302 to the transaction bytes", async () => {
+		const payload = Buffer.from("png-bytes");
+		const gateway = getPublicGatewayUrl();
+
+		jest.spyOn(axios, "get").mockImplementation(async (url, options) => {
+			expect(options.maxRedirects).toBeGreaterThan(0);
+
+			if (url === `${gateway}/txid`) {
+				return {
+					status: 302,
+					headers: { location: `${gateway}/txid/data` },
+					data: Buffer.alloc(0),
+				};
+			}
+
+			if (url === `${gateway}/txid/data`) {
+				return { status: 200, headers: {}, data: payload };
+			}
+
+			throw new Error(`unexpected url ${url}`);
+		});
+
+		await expect(fetchTxData("txid")).resolves.toBe(payload);
+		expect(axios.get).toHaveBeenCalledWith(`${gateway}/txid`, expect.objectContaining({ maxRedirects: 5 }));
 	});
 
 	it("postGraphql throws after all gateways fail", async () => {

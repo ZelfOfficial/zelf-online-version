@@ -8,10 +8,16 @@ const get = async (data, authUser, options = {}) => {
 
 	if (cid) return await IPFS.retrieve(cid, expires);
 
-	if (zelfName) return await IPFS.filter("name", zelfName);
+	const filterOptions = {};
+
+	// Default filter() turns a Pinata failure into []. Callers that must not
+	// treat an outage as "no such name" pass throwOnError.
+	if (data.throwOnError) filterOptions.throwOnError = true;
+
+	if (zelfName) return await IPFS.filter("name", zelfName, filterOptions);
 
 	if (key && value) {
-		const records = await IPFS.filter(key, value);
+		const records = await IPFS.filter(key, value, filterOptions);
 		if (options.restrictToCaller) return filterOwnedRecords(records, authUser);
 		return records;
 	}
