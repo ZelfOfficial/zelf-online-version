@@ -464,8 +464,8 @@ const getBalanceLegacy = async (params) => {
 		try {
 			tokens = await getTokens({ id: address });
 		} catch (_) {
-			dbgBsc("nodereal_tokens_down_try_oklink");
-			tokens = await getOklinkFormattedTokens(address, 100);
+			dbgBsc("nodereal_tokens_down");
+			tokens = [];
 		}
 
 		if (!tokens || tokens.length === 0) {
@@ -566,7 +566,7 @@ const txInflight = new Map(); // address -> Promise<transactions[]>
 const balanceCache = new Map(); // address -> { data, at }
 const balanceInflight = new Map(); // address -> Promise<data>
 
-/** Recent BNB transactions (current sources: OKLink → BscScan → Bogotá), cached per address, one fetch in flight per address. */
+/** Recent BNB transactions (BscScan or Etherscan v2 when a key exists, then Bogotá), cached per address. */
 const fetchRecentTransactions = (address) => {
 	const key = address.toLowerCase();
 	const cached = txCache.get(key);
@@ -977,7 +977,7 @@ async function getBscscanTransactions(address, page, show, price) {
 
 		return null;
 	} catch (error) {
-		dbgBsc("bscscan_tx_error", error?.message || error);
+		dbgBsc("bscscan_tx_error", String(error?.message || error).replace(/apikey=[^&\s]+/gi, "apikey=redacted"));
 
 		return null;
 	}
@@ -988,10 +988,52 @@ async function getBscscanTransactions(address, page, show, price) {
  * @param {Object} params
  * @returns
  */
+const getEtherscanV2BscTransactions = async (address, page, show, price) => {
+	const apiKey = String(process.env.ETHERSCAN_API_KEY || "").trim();
+	if (!apiKey) return null;
+
+	try {
+		const url = `${process.env.ETHERSCAN_V2_API || "https://api.etherscan.io/v2/api"}?chainid=${BSC_CHAIN_ID}&module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=${page}&offset=${show}&sort=desc&apikey=${apiKey}`;
+		const { data } = await instance.get(url);
+		if (data?.status !== "1" || !Array.isArray(data?.result)) return null;
+
+		const txs = data.result.map((tx) => {
+			const value = Number(tx.value || 0) / Math.pow(10, 18);
+			const fiatValue = value * Number(price || 0);
+			const traffic = String(tx.from || "").toLowerCase() === String(address).toLowerCase() ? "OUT" : "IN";
+			let txnFee = "0";
+			const gasUsed = Number(tx.gasUsed || 0);
+			const gasPrice = Number(tx.gasPrice || 0);
+			if (gasUsed && gasPrice) txnFee = ((gasUsed * gasPrice) / Math.pow(10, 18)).toFixed(8);
+
+			return {
+				age: tx.timeStamp ? new Date(Number(tx.timeStamp) * 1000).toISOString() : "",
+				amount: value ? String(value) : "0",
+				asset: "BNB",
+				block: String(tx.blockNumber || ""),
+				date: tx.timeStamp ? new Date(Number(tx.timeStamp) * 1000).toISOString().replace("T", " ").slice(0, 19) : "",
+				fiatAmount: fiatValue.toFixed(2),
+				from: tx.from,
+				hash: tx.hash,
+				method: tx.methodId ? "Contract Interaction" : "Transfer",
+				to: tx.to,
+				traffic,
+				txnFee,
+			};
+		});
+
+		return { pagination: { records: String(txs.length), pages: "1", page: String(page) }, transactions: txs };
+	} catch (error) {
+		dbgBsc("etherscan_v2_tx_error", String(error?.message || error).replace(/apikey=[^&\s]+/gi, "apikey=redacted"));
+		return null;
+	}
+};
+
 const getTransactionsList = async (params, query) => {
 	const address = params.id;
 	const page = query.page || 0;
 	const show = query.show || 10;
+	const scanPage = String(page) === "0" ? 1 : page;
 
 	try {
 		// Get current BNB price for fiat calculation
@@ -1001,13 +1043,11 @@ const getTransactionsList = async (params, query) => {
 			price = priceForToken(NATIVE_BNB, await getPrices([NATIVE_BNB]));
 		} catch (_) {}
 
-		// Try OKLink first
-		let resp = await getOklinkBscTransactions(address, page, show, price);
+		let resp = await getBscscanTransactions(address, scanPage, show, price);
 
 		if (resp && resp.transactions && resp.transactions.length > 0) return resp;
 
-		// Fallback to BscScan
-		resp = await getBscscanTransactions(address, page, show, price);
+		resp = await getEtherscanV2BscTransactions(address, scanPage, show, price);
 
 		if (resp && resp.transactions && resp.transactions.length > 0) return resp;
 

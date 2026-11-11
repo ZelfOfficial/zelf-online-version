@@ -30,6 +30,7 @@ const {
 	formatUtcIsoDate,
 	isTimeoutError,
 } = require("../../etherscan/modules/evm-transaction-list.util");
+const { fetchBlockscoutErc20Items, mapBlockscoutErc20Item } = require("../../etherscan/modules/blockscout-token-list.util");
 
 const BASE_CHAIN_ID = 8453;
 const BASE_BLOCKSCOUT_BASE = process.env.BASE_BLOCKSCOUT_URL || "https://base.blockscout.com";
@@ -224,51 +225,30 @@ const getAddress = async (query) => {
 const getTokens = async (params, query) => {
 	try {
 		const { address } = params;
-		const t = Date.now();
+		const limit = Math.max(1, parseInt(query?.show || "100", 10) || 100);
+		const page = Math.max(0, parseInt(query?.page || "0", 10) || 0);
 
-		// Use OKLink API for ERC20 tokens (Base is EVM compatible)
-		const url = `https://www.oklink.com/api/explorer/v2/base/addresses/${address}/tokens?offset=0&limit=${query.show || "100"}&t=${t}`;
-
-		const { data } = await axios.get(url, {
-			httpsAgent: agent,
-			timeout: 5000,
-			validateStatus: function (status) {
-				return status < 500;
-			},
-			headers: {
-				"X-Apikey": get_ApiKey().getApiKey(),
-				"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
-			},
-		});
-
-		if ((data.code === "0" || data.code === 0) && data.data && data.data.hits) {
-			const rawTokens = data.data.hits.map((token) => ({
-				address: token.contractAddress,
-				symbol: token.symbol,
-				name: token.tokenName,
-				decimals: token.decimals || 18,
-				amount: (parseFloat(token.holdingAmount) / Math.pow(10, token.decimals || 18)).toString(),
-				price: token.price || "0",
-				fiatBalance: (parseFloat(token.holdingAmount) * parseFloat(token.price || "0")) / Math.pow(10, token.decimals || 18),
-				image: token.logo || "https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png",
-				tokenType: "ERC20",
-				owner: address,
-				contractAddress: token.contractAddress,
-				rawAmount: token.holdingAmount,
-			}));
-
-			// Calculate total fiat balance across all tokens
-			const totalFiatBalance = rawTokens.reduce((sum, token) => sum + (token.fiatBalance || 0), 0);
-
-			// Use standardized formatter for token holdings
-			const tokenHoldings = baseFormatter.formatTokenHoldings(rawTokens);
-
-			return {
-				balance: tokenHoldings.balance,
-				total: tokenHoldings.total,
-				totalFiatBalance: totalFiatBalance,
-				tokens: tokenHoldings.tokens,
-			};
+		try {
+			const items = await fetchBlockscoutErc20Items((url, options) => instance.get(url, options), {
+				baseUrl: BASE_BLOCKSCOUT_BASE,
+				address,
+			});
+			const rawTokens = items
+				.map(mapBlockscoutErc20Item)
+				.filter(Boolean)
+				.slice(page * limit, (page + 1) * limit);
+			if (rawTokens.length) {
+				const tokenHoldings = baseFormatter.formatTokenHoldings(rawTokens);
+				const totalFiatBalance = rawTokens.reduce((sum, token) => sum + (token.fiatBalance || 0), 0);
+				return {
+					balance: tokenHoldings.balance,
+					total: tokenHoldings.total,
+					totalFiatBalance,
+					tokens: tokenHoldings.tokens,
+				};
+			}
+		} catch (blockscoutError) {
+			console.error("Base Blockscout token list failed:", blockscoutError.message || blockscoutError);
 		}
 
 		try {
@@ -330,10 +310,9 @@ const getTransactionsList = async (query) => {
 		const alchemyProvider = async (hopTimeout) => getBaseAlchemyTransactions(address, query, show, price, hopTimeout);
 		const blockscoutProvider = async (hopTimeout, walkDeadlineMs) =>
 			getBaseBlockscoutTransactions(address, query, show, price, hopTimeout, walkDeadlineMs);
-		const oklinkProvider = async (hopTimeout) => getOKLinkTransactions(address, page, show, price, hopTimeout);
 		const baseScanProvider = async (hopTimeout) => getBaseScanTransactions(address, page, show, price, hopTimeout);
 
-		const ladderResult = await runTransactionProviderLadder([alchemyProvider, blockscoutProvider, oklinkProvider, baseScanProvider], {
+		const ladderResult = await runTransactionProviderLadder([alchemyProvider, blockscoutProvider, baseScanProvider], {
 			deadlineMs,
 			primaryProviderTimeoutMs: TX_LIST_PRIMARY_PROVIDER_TIMEOUT_MS,
 		});

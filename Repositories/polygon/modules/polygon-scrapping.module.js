@@ -581,7 +581,6 @@ const getBalance = async (params) => {
 		logPolygonDebug("polygonscanApiCfg", {
 			url: polygonscanApiUrl,
 			keyPresent: Boolean(polygonscanApiKey),
-			keyPreview: polygonscanApiKey ? `${polygonscanApiKey.slice(0, 4)}…${polygonscanApiKey.slice(-4)}` : null,
 		});
 
 		logPolygonDebug("blockscoutHasUSDC", {
@@ -606,16 +605,6 @@ const getBalance = async (params) => {
 
 		if (erc20Items.length > 0) {
 			tokens = formatBlockscoutErc20ItemsForPortfolio(erc20Items, coingeckoPriceMap, verifiedSet);
-		} else {
-			// Blockscout tokens unavailable → try OKLink
-			const okTokens = await getOklinkFormattedTokens(formatedAddress, 100);
-
-			if (okTokens.length > 0) {
-				tokens = okTokens;
-				logPolygonDebug("tokens_from_oklink", tokens.length);
-			} else {
-				logPolygonDebug("oklink_tokens_empty");
-			}
 		}
 
 		logPolygonDebug(
@@ -1015,6 +1004,47 @@ const getTransactionStatus = async (params, query = {}) => {
 	}
 };
 
+async function getBlockscoutPolygonTransactions(address, page, show, price) {
+	try {
+		const pageNumber = Math.max(0, parseInt(page, 10) || 0);
+		const limit = Math.max(1, parseInt(show, 10) || 10);
+		const { data } = await instance.get(`https://polygon.blockscout.com/api/v2/addresses/${address}/transactions`);
+		const items = Array.isArray(data?.items) ? data.items : [];
+		const slice = items.slice(pageNumber * limit, (pageNumber + 1) * limit);
+		const transactions = slice.map((tx) => {
+			const value = Number(tx.value || 0) / 1e18;
+			const fiatValue = value * Number(price || 0);
+			const from = tx.from?.hash || tx.from || "";
+			const to = tx.to?.hash || tx.to || "";
+			const traffic = String(from).toLowerCase() === String(address).toLowerCase() ? "OUT" : "IN";
+			let txnFee = "0";
+			if (tx.fee?.value != null) txnFee = String(Number(tx.fee.value) / 1e18);
+			const timestamp = tx.timestamp ? new Date(tx.timestamp) : null;
+			const unix = timestamp && !Number.isNaN(timestamp.getTime()) ? Math.floor(timestamp.getTime() / 1000) : 0;
+
+			return {
+				age: unix ? moment(unix * 1000).fromNow() : "",
+				amount: value ? String(value) : "0",
+				asset: "POL",
+				block: String(tx.block_number || tx.block || ""),
+				date: unix ? moment(unix * 1000).format("YYYY-MM-DD HH:mm:ss") : "",
+				fiatAmount: fiatValue.toFixed(2),
+				from,
+				hash: tx.hash,
+				method: tx.method || (tx.raw_input && tx.raw_input !== "0x" ? "Contract Interaction" : "Transfer"),
+				to,
+				traffic,
+				txnFee,
+			};
+		});
+
+		return { pagination: { records: String(transactions.length), pages: "1", page: String(page) }, transactions };
+	} catch (error) {
+		logPolygonDebug("blockscout_tx_error", error?.message || error);
+		return null;
+	}
+}
+
 /**
  * get transactions list
  * @param {Object} params
@@ -1033,12 +1063,11 @@ const getTransactionsList = async (params, query) => {
 			price = Number(p?.price || 0);
 		} catch (_) { }
 
-		// Try OKLink first
-		let resp = await getOklinkTransactions(address, page, show, price);
+		const scanPage = String(page) === "0" ? 1 : page;
+		let resp = await getPolygonscanTransactions(address, scanPage, show, price);
 		if (resp && resp.transactions && resp.transactions.length > 0) return resp;
 
-		// Fallback to Polygonscan
-		resp = await getPolygonscanTransactions(address, page, show, price);
+		resp = await getBlockscoutPolygonTransactions(address, page, show, price);
 		if (resp && resp.transactions && resp.transactions.length > 0) return resp;
 
 		// Final fallback: internal microservice (if configured)

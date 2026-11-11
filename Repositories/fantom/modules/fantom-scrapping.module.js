@@ -154,7 +154,7 @@ const getAddress = async (query) => {
 
 				const transactionsData = await Promise.race([transactionDataPromise, transactionTimeoutPromise]);
 				transactions = transactionsData.transactions || [];
-				console.log(`Found ${transactions.length} transactions via OKLink API`);
+				console.log(`Found ${transactions.length} transactions`);
 			} catch (error) {
 				console.log("Transaction fetch failed:", error.message);
 				// Add error message as a transaction entry
