@@ -225,26 +225,15 @@ const _searchInIPFS = async (environment = "both", query, authUser, foundInArwea
 
 		const zelfNames = await _returnFormattedIPFSRecords(ipfsRecords, environment, foundInArweave);
 
-		if (!zelfNames.length) {
-			const error = new Error("not_found_in_arweave");
-			error.status = 404;
-			throw error;
-		}
+		// An Arweave miss is not an IPFS miss. Returning [] from the catch used to drop
+		// every pin that had already been fetched when formatting produced no rows.
+		if (!zelfNames.length) return foundInArweave ? [] : { ipfs: [] };
 
 		return foundInArweave ? zelfNames : { ipfs: zelfNames };
 	} catch (exception) {
 		console.error({ _searchInIPFS_exception: exception });
 
-		return foundInArweave
-			? []
-			: query.key === "zelfName"
-			? {
-					price,
-					reward,
-					zelfName,
-					available: true,
-			  }
-			: null;
+		return foundInArweave ? [] : { ipfs: [] };
 	}
 };
 
@@ -334,7 +323,8 @@ const _returnFormattedIPFSRecords = async (ipfsRecords, environment, foundInArwe
 			continue;
 		}
 
-		const recordType = ipfsRecord?.metadata?.keyvalues?.type;
+		const recordType =
+			formattedIPFS.publicData?.type || ipfsRecord?.metadata?.keyvalues?.type || ipfsRecord?.publicData?.type || ipfsRecord?.keyvalues?.type;
 
 		if ((environment === "hold" && recordType === "hold") || (environment === "mainnet" && (!recordType || recordType === "mainnet"))) {
 			zelfNamesInIPFS.push(formattedIPFS);

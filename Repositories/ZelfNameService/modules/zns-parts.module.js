@@ -164,11 +164,30 @@ const removeExpiredRecords = async (records) => {
 	// }
 };
 
-const formatIPFSRecord = async (ipfsRecord, foundInArweave) => {
-	const metadata = ipfsRecord?.metadata;
-	if (!metadata || typeof metadata !== "object") return null;
+const _objectValue = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : null);
 
-	const recordName = metadata.name || metadata.zelfName || null;
+/**
+ * Pinata list rows do not share one shape. Legacy pins nest fields in metadata.keyvalues.
+ * Core/ipfs filter() copies those fields onto publicData and drops top-level keyvalues.
+ * Tags search reads publicData first. A pin with only publicData is still a real name.
+ */
+const _ipfsRecordFields = (ipfsRecord) => {
+	const metadata = _objectValue(ipfsRecord?.metadata);
+
+	return (
+		_objectValue(metadata?.keyvalues) ||
+		_objectValue(ipfsRecord?.publicData) ||
+		_objectValue(ipfsRecord?.keyvalues) ||
+		metadata
+	);
+};
+
+const formatIPFSRecord = async (ipfsRecord, foundInArweave) => {
+	const fields = _ipfsRecordFields(ipfsRecord);
+	if (!fields) return null;
+
+	const metadata = _objectValue(ipfsRecord?.metadata);
+	const recordName = metadata?.name || metadata?.zelfName || fields.zelfName || fields.tagName || fields.name || ipfsRecord?.name || null;
 
 	const zelfNameObject = {
 		...ipfsRecord,
@@ -179,15 +198,17 @@ const formatIPFSRecord = async (ipfsRecord, foundInArweave) => {
 		zelfName: recordName,
 	};
 
-	Object.assign(zelfNameObject.publicData, ipfsRecord.metadata.keyvalues || ipfsRecord.metadata);
+	Object.assign(zelfNameObject.publicData, fields);
 
-	if (zelfNameObject.publicData.payment) {
-		const payment = JSON.parse(zelfNameObject.publicData.payment);
+	if (typeof zelfNameObject.publicData.payment === "string") {
+		try {
+			const payment = JSON.parse(zelfNameObject.publicData.payment);
 
-		// assign all payment properties to the publicData
-		Object.assign(zelfNameObject.publicData, payment);
-
-		delete zelfNameObject.publicData.payment;
+			Object.assign(zelfNameObject.publicData, payment);
+			delete zelfNameObject.publicData.payment;
+		} catch (_error) {
+			/* keep the record; a bad payment blob is not a missing name */
+		}
 	}
 
 	if (zelfNameObject.publicData.extraParams) {
