@@ -1,5 +1,5 @@
 const config = require("../../../Core/config");
-const jwt = require("jsonwebtoken");
+const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const { searchZelfName, createZelfPay, updateZelfPay } = require("./zns.v2.module");
 const moment = require("moment");
 const { getTickerPrice } = require("../../binance/modules/binance.module");
@@ -438,7 +438,7 @@ const calculateCryptoValue = async (token = "ETH", price_) => {
 
 const signRecordData = (recordData) => {
 	try {
-		const token = jwt.sign(recordData, config.JWT_SECRET);
+		const token = signToken(recordData, config.JWT_SECRET, { typ: TOKEN_TYPES.quote, expiresIn: "2h" });
 
 		return token;
 	} catch (error) {

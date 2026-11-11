@@ -10,6 +10,7 @@ const ZNSPartsModule = require("../../ZelfNameService/modules/zns-parts.module")
 const solanaModule = require("../../Solana/modules/solana-scrapping.module");
 const { getBalance } = require("../../bitcoin/modules/bitcoin-scrapping.module");
 const jwt = require("jsonwebtoken");
+const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const secretKey = config.signedData.key;
 
 const templatesMap = {
@@ -390,7 +391,7 @@ const get = async (params) => {
 
 const signRecordData = (recordData, secretKey) => {
 	try {
-		const token = jwt.sign(recordData, secretKey);
+		const token = signToken(recordData, secretKey, { typ: TOKEN_TYPES.record });
 		return token;
 	} catch (error) {
 		return { success: false, error: error.message };

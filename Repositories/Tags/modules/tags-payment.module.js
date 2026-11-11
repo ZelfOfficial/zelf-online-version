@@ -8,7 +8,7 @@ const { generateMnemonic } = require("../../Wallet/modules/helpers");
 const moment = require("moment");
 const { searchTag } = require("./tags.module");
 const { getTickerPrice } = require("../../binance/modules/binance.module");
-const jwt = require("jsonwebtoken");
+const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
 const { keccak256, solidityPacked, parseUnits, getAddress } = require("ethers");
 const { usdcAtomicFromUsd, stableAtomicFromUsd } = require("./tag-pay-usdc.util");
 const config = require("../../../Core/config");
@@ -709,7 +709,7 @@ const getPaymentOptions = async (tagName, domain, duration, authUser, requestOpt
         }
     }
 
-    const signedDataPrice = jwt.sign(returnData, config.JWT_SECRET);
+    const signedDataPrice = signToken(returnData, config.JWT_SECRET, { typ: TOKEN_TYPES.quote, expiresIn: "2h" });
 
     return {
         ...returnData,
