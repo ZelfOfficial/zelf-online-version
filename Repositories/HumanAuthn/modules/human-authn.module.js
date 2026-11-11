@@ -131,7 +131,14 @@ const decrypt = async (data) => {
 
         return encryptedResponse?.data;
     } catch (exception) {
-        const error = _formattingError(exception.response?.data);
+        const upstream = exception.response?.data;
+        const unparseableZelfproof = isUnparseableZelfproof(upstream?.code, upstream?.message);
+        const error = _formattingError(upstream);
+
+        if (unparseableZelfproof) {
+            error.status = 400;
+            error.code = "INVALID_ZELFPROOF";
+        }
 
         let _error = new Error(error.message);
 
@@ -167,6 +174,13 @@ const preview = async (data) => {
 
         throw _error;
     }
+};
+
+const isUnparseableZelfproof = (code, message) => {
+    const normalizedCode = String(code || "");
+    const normalizedMessage = String(message || "").toUpperCase();
+
+    return normalizedCode === "ERR_PARSE_FAILED" || normalizedMessage.includes("FAILED TO PARSE THE ZELFPROOF");
 };
 
 const _formattingError = (error = {}) => {

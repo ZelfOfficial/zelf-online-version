@@ -54,6 +54,14 @@ const decrypt = async (ctx) => {
 
 		ctx.body = { ...data };
 	} catch (error) {
+		if (error.code === "INVALID_ZELFPROOF") {
+			ctx.state.invalidZelfproof = true;
+			console.error("INVALID_ZELFPROOF");
+			ctx.status = 400;
+			ctx.body = { error: error.message, code: "INVALID_ZELFPROOF" };
+			return;
+		}
+
 		console.error(error);
 
 		ctx.status = error.status || 500;

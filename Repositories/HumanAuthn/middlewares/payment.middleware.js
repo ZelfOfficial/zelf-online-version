@@ -141,7 +141,15 @@ const paymentRequired = async (ctx, next) => {
 			return;
 		}
 
-		// Mark payment as used
+		// Run the handler before recording usage. optionalJwt (earlier in the chain) does not
+		// record a charge; usage is recorded here only after the handler returns.
+		await next();
+
+		// A zelfproof that cannot be parsed is rejected input. Do not consume or count the payment.
+		if (ctx.state.invalidZelfproof === true || (ctx.status === 400 && ctx.body?.code === "INVALID_ZELFPROOF")) {
+			return;
+		}
+
 		await markPaymentAsUsed({
 			txHash: paymentTxHash,
 			chain: paymentChain,
@@ -151,16 +159,12 @@ const paymentRequired = async (ctx, next) => {
 			timestamp: new Date(),
 		});
 
-		// Attach payment info to context for analytics
 		ctx.state.paymentInfo = {
 			chain: paymentChain,
 			amount: paymentConfig.cost,
 			txHash: paymentTxHash,
 			verified: true,
 		};
-
-		// Payment verified, proceed to endpoint
-		await next();
 	} catch (error) {
 		console.error("Payment verification error:", error);
 		ctx.status = 500;
