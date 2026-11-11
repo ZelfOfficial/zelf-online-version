@@ -93,7 +93,10 @@ const getSessionDetails = async (ctx) => {
     } catch (error) {
         console.error("Session Details Error:", error);
         ctx.status = error.status || 500;
-        ctx.body = { error: error.message };
+        ctx.body = {
+            error: error.message,
+            ...(error.code ? { code: error.code } : {}),
+        };
     }
 };
 

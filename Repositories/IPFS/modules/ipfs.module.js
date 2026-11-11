@@ -1,15 +1,20 @@
 const IPFS = require("../../../Core/ipfs");
 
 const config = require("../../../Core/config");
+const { filterOwnedRecords } = require("./ipfs-access.util");
 
-const get = async (data) => {
+const get = async (data, authUser, options = {}) => {
 	const { cid, zelfName, key, value, exipres } = data;
 
 	if (cid) return await IPFS.retrieve(cid, expires);
 
 	if (zelfName) return await IPFS.filter("name", zelfName);
 
-	if (key && value) return await IPFS.filter(key, value);
+	if (key && value) {
+		const records = await IPFS.filter(key, value);
+		if (options.restrictToCaller) return filterOwnedRecords(records, authUser);
+		return records;
+	}
 
 	const error = new Error("Conditions_not_acceptable");
 

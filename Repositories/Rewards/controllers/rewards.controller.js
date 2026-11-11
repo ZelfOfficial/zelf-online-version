@@ -57,9 +57,12 @@ const firstTransactionReward = async (ctx) => {
     } catch (error) {
         const _exception = errorHandler(error, ctx);
 
-        ctx.status = error.status || 500;
+        ctx.status = error.status || _exception.status || 500;
 
-        ctx.body = { error: error.message };
+        ctx.body = {
+            error: error.message,
+            code: error.code || _exception.code,
+        };
     }
 };
 

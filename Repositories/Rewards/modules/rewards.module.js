@@ -9,6 +9,13 @@ const { normalizeZelfName } = require("../middlewares/rewards.middleware");
 const TagsSearchModule = require("../../Tags/modules/tags-search.module");
 const { getDomainConfig } = require("../../Tags/config/supported-domains");
 const TagsPartsModule = require("../../Tags/modules/tags-parts.module");
+const SessionModule = require("../../Session/modules/session.module");
+const FirstTransactionClaim = require("../models/first-transaction-claim.model");
+const {
+    assertRewardOwnedByVerifiedSession,
+    firstTransactionClaimDecision,
+    splitCanonicalTag,
+} = require("./first-transaction-auth.util");
 
 /**
  * Get rewards from IPFS
@@ -656,9 +663,43 @@ const _getTagObject = async (tagName, domain, authUser) => {
     return { tagObject, _tagName, domainConfig };
 };
 
-const rewardFirstTransaction = async (data, authUser) => {
+const _takeFirstTransactionClaim = async (tagName) => {
+    const existing = await FirstTransactionClaim.findOne({ tagName });
+    const decision = firstTransactionClaimDecision(existing);
+
+    if (decision === "already") return { ok: false };
+
+    if (decision === "retry") {
+        const updated = await FirstTransactionClaim.findOneAndUpdate(
+            {
+                tagName,
+                status: "failed",
+                $or: [{ payoutTx: "" }, { payoutTx: null }, { payoutTx: { $exists: false } }],
+            },
+            { $set: { status: "pending" } },
+            { new: true }
+        );
+
+        if (!updated) return { ok: false };
+        return { ok: true, claim: updated };
+    }
+
     try {
-        const { tagName, domain } = data;
+        const claim = await FirstTransactionClaim.create({ tagName, status: "pending", payoutTx: "" });
+        return { ok: true, claim };
+    } catch (error) {
+        if (error.code === 11000) return { ok: false };
+        throw error;
+    }
+};
+
+const rewardFirstTransaction = async (data, authUser) => {
+    let claimDoc = null;
+
+    try {
+        const verifiedStored = await SessionModule.readVerifiedTagName(authUser);
+        const verifiedTag = assertRewardOwnedByVerifiedSession(verifiedStored, data?.tagName, data?.domain);
+        const { name: tagName, domain } = splitCanonicalTag(verifiedTag);
 
         const { tagObject, _tagName, domainConfig } = await _getTagObject(tagName, domain, authUser);
 
@@ -696,6 +737,18 @@ const rewardFirstTransaction = async (data, authUser) => {
                 },
             };
         }
+
+        const claimResult = await _takeFirstTransactionClaim(splitCanonicalTag(_tagName).canonical);
+        if (!claimResult.ok) {
+            return {
+                success: false,
+                message: "First transaction reward already claimed",
+                rewardType: "first_transaction",
+                alreadyClaimed: true,
+                code: "REWARD_ALREADY_CLAIMED",
+            };
+        }
+        claimDoc = claimResult.claim;
 
         // User is eligible for first transaction reward - random 1-100 ZNS
         const rewardAmount = Math.floor(Math.random() * 100) + 1;
@@ -770,6 +823,12 @@ const rewardFirstTransaction = async (data, authUser) => {
                 recipientAddress: tagObject.publicData.solanaAddress,
             };
 
+            if (claimDoc) {
+                claimDoc.payoutTx = transferSignature || "";
+                claimDoc.status = transferSignature ? "claimed" : "failed";
+                await claimDoc.save();
+            }
+
             rewardData.tokenTransfer = tokenTransferResult;
             mongoReward.tokenTransfer = tokenTransferResult;
             mongoReward.status = "claimed";
@@ -788,6 +847,11 @@ const rewardFirstTransaction = async (data, authUser) => {
             mongoReward.status = "failed";
             mongoReward.failReason = tokenError.message;
             await mongoReward.save();
+
+            if (claimDoc && !claimDoc.payoutTx) {
+                claimDoc.status = "failed";
+                await claimDoc.save();
+            }
         }
 
         // Send notification
@@ -810,6 +874,13 @@ const rewardFirstTransaction = async (data, authUser) => {
         };
     } catch (error) {
         console.error("❌ Error in rewardFirstTransaction:", error);
+
+        if (claimDoc && !claimDoc.payoutTx) {
+            claimDoc.status = "failed";
+            await claimDoc.save().catch(() => {});
+        }
+
+        if (error.status && error.code) throw error;
         throw new Error(`Failed to process first transaction reward: ${error.message}`);
     }
 };

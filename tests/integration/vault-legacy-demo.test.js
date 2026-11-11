@@ -18,10 +18,12 @@ const hasDemoEnv = () =>
     process.env.LEGACY_DEMO_MODE === "true" &&
     Boolean(process.env.LEGACY_DEMO_LAWYER_ADDRESS?.trim());
 
+const TEST_OWNER = "0x0000000000000000000000000000000000000001";
+
 async function getLegacyToken() {
     const res = await request(apiBaseUrl())
         .post(`${LEGACY_PATH}/sessions`)
-        .send({ identifier: `demo-test-${Date.now()}` });
+        .send({ identifier: TEST_OWNER });
     expect(res.status).toBe(200);
     expect(res.body.token).toBeTruthy();
     return res.body.token;

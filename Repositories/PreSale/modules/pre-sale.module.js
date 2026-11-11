@@ -84,6 +84,16 @@ const getBonusTier = (amount) => {
 };
 
 const { getPresaleLicenseExtensionYears } = require("./presale-license.util");
+const {
+    RELEASE_SOURCE_VERIFIED_WEBHOOK,
+    assertVerifiedReleaseSource,
+    buildAtomicReleaseUpdate,
+    isLicenseExtensionRecorded,
+    isTokenPayoutRecorded,
+    lockUnavailableError,
+    tokensAlreadyReleasedError,
+} = require("./presale-release.util");
+const PresaleRelease = require("../models/presale-release.model");
 
 const calculateTokens = (usdAmount) => {
     const tier = getBonusTier(usdAmount);
@@ -431,7 +441,9 @@ const _formatDetailsFromRecord = (existingRecord) => {
 /**
  * Process a paid transaction: Release tokens and store receipt
  */
-const _processPayment = async (sessionIdOrCode, details, isPaid, existingRecord) => {
+const _processPayment = async (sessionIdOrCode, details, isPaid, existingRecord, options = {}) => {
+    assertVerifiedReleaseSource(options.source);
+
     if (!isPaid) return details;
 
     const totalTokens = parseFloat(details.metadata?.tokens || "0");
@@ -443,28 +455,49 @@ const _processPayment = async (sessionIdOrCode, details, isPaid, existingRecord)
     // Get zelfName from metadata (passed during session creation)
     const zelfName = details.metadata?.zelfName || "";
 
-    const tokensAlreadyReleased = details.metadata?.tokensReleased === true;
+    const mongoState = await PresaleRelease.findOne({ sessionId: sessionIdOrCode }).lean();
+    const payoutTx = mongoState?.payoutTx || details.metadata?.transactionSignature || "";
+    const tokensAlreadyReleased = isTokenPayoutRecorded({
+        tokensReleased: mongoState?.tokensReleased === true || details.metadata?.tokensReleased === true,
+        payoutTx,
+    });
+
+    const storedLicenseRecord =
+        mongoState?.licenseRecord ||
+        details.metadata?.licenseExtensionExpiresAt ||
+        details.metadata?.licenseExtensionTag ||
+        "";
+    const licenseAlreadyExtended = isLicenseExtensionRecorded({
+        licenseExtended: mongoState?.licenseExtended === true || details.metadata?.licenseExtended === true,
+        licenseRecord: storedLicenseRecord,
+    });
+
+    const licenseExtensionSkipped = !String(zelfName || "").trim() || getPresaleLicenseExtensionYears(details.amount) === 0;
+
+    if (tokensAlreadyReleased && (licenseAlreadyExtended || licenseExtensionSkipped)) {
+        throw tokensAlreadyReleasedError();
+    }
+
     let releaseResult = {
         released: tokensAlreadyReleased,
-        signature: details.metadata?.transactionSignature || "",
+        signature: payoutTx,
     };
 
     if (!tokensAlreadyReleased) {
         releaseResult = await _releasePendingTokens(totalTokens, solanaAddress);
     }
 
-    const licenseAlreadyExtended = details.metadata?.licenseExtended === true;
     let licenseResult = {
         extended: licenseAlreadyExtended,
         years: details.metadata?.licenseExtensionYears || 0,
         tagName: null,
         domain: null,
-        expiresAt: details.metadata?.licenseExtensionExpiresAt || null,
+        expiresAt: details.metadata?.licenseExtensionExpiresAt || storedLicenseRecord || null,
         ipfsId: null,
         error: null,
     };
 
-    if (!licenseAlreadyExtended) {
+    if (!licenseAlreadyExtended && !licenseExtensionSkipped) {
         licenseResult = await _extendTagLicenseForPresale(zelfName, details.amount);
     }
 
@@ -473,15 +506,32 @@ const _processPayment = async (sessionIdOrCode, details, isPaid, existingRecord)
             ? `${licenseResult.tagName}.${licenseResult.domain}`
             : details.metadata?.licenseExtensionTag || "";
 
+    const recordedPayoutTx = releaseResult.released ? releaseResult.signature || payoutTx : "";
+    const recordedLicense =
+        licenseResult.extended
+            ? String(licenseResult.expiresAt || licenseResult.ipfsId || licenseExtensionTag || storedLicenseRecord || "")
+            : licenseAlreadyExtended
+              ? storedLicenseRecord
+              : "";
+
+    const releaseUpdate = buildAtomicReleaseUpdate({
+        payoutTx: recordedPayoutTx,
+        licenseRecord: recordedLicense,
+    });
+
+    if (Object.keys(releaseUpdate).length) {
+        await PresaleRelease.findOneAndUpdate({ sessionId: sessionIdOrCode }, { $set: releaseUpdate }, { upsert: true, new: true });
+    }
+
     // Save/Update IPFS
     const receipt = await _saveReceiptToIPFS(existingRecord, {
         sessionId: sessionIdOrCode,
         details: details,
         totalTokens: totalTokens,
         bonusPercentage: bonusPercentage,
-        released: releaseResult.released,
+        released: Boolean(releaseUpdate.tokensReleased),
         address: solanaAddress,
-        signature: releaseResult.signature,
+        signature: releaseUpdate.payoutTx || "",
         zelfName: zelfName,
         licenseExtension: licenseResult,
     });
@@ -495,9 +545,9 @@ const _processPayment = async (sessionIdOrCode, details, isPaid, existingRecord)
         metadata: {
             tokens: totalTokens.toString(),
             bonus: bonusPercentage.toString(),
-            released: releaseResult.released,
+            released: Boolean(releaseUpdate.tokensReleased),
             solanaAddress: solanaAddress,
-            transactionSignature: releaseResult.signature,
+            transactionSignature: releaseUpdate.payoutTx || "",
             zelfName: zelfName,
             licenseExtended: licenseResult.extended,
             licenseExtensionYears: licenseResult.years,
@@ -519,14 +569,8 @@ const _acquireSessionLock = async (sessionId) => {
         await PresaleLock.create({ sessionId });
         return true;
     } catch (e) {
-        if (e.code === 11000) {
-            // Duplicate key error = locked by another process
-            const error = new Error("Processing payment, please wait...");
-            error.status = 429;
-            throw error;
-        }
-        console.error("Lock acquisition error:", e);
-        throw e;
+        if (e.code !== 11000) console.error("Lock acquisition error:", e);
+        throw lockUnavailableError();
     }
 };
 
@@ -547,52 +591,82 @@ const _releaseSessionLock = async (sessionId) => {
  * @returns {Promise<Object>}
  */
 const getPaymentDetails = async (sessionIdOrCode) => {
+    const existingRecord = await _checkIPFSRecord(sessionIdOrCode);
+
+    if (existingRecord) {
+        return {
+            ..._formatDetailsFromRecord(existingRecord),
+            ipfsHash: existingRecord.ipfs_pin_hash,
+        };
+    }
+
+    const verification = await _verifyWithProvider(sessionIdOrCode);
+    return verification.details;
+};
+
+/**
+ * Release tokens and extend the license only after the Stripe webhook signature has been verified
+ * and the Checkout Session has been re-fetched as paid.
+ */
+const releaseFromVerifiedStripeEvent = async (event) => {
+    const allowedTypes = new Set(["checkout.session.completed", "checkout.session.async_payment_succeeded"]);
+
+    if (!allowedTypes.has(event?.type)) {
+        return { status: "ignored" };
+    }
+
+    const eventSession = event.data?.object;
+    if (!eventSession?.id || eventSession.metadata?.type !== "zns_presale") {
+        return { status: "ignored" };
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(eventSession.id);
+
+    if (session.metadata?.type !== "zns_presale" || session.payment_status !== "paid") {
+        return { status: "ignored", reason: "not_paid" };
+    }
+
     let lockAcquired = false;
 
-    lockAcquired = await _acquireSessionLock(sessionIdOrCode);
-
     try {
-        // 1. Check IPFS first
-        const existingRecord = await _checkIPFSRecord(sessionIdOrCode);
+        await _acquireSessionLock(session.id);
+        lockAcquired = true;
 
-        let details = {};
-        let isPaid = false;
+        const existingRecord = await _checkIPFSRecord(session.id);
+        const formatted = existingRecord ? _formatDetailsFromRecord(existingRecord) : null;
 
-        // 2. Determine status and details
-        if (existingRecord) {
-            details = _formatDetailsFromRecord(existingRecord);
-            isPaid = true;
+        const details = {
+            method: "stripe",
+            status: session.payment_status,
+            amount: session.amount_total / 100,
+            email: session.customer_details?.email || session.customer_email || formatted?.email,
+            metadata: {
+                ...(session.metadata || {}),
+                tokensReleased: formatted?.metadata?.tokensReleased === true,
+                transactionSignature: formatted?.metadata?.transactionSignature || "",
+                licenseExtended: formatted?.metadata?.licenseExtended === true,
+                licenseExtensionYears: formatted?.metadata?.licenseExtensionYears || 0,
+                licenseExtensionExpiresAt: formatted?.metadata?.licenseExtensionExpiresAt || "",
+                licenseExtensionTag: formatted?.metadata?.licenseExtensionTag || "",
+                zelfName: session.metadata?.zelfName || formatted?.metadata?.zelfName || "",
+                solanaAddress: session.metadata?.solanaAddress || formatted?.metadata?.solanaAddress || "",
+            },
+            currency: session.currency || "USD",
+        };
 
-            const zelfName = details.metadata?.zelfName || "";
-            const solanaAddress = details.metadata?.solanaAddress || "";
-            const tokensReleased = details.metadata?.tokensReleased === true;
-            const licenseExtended = details.metadata?.licenseExtended === true;
-            const licenseExtensionSkipped = !zelfName.trim() || getPresaleLicenseExtensionYears(details.amount) === 0;
-            const tokensDone = tokensReleased || !solanaAddress;
-            const licenseDone = licenseExtended || licenseExtensionSkipped;
-            const fullyProcessed = tokensDone && licenseDone;
+        const result = await _processPayment(session.id, details, true, existingRecord, {
+            source: RELEASE_SOURCE_VERIFIED_WEBHOOK,
+        });
 
-            if (fullyProcessed) {
-                return {
-                    ...details,
-                    ipfsHash: existingRecord.ipfs_pin_hash,
-                };
-            }
-        } else {
-            // Verify with provider
-            const verification = await _verifyWithProvider(sessionIdOrCode);
-            isPaid = verification.isPaid;
-            details = verification.details;
-        }
-
-        // 3. Process if paid (Release tokens + Store Receipt)
-        return await _processPayment(sessionIdOrCode, details, isPaid, existingRecord);
+        return { status: "released", result };
     } catch (error) {
-        console.error("Error fetching payment details:", error);
+        if (error.code === "TOKENS_ALREADY_RELEASED") {
+            return { status: "already_released", code: "TOKENS_ALREADY_RELEASED" };
+        }
         throw error;
     } finally {
         if (lockAcquired) {
-            await _releaseSessionLock(sessionIdOrCode);
+            await _releaseSessionLock(session.id);
         }
     }
 };
@@ -603,4 +677,5 @@ module.exports = {
     getPresaleLicenseExtensionYears,
     sendReceiptEmail,
     getPaymentDetails,
+    releaseFromVerifiedStripeEvent,
 };

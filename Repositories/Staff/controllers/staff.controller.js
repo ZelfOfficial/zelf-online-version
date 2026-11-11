@@ -77,7 +77,7 @@ const remove = async (ctx) => {
  */
 const savePasskey = async (ctx) => {
 	try {
-		const data = await StaffModule.savePasskey(ctx.request.body);
+		const data = await StaffModule.savePasskey(ctx.request.body, ctx.state.user);
 		ctx.body = data;
 	} catch (error) {
 		const _exception = errorHandler(error, ctx);

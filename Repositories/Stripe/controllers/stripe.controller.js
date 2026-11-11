@@ -24,8 +24,11 @@ const handleWebhook = async (ctx) => {
     } catch (error) {
         console.error("Error processing webhook:", error);
 
-        ctx.status = 400;
-        ctx.body = { error: "Webhook processing failed" };
+        ctx.status = error.status || 400;
+        ctx.body = {
+            error: "Webhook processing failed",
+            ...(error.code ? { code: error.code } : {}),
+        };
     }
 };
 
