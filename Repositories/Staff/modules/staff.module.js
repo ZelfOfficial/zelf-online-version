@@ -451,61 +451,29 @@ const auth = async (data) => {
  * @param {Object} authUser
  * @returns {Object}
  */
-const staffAccessError = (code) => {
-    const error = new Error(`403:${code}`);
-    error.status = 403;
-    error.code = code;
-    error.clientCode = code;
-    error.clientMessage = code;
-    return error;
-};
-
-const callerIsStaff = (authUser) =>
-    authUser?.accountType === "staff" || authUser?.accountType === "staff_account" || authUser?.typ === TOKEN_TYPES.staff;
-
-const organizationEmailFor = (authUser) => {
-    const raw = callerIsStaff(authUser) ? authUser?.ownerEmail : authUser?.email;
-    return typeof raw === "string" ? raw.trim().toLowerCase() : "";
-};
-
-const staffOwnerEmailOf = (staffAccount) => {
-    const publicData = staffAccount?.publicData || staffAccount?.keyvalues || {};
-    const raw = publicData.staffOwnerEmail || publicData.ownerEmail || "";
-    return typeof raw === "string" ? raw.trim().toLowerCase() : "";
-};
-
 const updateRole = async (data, authUser) => {
     const { staffEmail, newRole, faceBase64, masterPassword } = data;
-    const staffCaller = callerIsStaff(authUser);
-    const callerRole = String(authUser?.role || authUser?.staffRole || "").trim().toLowerCase();
-    const organizationEmail = organizationEmailFor(authUser);
 
-    if (!organizationEmail) throw staffAccessError("FORBIDDEN");
-    if (staffCaller && callerRole !== "admin") throw staffAccessError("FORBIDDEN");
+    // Verify client owner
+    const clientAccount = await ClientModule.get({ email: authUser.email });
+    if (!clientAccount) throw new Error("404:client_not_found");
 
+    const clientJSON = await axios.get(clientAccount.url);
+
+    const decryptedClient = await zelfProofModule.decrypt({
+        zelfProof: clientJSON.data.zelfProof,
+        faceBase64,
+        verifierKey: config.zelfEncrypt.serverKey,
+        password: masterPassword,
+    });
+
+    if (!decryptedClient) throw new Error("409:verification_failed");
+
+    // Get staff account
     const staffRecords = await IPFSModule.get({ key: "staffEmail", value: staffEmail });
     if (!staffRecords.length) throw new Error("404:staff_not_found");
 
     const staffAccount = staffRecords[0];
-    if (staffOwnerEmailOf(staffAccount) !== organizationEmail) throw staffAccessError("STAFF_NOT_IN_CLIENT");
-
-    if (!staffCaller) {
-        // Verify client owner. Face and password stay required.
-        const clientAccount = await ClientModule.get({ email: authUser.email });
-        if (!clientAccount) throw staffAccessError("FORBIDDEN");
-
-        const clientJSON = await axios.get(clientAccount.url);
-
-        const decryptedClient = await zelfProofModule.decrypt({
-            zelfProof: clientJSON.data.zelfProof,
-            faceBase64,
-            verifierKey: config.zelfEncrypt.serverKey,
-            password: masterPassword,
-        });
-
-        if (!decryptedClient) throw new Error("409:verification_failed");
-    }
-
     const staffJSON = await axios.get(staffAccount.url);
 
     // Update role in staff data
@@ -645,40 +613,19 @@ const _processExistingInvitation = (ipfsRecords, existingJSON, currentData, isRe
  * Save Passkey Metadata to IPFS
  * @param {Object} data { email, phone, passkey }
  */
-const savePasskey = async ({ email, phone, passkey }, authUser = {}) => {
-    const sessionEmailRaw = authUser.email || authUser.staffEmail || "";
-    const sessionPhoneRaw = authUser.phone || authUser.staffPhone || "";
-    const sessionEmail = String(sessionEmailRaw).trim().toLowerCase();
-    const sessionPhone = String(sessionPhoneRaw).trim();
-    const requestedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
-    const requestedPhone = typeof phone === "string" ? phone.trim() : "";
-
-    if ((!sessionEmail && !sessionPhone) || (requestedEmail && requestedEmail !== sessionEmail) || (requestedPhone && requestedPhone !== sessionPhone)) {
-        throw staffAccessError("PASSKEY_OWNER_MISMATCH");
-    }
-
+const savePasskey = async ({ email, phone, passkey }) => {
     const identifiers = [];
-    if (sessionEmail) identifiers.push({ key: "passKeysEmail", value: String(sessionEmailRaw).trim() });
-    if (sessionPhone) identifiers.push({ key: "passKeysPhone", value: sessionPhone });
+    if (email) identifiers.push({ key: "passKeysEmail", value: email });
+    if (phone) identifiers.push({ key: "passKeysPhone", value: phone });
 
-    if (identifiers.length === 0) throw staffAccessError("PASSKEY_OWNER_MISMATCH");
+    if (identifiers.length === 0) throw new Error("400:missing_identifier");
 
     const jsonData = JSON.stringify(passkey, null, 2);
     const base64 = Buffer.from(jsonData).toString("base64");
 
     const promises = identifiers.map(async (item) => {
+        // Unpin existing
         const existing = await IPFSModule.get({ key: item.key, value: item.value });
-        const foreign = existing.find((record) => {
-            const publicData = record?.publicData || record?.keyvalues || {};
-            const storedEmail = String(publicData.passKeysEmail || "").trim().toLowerCase();
-            const storedPhone = String(publicData.passKeysPhone || "").trim();
-            if (item.key === "passKeysEmail" && storedEmail && storedEmail !== sessionEmail) return true;
-            if (item.key === "passKeysPhone" && storedPhone && storedPhone !== sessionPhone) return true;
-            return false;
-        });
-
-        if (foreign) throw staffAccessError("PASSKEY_OWNER_MISMATCH");
-
         if (existing.length) {
             await IPFSModule.unPinFiles(existing.map((r) => r.id)).catch((e) => console.warn(e));
         }

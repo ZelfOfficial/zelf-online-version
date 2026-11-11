@@ -172,30 +172,16 @@ const rewardStatsValidation = async (ctx, next) => {
 
 const firstTransactionRewardValidation = async (ctx, next) => {
 	try {
-		const { tagName, domain, faceBase64, masterPassword, password } = ctx.request.body || {};
+		const { tagName, domain } = ctx.request.body;
 
-		const valid = validate(schemas.dailyReward, {
+		const valid = validate(schemas.reward, {
 			tagName,
 			domain,
-			faceBase64,
-			masterPassword,
-			password,
 		});
 
 		if (valid.error) {
-			const validationMessage = valid.error.message || "";
-
-			if (validationMessage.includes("faceBase64")) {
-				ctx.status = 400;
-				ctx.body = {
-					message: "ERR_IDENTITY_VERIFICATION_REQUIRED",
-					code: "ERR_IDENTITY_VERIFICATION_REQUIRED",
-				};
-				return;
-			}
-
 			ctx.status = 400;
-			ctx.body = { error: validationMessage };
+			ctx.body = { error: valid.error.message };
 			return;
 		}
 

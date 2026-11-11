@@ -17,8 +17,6 @@ const VaultLegacySchema = new Schema({
 
     // E-mail addresses captured before the vault is written to chain
     testatorEmail: defaultField(String, null),
-    /** Checksummed owner address allowed to set these emails. */
-    ownerAddress: defaultField(String, null),
     lawyerEmail: defaultField(String, null),
     beneficiaryEmails: { type: [String], default: [] },
 
