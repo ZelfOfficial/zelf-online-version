@@ -402,11 +402,50 @@ const _formatDetailsFromRecord = (existingRecord) => {
     };
 };
 
+const presaleError = (status, code) => {
+    const error = new Error(`${status}:${code}`);
+    error.status = status;
+    error.code = code;
+    error.clientCode = code;
+    error.clientMessage = code;
+    return error;
+};
+
 /**
- * Process a paid transaction: Release tokens and store receipt
+ * Flags and payout signature already stored on the receipt (pin metadata and file body).
+ */
+const _receiptPayout = async (existingRecord) => {
+    const formatted = existingRecord ? _formatDetailsFromRecord(existingRecord) : null;
+    let body = {};
+
+    if (existingRecord?.url) {
+        try {
+            const response = await axios.get(existingRecord.url);
+            body = response.data && typeof response.data === "object" ? response.data : {};
+        } catch (error) {
+            console.error("Presale receipt body unreadable:", error?.message || error);
+        }
+    }
+
+    const metadata = formatted?.metadata || {};
+    const bodySignature = String(body?.release?.signature || "").trim();
+    const metadataSignature = String(metadata.transactionSignature || "").trim();
+    const transactionSignature = metadataSignature || bodySignature;
+    const tokensReleased = metadata.tokensReleased === true || body?.release?.released === true || Boolean(transactionSignature);
+    const licenseExtended = metadata.licenseExtended === true || body?.licenseExtension?.extended === true;
+
+    return { tokensReleased, licenseExtended, transactionSignature, formatted };
+};
+
+/**
+ * Release tokens and extend the license once. Caller must already hold the session lock.
  */
 const _processPayment = async (sessionIdOrCode, details, isPaid, existingRecord) => {
     if (!isPaid) return details;
+
+    const recorded = existingRecord
+        ? await _receiptPayout(existingRecord)
+        : { tokensReleased: false, licenseExtended: false, transactionSignature: "" };
 
     const totalTokens = parseFloat(details.metadata?.tokens || "0");
     const bonusPercentage = parseFloat(details.metadata?.bonus || "0");
@@ -417,17 +456,35 @@ const _processPayment = async (sessionIdOrCode, details, isPaid, existingRecord)
     // Get zelfName from metadata (passed during session creation)
     const zelfName = details.metadata?.zelfName || "";
 
-    const tokensAlreadyReleased = details.metadata?.tokensReleased === true;
+    const metadataSignature = String(details.metadata?.transactionSignature || "").trim();
+    const transactionSignature = String(recorded.transactionSignature || metadataSignature || "").trim();
+    const tokensMarked = details.metadata?.tokensReleased === true || recorded.tokensReleased === true;
+    const tokensAlreadyReleased = tokensMarked || Boolean(transactionSignature);
+    const licenseAlreadyExtended = details.metadata?.licenseExtended === true || recorded.licenseExtended === true;
+    const licenseExtensionSkipped = !String(zelfName || "").trim() || getPresaleLicenseExtensionYears(details.amount) === 0;
+
+    if (licenseAlreadyExtended && tokensAlreadyReleased) {
+        throw presaleError(409, "LICENSE_ALREADY_EXTENDED");
+    }
+
+    if (tokensAlreadyReleased && (licenseAlreadyExtended || licenseExtensionSkipped)) {
+        throw presaleError(409, "TOKENS_ALREADY_RELEASED");
+    }
+
     let releaseResult = {
         released: tokensAlreadyReleased,
-        signature: details.metadata?.transactionSignature || "",
+        signature: transactionSignature,
     };
 
     if (!tokensAlreadyReleased) {
-        releaseResult = await _releasePendingTokens(totalTokens, solanaAddress);
+        if (tokensMarked || transactionSignature) {
+            throw presaleError(409, "TOKENS_ALREADY_RELEASED");
+        }
+
+        const paid = await _releasePendingTokens(totalTokens, solanaAddress);
+        releaseResult = paid.released && paid.signature ? { released: true, signature: paid.signature } : { released: false, signature: "" };
     }
 
-    const licenseAlreadyExtended = details.metadata?.licenseExtended === true;
     let licenseResult = {
         extended: licenseAlreadyExtended,
         years: details.metadata?.licenseExtensionYears || 0,
@@ -492,15 +549,9 @@ const _acquireSessionLock = async (sessionId) => {
     try {
         await PresaleLock.create({ sessionId });
         return true;
-    } catch (e) {
-        if (e.code === 11000) {
-            // Duplicate key error = locked by another process
-            const error = new Error("Processing payment, please wait...");
-            error.status = 429;
-            throw error;
-        }
-        console.error("Lock acquisition error:", e);
-        throw e;
+    } catch (error) {
+        console.error("Lock acquisition error:", error?.code || error?.message || error);
+        return false;
     }
 };
 
@@ -516,58 +567,91 @@ const _releaseSessionLock = async (sessionId) => {
 };
 
 /**
- * Get Payment/Session Details and Confirm Transaction
+ * Read payment status. Does not release tokens or extend a license.
  * @param {string} sessionIdOrCode
  * @returns {Promise<Object>}
  */
 const getPaymentDetails = async (sessionIdOrCode) => {
-    let lockAcquired = false;
+    const existingRecord = await _checkIPFSRecord(sessionIdOrCode);
 
-    lockAcquired = await _acquireSessionLock(sessionIdOrCode);
+    if (existingRecord) {
+        const recorded = await _receiptPayout(existingRecord);
+        const formatted = recorded.formatted || _formatDetailsFromRecord(existingRecord);
+
+        return {
+            ...formatted,
+            metadata: {
+                ...(formatted.metadata || {}),
+                tokensReleased: recorded.tokensReleased,
+                licenseExtended: recorded.licenseExtended,
+                transactionSignature: recorded.transactionSignature,
+            },
+            ipfsHash: existingRecord.ipfs_pin_hash,
+        };
+    }
+
+    const verification = await _verifyWithProvider(sessionIdOrCode);
+    return verification.details;
+};
+
+/**
+ * Release tokens and extend the license for a paid presale checkout.
+ * Only the verified Stripe webhook should call this.
+ * @param {string} sessionIdOrCode
+ */
+const fulfillPaidPresale = async (sessionIdOrCode) => {
+    const locked = await _acquireSessionLock(sessionIdOrCode);
+    if (!locked) throw presaleError(409, "PAYMENT_LOCK_UNAVAILABLE");
 
     try {
-        // 1. Check IPFS first
         const existingRecord = await _checkIPFSRecord(sessionIdOrCode);
+        const verification = await _verifyWithProvider(sessionIdOrCode);
 
-        let details = {};
-        let isPaid = false;
+        if (!verification.isPaid) return verification.details;
 
-        // 2. Determine status and details
-        if (existingRecord) {
-            details = _formatDetailsFromRecord(existingRecord);
-            isPaid = true;
-
-            const zelfName = details.metadata?.zelfName || "";
-            const solanaAddress = details.metadata?.solanaAddress || "";
-            const tokensReleased = details.metadata?.tokensReleased === true;
-            const licenseExtended = details.metadata?.licenseExtended === true;
-            const licenseExtensionSkipped = !zelfName.trim() || getPresaleLicenseExtensionYears(details.amount) === 0;
-            const tokensDone = tokensReleased || !solanaAddress;
-            const licenseDone = licenseExtended || licenseExtensionSkipped;
-            const fullyProcessed = tokensDone && licenseDone;
-
-            if (fullyProcessed) {
-                return {
-                    ...details,
-                    ipfsHash: existingRecord.ipfs_pin_hash,
-                };
-            }
-        } else {
-            // Verify with provider
-            const verification = await _verifyWithProvider(sessionIdOrCode);
-            isPaid = verification.isPaid;
-            details = verification.details;
+        if (verification.details?.metadata?.type !== "zns_presale") {
+            return verification.details;
         }
 
-        // 3. Process if paid (Release tokens + Store Receipt)
-        return await _processPayment(sessionIdOrCode, details, isPaid, existingRecord);
-    } catch (error) {
-        console.error("Error fetching payment details:", error);
-        throw error;
+        return await _processPayment(sessionIdOrCode, verification.details, true, existingRecord);
     } finally {
-        if (lockAcquired) {
-            await _releaseSessionLock(sessionIdOrCode);
+        await _releaseSessionLock(sessionIdOrCode);
+    }
+};
+
+/**
+ * @param {Object} event verified Stripe webhook event
+ */
+const fulfillFromVerifiedStripeEvent = async (event) => {
+    const type = event?.type;
+    const session = event?.data?.object;
+
+    if (type !== "checkout.session.completed" && type !== "checkout.session.async_payment_succeeded") {
+        return { status: "skipped", reason: "not_presale" };
+    }
+
+    if (session?.metadata?.type !== "zns_presale") {
+        return { status: "skipped", reason: "not_presale" };
+    }
+
+    if (session.payment_status !== "paid") {
+        return { status: "skipped", reason: "unpaid" };
+    }
+
+    try {
+        const details = await fulfillPaidPresale(session.id);
+        return { status: "success", action: "presale_fulfilled", sessionId: session.id, data: details };
+    } catch (error) {
+        if (error?.code === "TOKENS_ALREADY_RELEASED" || error?.code === "LICENSE_ALREADY_EXTENDED") {
+            return {
+                status: "success",
+                action: "presale_already_fulfilled",
+                code: error.code,
+                sessionId: session.id,
+            };
         }
+
+        throw error;
     }
 };
 
@@ -578,4 +662,6 @@ module.exports = {
     getPresaleLicenseExtensionYears,
     sendReceiptEmail,
     getPaymentDetails,
+    fulfillPaidPresale,
+    fulfillFromVerifiedStripeEvent,
 };

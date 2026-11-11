@@ -20,6 +20,7 @@ const REWARD_IDENTITY_STATUS = {
     ERR_INVALID_PASSWORD: 401,
     ERR_PASSWORD_REQUIRED: 409,
     ERR_VERIFICATION_FAILED: 422,
+    ERR_SESSION_OWNER_MISMATCH: 403,
 };
 
 const throwRewardIdentityError = (code) => {
@@ -28,6 +29,8 @@ const throwRewardIdentityError = (code) => {
 
     error.status = status;
     error.code = code;
+    error.clientCode = code;
+    error.clientMessage = code;
 
     throw error;
 };
@@ -819,11 +822,47 @@ const _getTagObject = async (tagName, domain, authUser) => {
     return { tagObject, _tagName, domainConfig };
 };
 
+/**
+ * The rewarded name is the session's stored verifiedTagName.
+ * A client-supplied tagName that does not match that record is rejected.
+ */
+const resolveVerifiedRewardTarget = async (data, authUser) => {
+    const Session = require("../../Session/models/session.model");
+    const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
+
+    if (!authUser?.session) throwRewardIdentityError("ERR_IDENTITY_VERIFICATION_REQUIRED");
+
+    const session = await Session.findById(authUser.session).lean();
+    const verifiedUntil = session?.verifiedUntil ? new Date(session.verifiedUntil).getTime() : 0;
+    const verifiedRaw = typeof session?.verifiedTagName === "string" ? session.verifiedTagName.trim() : "";
+
+    if (!session || session.status !== "active" || !verifiedRaw || !Number.isFinite(verifiedUntil) || verifiedUntil <= Date.now()) {
+        throwRewardIdentityError("ERR_IDENTITY_VERIFICATION_REQUIRED");
+    }
+
+    const domain = data?.domain || session.domain || authUser.domain || "zelf";
+    const verified = normalizeZelfName(verifiedRaw, session.domain || domain);
+    const requested = normalizeZelfName(data?.tagName, data?.domain || domain);
+
+    if (!verified.zelfName || !requested.zelfName || verified.zelfName !== requested.zelfName) {
+        throwRewardIdentityError("ERR_SESSION_OWNER_MISMATCH");
+    }
+
+    return {
+        ...data,
+        tagName: verified.tagName,
+        domain: verified.domain,
+    };
+};
+
 const rewardFirstTransaction = async (data, authUser) => {
     try {
-        const { tagName, domain } = data;
+        const owned = await resolveVerifiedRewardTarget(data, authUser);
+        const { tagName, domain } = owned;
 
         const { tagObject, _tagName, domainConfig } = await _getTagObject(tagName, domain, authUser);
+
+        await assertDailyRewardIdentity(owned, tagObject, authUser);
 
         // Check if user has already received first transaction reward
         const existingReward = await IPFS.filter("first_zns_transaction", _tagName);
@@ -972,6 +1011,8 @@ const rewardFirstTransaction = async (data, authUser) => {
             timestamp: rewardData.timestamp,
         };
     } catch (error) {
+        if (isRewardIdentityError(error)) throw error;
+
         console.error("❌ Error in rewardFirstTransaction:", error);
         throw new Error(`Failed to process first transaction reward: ${error.message}`);
     }
