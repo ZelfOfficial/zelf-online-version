@@ -73,14 +73,6 @@ const getWebhookSource = async (event) => {
  * @returns {Promise<Object>} - Handler result
  */
 const routeWebhook = async (event) => {
-	const presaleType = event?.data?.object?.metadata?.type;
-	const presaleEvent = event?.type === "checkout.session.completed" || event?.type === "checkout.session.async_payment_succeeded";
-
-	if (presaleEvent && presaleType === "zns_presale") {
-		const PreSaleModule = require("../../PreSale/modules/pre-sale.module");
-		return await PreSaleModule.fulfillFromVerifiedStripeEvent(event);
-	}
-
 	const source = await getWebhookSource(event);
 
 	// Extension/app sources route to Subscription module

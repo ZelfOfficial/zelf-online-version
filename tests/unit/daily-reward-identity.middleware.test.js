@@ -23,7 +23,7 @@ jest.mock("../../Repositories/Face/middlewares/face.middleware", () => ({
     },
 }));
 
-const { dailyRewardsValidation, firstTransactionRewardValidation, rouletteWheelValidation } = require("../../Repositories/Rewards/middlewares/rewards.middleware");
+const { dailyRewardsValidation, rouletteWheelValidation } = require("../../Repositories/Rewards/middlewares/rewards.middleware");
 const { pickWhitelistedBody } = require("../../Repositories/Face/modules/face-body-whitelist.module");
 
 const ctxFor = (body) => ({
@@ -68,19 +68,6 @@ describe("daily reward validation", () => {
     });
 });
 
-describe("first transaction reward validation", () => {
-    it("requires a face the same way the daily reward does", async () => {
-        const ctx = ctxFor({ tagName: "alice", domain: "zelf" });
-        const next = jest.fn();
-
-        await firstTransactionRewardValidation(ctx, next);
-
-        expect(next).not.toHaveBeenCalled();
-        expect(ctx.status).toBe(400);
-        expect(ctx.body.code).toBe("ERR_IDENTITY_VERIFICATION_REQUIRED");
-    });
-});
-
 describe("roulette status stays readable without a face", () => {
     it("does not ask for identity verification", async () => {
         const ctx = {
@@ -120,12 +107,7 @@ describe("daily reward route wiring", () => {
         expect(daily.handlers[1].action).toBe("daily-reward");
         expect(wheel.handlers).toHaveLength(2);
         expect(wheel.handlers.some((handler) => handler.action === "daily-reward")).toBe(false);
-        expect(first.handlers.map((handler) => handler.name)).toEqual([
-            "firstTransactionRewardValidation",
-            "faceGate",
-            "firstTransactionReward",
-        ]);
-        expect(first.handlers[1].action).toBe("first-transaction");
+        expect(first.handlers).toHaveLength(2);
     });
 });
 

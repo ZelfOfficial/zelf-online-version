@@ -109,7 +109,6 @@ const ALLOWED_BY_ACTION = {
     ),
     "change-master-password": withCommon("oldMasterPassword", "newMasterPassword"),
     "daily-reward": withCommon("tagName", "domain"),
-    "first-transaction": withCommon("tagName", "domain"),
     "payment-confirmation": withCommon("tagName", "domain", "network", "token"),
     "wallet-decrypt": withCommon(
         "zelfProof",
