@@ -9,8 +9,19 @@ jest.mock("../../Repositories/Wallet/modules/encryption", () => ({
     encryptQR: jest.fn(),
 }));
 
+jest.mock("../../Repositories/Wallet/modules/stored-zelf-proof.module", () => ({
+    findStoredZelfProof: jest.fn(async () => null),
+    proofsMatch: (left, right) => {
+        if (typeof left !== "string" || typeof right !== "string") return false;
+        const a = Buffer.from(left.trim());
+        const b = Buffer.from(right.trim());
+        return a.length > 0 && a.length === b.length && a.equals(b);
+    },
+}));
+
 const config = require("../../Core/config");
 const { decrypt } = require("../../Repositories/Wallet/modules/encryption");
+const StoredZelfProof = require("../../Repositories/Wallet/modules/stored-zelf-proof.module");
 const SessionModule = require("../../Repositories/Session/modules/session.module");
 const Session = require("../../Repositories/Session/models/session.model");
 const WalletModule = require("../../Repositories/Wallet/modules/wallet.module");
@@ -40,6 +51,8 @@ describe("session verification comes from the decrypted record", () => {
             publicData: { zelfName: "alice.zelf" },
             metadata: { mnemonic: "test mnemonic" },
         });
+        StoredZelfProof.findStoredZelfProof.mockReset();
+        StoredZelfProof.findStoredZelfProof.mockResolvedValue(null);
     });
 
     const openSession = async (extra = {}) => {
@@ -90,8 +103,64 @@ describe("session verification comes from the decrypted record", () => {
         expect(after.tagName).toBeFalsy();
     });
 
+    test("a decrypt that is not the stored record does not verify the session", async () => {
+        const { stored } = await openSession();
+        StoredZelfProof.findStoredZelfProof.mockResolvedValue(null);
+
+        const result = await WalletModule.decryptWallet(
+            {
+                zelfProof: "local-proof",
+                faceBase64: "face",
+                password: "secret",
+                zelfName: "alice",
+                skipQRCode: true,
+                removePGP: true,
+                domain: "zelf",
+            },
+            { session: stored._id, domain: "zelf" }
+        );
+
+        expect(result.publicData.zelfName).toBe("alice.zelf");
+        const after = await Session.findById(stored._id).lean();
+        expect(after.verifiedTagName).toBeFalsy();
+    });
+
+    test("a client blob labelled as another name does not verify the session", async () => {
+        const { stored } = await openSession();
+        decrypt.mockResolvedValue({
+            publicData: { zelfName: "victim.zelf" },
+            metadata: { mnemonic: "other mnemonic" },
+        });
+        StoredZelfProof.findStoredZelfProof.mockResolvedValue({
+            zelfName: "victim.zelf",
+            zelfProof: "stored-proof",
+        });
+
+        await expect(
+            WalletModule.decryptWallet(
+                {
+                    zelfProof: "labelled-proof",
+                    faceBase64: "face",
+                    password: "secret",
+                    zelfName: "victim",
+                    skipQRCode: true,
+                    removePGP: true,
+                    domain: "zelf",
+                },
+                { session: stored._id, domain: "zelf" }
+            )
+        ).rejects.toMatchObject({ status: 403, code: "ZELF_PROOF_MISMATCH" });
+
+        const after = await Session.findById(stored._id).lean();
+        expect(after.verifiedTagName).toBeFalsy();
+    });
+
     test("a matching decrypt stamps the record name, and unverified tagName is not enough", async () => {
         const { stored } = await openSession();
+        StoredZelfProof.findStoredZelfProof.mockResolvedValue({
+            zelfName: "alice.zelf",
+            zelfProof: "proof-a",
+        });
         await Session.updateOne({ _id: stored._id }, { $set: { tagName: "bob.zelf" } });
 
         const ctx = {

@@ -7,7 +7,7 @@ Shared lockout, proof-of-work, capture nonces, and request body whitelisting for
 1. `POST /api/face/nonce` with `{ action }` (optional legacy `identifier`, **ignored for binding**) → `{ nonce, expiresAt, bindingIdentifier, pow? }`. The server resolves `bindingIdentifier` from the JWT (tag@domain, etc.) with the same rules as the face gate.
 2. Face endpoints include `faceNonce` and, when required, `pow: { challengeId, solution }` (challenge fields are stored server-side by `challengeId`).
 3. PoW: `SHA-256(salt + solution)` must have at least `difficulty` **leading zero bits** in the hex digest (`difficultyMode: leading_zero_bits`). Default **16** bits at the first PoW threshold (`powAfterFailures`, default 2), then **+1 bit per two** additional identity failures, capped at **19**.
-4. `428` + `pow_required` when PoW is mandatory; `429` + `face_locked` + `retryAfter` when locked out; `409` + `face_replay_detected` when the same face capture is reused.
+4. `428` + `pow_required` when PoW is mandatory; `429` + `face_locked` + `retryAfter` when the session identity is locked out; `429` + `TOO_MANY_ATTEMPTS` + `retryAfter` when a Zelf name or an IP address is locked out; `409` + `face_replay_detected` when the same face capture is reused.
 
 ## Configuration
 
@@ -35,6 +35,7 @@ Legacy mappings: `securePassword` → `password`; `newTagName` → `tagName` whe
 
 ## Lockout scopes
 
-- **Identity** (`action:tag@domain` or JWT `tagName@domain` / `session:<id>` when the body has no tag) — primary lockout and PoW threshold. No shared `unknown` bucket.
+- **Identity** (`action:tag@domain` or JWT `tagName@domain` / `session:<id>` when the body has no tag) — primary lockout and PoW threshold. No shared `unknown` bucket. Response code `face_locked`.
+- **Target name** (`target:<zelfName>`) — failed decrypt and export attempts for that name, shared across sessions. Default 5 failures, then the same escalating lockout. Response code `TOO_MANY_ATTEMPTS`.
 - **Device** — JWT `session` + identity composite (not global session-only).
-- **IP** — metrics only unless `FACE_ATTEMPT_IP_LOCKOUT_ENABLED=true` (default `false` for shared NAT).
+- **IP** — on unless `FACE_ATTEMPT_IP_LOCKOUT_ENABLED=false`. Default threshold is 1000 failures in the identity window so a shared address is not locked by ordinary use. Response code `TOO_MANY_ATTEMPTS`. Nonce and proof-of-work stay in `log` mode unless their own enforcement flags are changed.

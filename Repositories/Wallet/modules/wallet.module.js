@@ -10,6 +10,7 @@ const OfflineProofModule = require("../../../Core/offline-proof");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const { decryptWithPasswordFallback } = require("../../ZelfID/modules/zelf-id-password.module");
 const { _formattingError, ZELFPROOF_CLIENT_ERROR_STATUS } = require("../../ZelfProof/modules/zelf-proof.module");
+const { findStoredZelfProof, proofsMatch } = require("./stored-zelf-proof.module");
 const moment = require("moment");
 const populates = [];
 
@@ -252,9 +253,9 @@ const decryptWallet = async (params, authUser) => {
 	}
 
 	const SessionModule = require("../../Session/modules/session.module");
+	const domain = params.domain || authUser?.domain || "zelf";
 	const recordName = decryptedWallet?.publicData?.zelfName || decryptedWallet?.publicData?.tagName || "";
 	if (requestedName != null && String(requestedName).trim() !== "") {
-		const domain = params.domain || authUser?.domain || "zelf";
 		const requested = SessionModule.normalizeZelfName(requestedName, domain);
 		const actual = SessionModule.normalizeZelfName(recordName, domain);
 		if (!actual.zelfName || requested.zelfName !== actual.zelfName) {
@@ -265,7 +266,15 @@ const decryptWallet = async (params, authUser) => {
 			throw error;
 		}
 	}
-	await SessionModule.markSessionIdentityVerified(authUser, recordName, params.domain);
+
+	// Verification uses the stored record for the claimed name. The name inside the client blob is only a lookup key.
+	const claimedName = requestedName != null && String(requestedName).trim() !== "" ? requestedName : recordName;
+	await verifySessionFromStoredRecord({
+		authUser,
+		domain,
+		claimedName,
+		clientProof: zelfProof,
+	});
 
 	return {
 		...decryptedWallet,
@@ -273,6 +282,29 @@ const decryptWallet = async (params, authUser) => {
 		// zkProof: await OfflineProofModule.createProof(zelfProof),
 		zelfProof,
 	};
+};
+
+/**
+ * Stamp the session only when `clientProof` is the server record for `claimedName`.
+ * No stored record (unregistered wallet): leave the session unverified and keep the decrypt result.
+ * @param {{ authUser: Object, domain: string, claimedName: string, clientProof: string }} input
+ */
+const verifySessionFromStoredRecord = async ({ authUser, domain, claimedName, clientProof }) => {
+	if (claimedName == null || String(claimedName).trim() === "") return null;
+
+	const stored = await findStoredZelfProof(claimedName, domain, authUser);
+	if (!stored?.zelfProof || !stored.zelfName) return null;
+
+	if (!proofsMatch(clientProof, stored.zelfProof)) {
+		const error = new Error("403:ZELF_PROOF_MISMATCH");
+		error.status = 403;
+		error.code = "ZELF_PROOF_MISMATCH";
+		error.clientCode = "ZELF_PROOF_MISMATCH";
+		throw error;
+	}
+
+	const SessionModule = require("../../Session/modules/session.module");
+	return SessionModule.markSessionIdentityVerified(authUser, stored.zelfName, domain);
 };
 
 const validateZkProof = async (params, authUser) => {

@@ -27,7 +27,7 @@ const gate = (action) => async (ctx, next) => {
         return;
     }
 
-    if (ctx.status === 429 && ctx.body?.code === "face_locked") {
+    if (ctx.status === 429 && (ctx.body?.code === "face_locked" || ctx.body?.code === "TOO_MANY_ATTEMPTS")) {
         const retryAfter = ctx.body.retryAfter || ctx.get("Retry-After");
         if (retryAfter) ctx.set("Retry-After", String(retryAfter));
     }
@@ -40,13 +40,14 @@ const gate = (action) => async (ctx, next) => {
 };
 
 const handleFaceSecurityError = (ctx, err) => {
-    if (err?.clientCode === "face_locked" || err?.status === 429) {
+    if (err?.clientCode === "TOO_MANY_ATTEMPTS" || err?.clientCode === "face_locked" || err?.status === 429) {
         const retryAfter = err.retryAfterSeconds || 60;
+        const code = err?.clientCode === "TOO_MANY_ATTEMPTS" ? "TOO_MANY_ATTEMPTS" : "face_locked";
         ctx.status = 429;
         ctx.set("Retry-After", String(retryAfter));
         ctx.body = {
-            message: "Too many failed face attempts",
-            code: "face_locked",
+            message: code === "TOO_MANY_ATTEMPTS" ? "Too many attempts" : "Too many failed face attempts",
+            code,
             retryAfter,
         };
         return true;

@@ -25,13 +25,14 @@ const issueNonce = async (ctx) => {
             });
             failureCount = check.failureCount || 0;
         } catch (err) {
-            if (err.clientCode === "face_locked") {
+            if (err.clientCode === "face_locked" || err.clientCode === "TOO_MANY_ATTEMPTS") {
                 const retryAfter = err.retryAfterSeconds || 60;
+                const code = err.clientCode === "TOO_MANY_ATTEMPTS" ? "TOO_MANY_ATTEMPTS" : "face_locked";
                 ctx.status = 429;
                 ctx.set("Retry-After", String(retryAfter));
                 ctx.body = {
-                    message: "Too many failed face attempts",
-                    code: "face_locked",
+                    message: code === "TOO_MANY_ATTEMPTS" ? "Too many attempts" : "Too many failed face attempts",
+                    code,
                     retryAfter,
                 };
                 return;

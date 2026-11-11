@@ -106,11 +106,28 @@ const decryptZelfName = async (params, authUser) => {
 
 	const { face, password } = await _decryptParams(params, authUser);
 
+	const storedZelfProof = [
+		zelfNameObject?.publicData?.zelfProof,
+		zelfNameObject?.zelfProof,
+		zelfNameObjects.ipfs?.[0]?.publicData?.zelfProof,
+		zelfNameObjects.ipfs?.[0]?.zelfProof,
+		zelfNameObjects.arweave?.[0]?.publicData?.zelfProof,
+		zelfNameObjects.arweave?.[0]?.zelfProof,
+	].find((value) => typeof value === "string" && value.trim())
+		?.trim();
+
+	if (!storedZelfProof) {
+		const error = new Error("STORED_RECORD_NOT_FOUND");
+		error.status = 404;
+		error.code = "STORED_RECORD_NOT_FOUND";
+		throw error;
+	}
+
 	const decryptedZelfProof = await decrypt({
 		addServerPassword: Boolean(params.addServerPassword),
 		faceBase64: face,
 		password,
-		zelfProof: zelfNameObject.publicData.zelfProof || params.zelfProof,
+		zelfProof: storedZelfProof,
 	});
 
 	if (decryptedZelfProof.error) {
