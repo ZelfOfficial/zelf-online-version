@@ -1,6 +1,7 @@
 const Koa = require("koa");
 const { koaBody } = require("koa-body");
 const jwt = require("koa-jwt");
+const { acceptAccessToken } = require("./Core/jwt-claims");
 const config = require("./Core/config");
 const secret = config.JWT_SECRET; // Replace with your secret key
 const cors = require("@koa/cors");
@@ -94,6 +95,8 @@ const server = app.listen(config.port, () => {
                 },
             })
         );
+
+        app.use(acceptAccessToken);
 
         // Protected routes
         const protectedRoutes = require("./Routes/protected");
