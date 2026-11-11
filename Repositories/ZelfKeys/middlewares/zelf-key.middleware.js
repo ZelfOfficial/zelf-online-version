@@ -1,4 +1,6 @@
 const { string, validate, boolean, stringEnum, object } = require("../../../Core/JoiUtils");
+const Session = require("../../Session/models/session.model");
+const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
 
 /**
  * ZelfKey Middleware - Business logic validation for password manager operations
@@ -205,6 +207,113 @@ const retrieveValidation = async (ctx, next) => {
 	await next();
 };
 
+const LIST_ACCESS = {
+	SESSION_REQUIRED: {
+		status: 401,
+		code: "ERR_SESSION_REQUIRED",
+		message: "A verified session is required",
+	},
+	NOT_VERIFIED: {
+		status: 403,
+		code: "ERR_SESSION_NOT_VERIFIED",
+		message: "Session is not verified for this wallet",
+	},
+	OWNER_MISMATCH: {
+		status: 403,
+		code: "ERR_SESSION_OWNER_MISMATCH",
+		message: "Session is not the owner of this wallet",
+	},
+};
+
+/**
+ * One log line and no stack. The module must not run for these responses.
+ * @param {Object} ctx
+ * @param {{ status: number, code: string, message: string }} decision
+ */
+const rejectListRequest = (ctx, decision) => {
+	console.warn(`zelf-keys list: ${decision.code}`);
+	ctx.status = decision.status;
+	ctx.body = { message: decision.message, code: decision.code };
+	return false;
+};
+
+/**
+ * Owner of a Zelf Keys list, aligned with v4 `requireVerifiedWallet`.
+ * The name is the server stamp `verifiedTagName`. The JWT `tagName` is only
+ * checked when it is present, and a query `tagName` is not an input.
+ * @param {{ authUser?: Object, session?: Object, now?: number }} input
+ */
+const resolveListOwner = ({ authUser, session, now = Date.now() } = {}) => {
+	if (!session || session.status !== "active") {
+		return { ok: false, ...LIST_ACCESS.SESSION_REQUIRED };
+	}
+
+	const domain = authUser?.domain || session.domain || "zelf";
+	const verified = normalizeZelfName(session.verifiedTagName, domain);
+	const tokenWallet = normalizeZelfName(authUser?.tagName, domain);
+	const expired = Boolean(session.verifiedUntil) && new Date(session.verifiedUntil).getTime() <= now;
+
+	if (!verified.zelfName || expired) {
+		return { ok: false, ...LIST_ACCESS.NOT_VERIFIED };
+	}
+
+	if (tokenWallet.zelfName && tokenWallet.zelfName !== verified.zelfName) {
+		return { ok: false, ...LIST_ACCESS.OWNER_MISMATCH };
+	}
+
+	return { ok: true, tagName: verified.tagName, domain: verified.domain };
+};
+
+/**
+ * Copy the verified wallet onto the request and drop any query `tagName`.
+ * @param {Object} ctx
+ * @param {{ tagName: string, domain: string }} decision
+ */
+const assignVerifiedListOwner = (ctx, decision) => {
+	ctx.state.user = {
+		...ctx.state.user,
+		tagName: decision.tagName,
+		domain: decision.domain,
+	};
+
+	if (ctx.request?.query && Object.prototype.hasOwnProperty.call(ctx.request.query, "tagName")) {
+		delete ctx.request.query.tagName;
+	}
+};
+
+/**
+ * Session stamp required before listing. Returns false when the response is already set.
+ * @param {Object} ctx
+ */
+const requireVerifiedListOwner = async (ctx) => {
+	const authUser = ctx.state.user;
+
+	if (!authUser?.session) {
+		return rejectListRequest(ctx, LIST_ACCESS.SESSION_REQUIRED);
+	}
+
+	let session;
+
+	try {
+		session = await Session.findById(authUser.session).select("status domain verifiedTagName verifiedUntil").lean();
+	} catch (error) {
+		if (error?.name === "CastError") {
+			return rejectListRequest(ctx, LIST_ACCESS.SESSION_REQUIRED);
+		}
+
+		throw error;
+	}
+
+	const decision = resolveListOwner({ authUser, session });
+
+	if (!decision.ok) {
+		return rejectListRequest(ctx, decision);
+	}
+
+	assignVerifiedListOwner(ctx, decision);
+	return true;
+};
+
 const listValidation = async (ctx, next) => {
 	const valid = validate(schemas.list, ctx.request.query);
 
@@ -213,6 +322,8 @@ const listValidation = async (ctx, next) => {
 		ctx.body = { validationError: valid.error.message };
 		return;
 	}
+
+	if (!(await requireVerifiedListOwner(ctx))) return;
 
 	await next();
 };
@@ -225,6 +336,8 @@ const listAllValidation = async (ctx, next) => {
 		ctx.body = { validationError: valid.error.message };
 		return;
 	}
+
+	if (!(await requireVerifiedListOwner(ctx))) return;
 
 	await next();
 };
@@ -298,6 +411,11 @@ module.exports = {
 	storeCreditCardValidation,
 	retrieveValidation,
 	previewValidation,
+	LIST_ACCESS,
+	resolveListOwner,
+	assignVerifiedListOwner,
+	rejectListRequest,
+	requireVerifiedListOwner,
 	listValidation,
 	listAllValidation,
 	listDashboardValidation,
