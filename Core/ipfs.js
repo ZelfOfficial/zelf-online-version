@@ -174,7 +174,7 @@ const upload = async (base64Image, filename = "image.png", mimeType = "image/png
 };
 
 const retrieve = async (cid, expires = 1800) => {
-    if (!cid) return null;
+    if (typeof cid !== "string" || cid.length === 0) return null;
 
     try {
         // Use the new Pinata SDK v2.5.0 with JWT authentication
@@ -315,11 +315,83 @@ const _normalizeFiles = (files) => {
 };
 
 /**
+ * Drop null and undefined Pinata keyvalues.
+ * listFiles calls value.toString() on every metadata entry, which throws when a value is missing.
+ * Returns null when nothing usable remains so callers do not list every pinned file.
+ * Defined values are returned unchanged.
+ * @param {object} keyvalues
+ * @returns {object|null}
+ */
+const sanitizePinataKeyvalues = (keyvalues) => {
+    if (!keyvalues || typeof keyvalues !== "object" || Array.isArray(keyvalues)) return null;
+
+    const cleaned = {};
+
+    for (const [key, value] of Object.entries(keyvalues)) {
+        if (value === undefined || value === null) continue;
+        cleaned[key] = value;
+    }
+
+    return Object.keys(cleaned).length ? cleaned : null;
+};
+
+/**
+ * Build a name, cid, or keyvalues filter for files.public.list().
+ * A missing name or cid must not be sent: the SDK skips a falsy name/cid and then lists every file.
+ * @param {string} property
+ * @param {*} value
+ * @returns {{ mode: "name"|"cid"|"keyvalues", value?: string, keyvalues?: object }|null}
+ */
+const buildPinataListQuery = (property, value) => {
+    if (typeof property !== "string" || property.length === 0) return null;
+
+    if (property === "name" || property === "cid") {
+        if (typeof value !== "string" || value.length === 0) return null;
+        return { mode: property, value };
+    }
+
+    const keyvalues = sanitizePinataKeyvalues({ [property]: value });
+    if (!keyvalues) return null;
+
+    return { mode: "keyvalues", keyvalues };
+};
+
+/**
+ * Page size for list().limit(). Missing or non-finite values use the fallback
+ * so the SDK never receives undefined.
+ * @param {*} limit
+ * @param {number} [fallback=100]
+ * @returns {number}
+ */
+const sanitizePinataPageLimit = (limit, fallback = 100) => {
+    const cap = Number.isFinite(fallback) && fallback > 0 ? fallback : 100;
+    if (limit === undefined || limit === null || limit === "") return cap;
+
+    const numeric = typeof limit === "number" ? limit : typeof limit === "string" ? Number(limit) : NaN;
+    if (!Number.isFinite(numeric) || numeric <= 0) return cap;
+
+    return Math.min(Math.floor(numeric), cap);
+};
+
+const _listQuery = (resolved) => {
+    let query = web3Instance.files.public.list();
+
+    if (resolved.mode === "name") query = query.name(resolved.value);
+    else if (resolved.mode === "cid") query = query.cid(resolved.value);
+    else query = query.keyvalues(resolved.keyvalues);
+
+    return query;
+};
+
+/**
  * Auto-paginating filter using Pinata cursor-based pagination.
  * Keeps fetching pages via next_page_token until exhausted or safety cap (1000) is hit.
  * Each page requests 100 items (Pinata max per request).
  */
 const filter = async (property = "name", value, options = {}) => {
+    const resolved = buildPinataListQuery(property, value);
+    if (!resolved) return [];
+
     const PAGE_SIZE = 100; // Pinata max per request
     const SAFETY_CAP = options.limit || 1000;
     const allFiles = [];
@@ -328,10 +400,7 @@ const filter = async (property = "name", value, options = {}) => {
         let pageToken = null;
 
         while (allFiles.length < SAFETY_CAP) {
-            let query;
-            if (property === "name") query = web3Instance.files.public.list().name(value);
-            else if (property === "cid") query = web3Instance.files.public.list().cid(value);
-            else query = web3Instance.files.public.list().keyvalues({ [property]: value });
+            let query = _listQuery(resolved);
 
             query = query.limit(PAGE_SIZE);
             if (pageToken && typeof query.pageToken === "function") {
@@ -446,15 +515,15 @@ const updateItemTokenId = async (ipfsFileId, tokenId, txHash) => {
  * @param {string} [options.pageToken]      - Cursor from previous call
  */
 const filterPaged = async (property, value, options = {}) => {
-    const PAGE_SIZE = Math.min(options.pageSize || 100, 100);
+    const resolved = buildPinataListQuery(property, value);
+    if (!resolved) return { files: [], nextPageToken: null };
+
+    const PAGE_SIZE = sanitizePinataPageLimit(options.pageSize, 100);
     try {
-        let query;
-        if (property === "name") query = web3Instance.files.public.list().name(value);
-        else if (property === "cid") query = web3Instance.files.public.list().cid(value);
-        else query = web3Instance.files.public.list().keyvalues({ [property]: value });
+        let query = _listQuery(resolved);
 
         query = query.limit(PAGE_SIZE);
-        if (options.pageToken && typeof query.pageToken === "function") {
+        if (typeof options.pageToken === "string" && options.pageToken && typeof query.pageToken === "function") {
             query = query.pageToken(options.pageToken);
         }
 
@@ -475,6 +544,9 @@ module.exports = {
     pinFileWindows,
     filter,
     filterPaged,
+    sanitizePinataKeyvalues,
+    buildPinataListQuery,
+    sanitizePinataPageLimit,
     unPinFiles,
     deleteFiles,
     getFileById,
