@@ -50,6 +50,13 @@ This is a Koa backend API with MongoDB, Mongoose, and JWT-protected routes.
 -   Env: `ONESIGNAL_APP_ID`, `ONESIGNAL_APP_API_KEY` (IP-allowlisted to the server), optional `TX_WATCHER_*` (see `.env.example`). Only curated tokens are announced (`modules/tokens.js`).
 -   Tests: `TX_NOTIFICATIONS_TEST_MONGO_URI=mongodb://127.0.0.1:27017 npm run test:tx-notifications` (unit tests use recorded mainnet fixtures in `tests/fixtures/tx-notifications/`).
 
+## Secure password shares
+
+- Feature root: `Repositories/PasswordShare/`. Contract: `Repositories/PasswordShare/CONTRACT.md`.
+- Owner routes (`POST`, `GET` collection, `DELETE`) are session JWT. Public metadata and reveal are unauthenticated.
+- The API stores ciphertext only. Production share links use `https://zelf.world` (`config.landingUrl`).
+- Focused check: `PORT=3003 npm run test:password-shares`.
+
 ## Vault Legacy demo mode
 
 -   Demo wills: `LEGACY_DEMO_MODE=true`, per-vault `isDemo` on `VaultLegacy` Mongo records, fixed `LEGACY_DEMO_LAWYER_ADDRESS`.

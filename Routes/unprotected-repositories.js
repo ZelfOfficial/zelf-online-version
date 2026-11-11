@@ -56,4 +56,5 @@ module.exports = (server) => {
     require("../Repositories/FaceCertificates/routes/face-certificates.route")(server);
     require("../Repositories/ZelfID/routes/zelf-ids-revenue-cat.routes")(server);
     require("../Repositories/ZelfID/routes/zelf-ids-referral-availability.routes")(server);
+    require("../Repositories/PasswordShare/routes/password-share-public.routes")(server);
 };

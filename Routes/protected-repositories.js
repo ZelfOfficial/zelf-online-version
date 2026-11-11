@@ -87,6 +87,7 @@ module.exports = (server) => {
     //Z
     require("../Repositories/ZelfNameService/routes/zns.routes")(server);
     require("../Repositories/ZelfKeys/routes/zelf-key.route")(server);
+    require("../Repositories/PasswordShare/routes/password-share.routes")(server);
     require("../Repositories/ZelfNameService/routes/my-zns.routes")(server);
     require("../Repositories/ZelfProof/routes/zelf-proof-jwt.route")(server);
     require("../Repositories/ZSend/routes/zsend.routes")(server);

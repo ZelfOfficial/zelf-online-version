@@ -36,6 +36,9 @@ const initMongoDB = () => {
         require("../Repositories/ZelfID/modules/zelf-id-chain-activation.module")
             .ensureIndexes()
             .catch((error) => console.error("Chain activation index creation failed:", error?.message || error));
+        require("../Repositories/PasswordShare/modules/password-share.module")
+            .ensureIndexes()
+            .catch((error) => console.error("PasswordShare index creation failed:", error?.code || error?.name || "index_error"));
     });
 
     return MongoConnection;
