@@ -18,6 +18,7 @@ const {
 const { createNFT } = require("../../Avalanche/modules/avax-nft.module");
 
 const config = require("../../../Core/config");
+const { listOwner } = require("./zelf-key-list-owner");
 
 const TYPES_REQUIRING_TRANSPORT_ENCRYPTION = new Set(["password", "notes", "note", "credit_card", "payment-card"]);
 
@@ -509,29 +510,16 @@ const createNFTReadyData = async (data, authToken) => {
 };
 
 /**
- * List data by category
- * @param {Object} data - Query parameters
- * @param {Object} authToken - Authentication token
+ * List data by category for the session stamp on `authToken.tagName`.
+ * @param {Object} data - Query parameters. `tagName` is ignored.
+ * @param {Object} authToken - Authentication token, with `tagName` set from the verified session
  * @returns {Promise<Object>} List of data items in the specified category
  */
 const listData = async (data, authToken) => {
+    const { category } = data || {};
+    const { fullTagName } = listOwner(authToken);
+
     try {
-        const { category, tagName: queryTagName } = data;
-        let identifier = authToken.tagName || authToken.identifier;
-
-        // Allow tagName override only for staff or when it matches the authenticated user
-        let domain = authToken.domain || "zelf";
-        if (queryTagName && queryTagName.trim()) {
-            const isStaff = authToken.accountType === "staff";
-            const userTagName = TagsPartsModule.getFullTagName(identifier, domain);
-            if (isStaff || queryTagName === userTagName) {
-                const parts = queryTagName.split(".");
-                identifier = parts[0] || queryTagName;
-                domain = parts[1] || domain;
-            }
-        }
-        const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
-
         let searchCategory = category;
         let results = [];
 
@@ -597,6 +585,10 @@ const listData = async (data, authToken) => {
             totalCount: results.length,
         };
     } catch (error) {
+        if (typeof error?.message === "string" && /^\d{3}:/.test(error.message.trim())) {
+            throw error;
+        }
+
         console.error("Error listing data:", error);
         throw new Error(`Failed to list data: ${error.message}`);
     }
@@ -664,7 +656,7 @@ const listAllDataForDashboard = async (identifier, authToken) => {
 
 /**
  * List all data across all categories
- * @param {Object} data - Query parameters (optional tagName)
+ * @param {Object} data - Query parameters. `tagName` is ignored; the session stamp owns the list.
  * @param {Object} authToken - Authentication token
  * @returns {Promise<Object>} Merged list of all data items by category
  */
