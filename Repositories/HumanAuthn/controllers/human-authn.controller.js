@@ -46,20 +46,15 @@ const encryptQRCode = async (ctx) => {
 	}
 };
 
+const V4_HUMAN_AUTHN_DECRYPT = "https://v4.zelf.world/api/human-authn/decrypt";
+
 const decrypt = async (ctx) => {
-	try {
-		const data = await Module.decrypt(ctx.request.body, ctx.state.user);
-
-		await recordPlayStep(ctx, "playDecrypt");
-
-		ctx.body = { ...data };
-	} catch (error) {
-		console.error(error);
-
-		ctx.status = error.status || 500;
-
-		ctx.body = { error: error.message };
-	}
+	ctx.status = 410;
+	ctx.body = {
+		code: "ENDPOINT_MOVED_TO_V4",
+		message: `This endpoint has moved. Use ${V4_HUMAN_AUTHN_DECRYPT}`,
+		newEndpoint: V4_HUMAN_AUTHN_DECRYPT,
+	};
 };
 
 const preview = async (ctx) => {
