@@ -38,12 +38,27 @@ const {
 } = require("./zelf-key-zotp.module");
 const PlanLimits = require("./zelf-key-plan-limits.module");
 
+/**
+ * Owner of a ZelfKey request: the server-verified name, or the name the app claims for this session
+ * (only used by routes that face-verify it in the same request). A device/session `identifier` is never an owner.
+ */
 const ownerParts = (authToken) => {
     const domain = authToken?.domain || "zelf";
-    const raw = authToken?.tagName || authToken?.identifier;
-    const normalized = normalizeZelfName(raw, domain);
+    const raw = [authToken?.verifiedTagName, authToken?.tagName, authToken?.claimedTagName].find(
+        (value) => typeof value === "string" && value.trim(),
+    );
+
+    if (!raw) {
+        const error = new Error("401:ERR_ZELF_IDENTITY_REQUIRED");
+        error.status = 401;
+        error.clientCode = "ERR_ZELF_IDENTITY_REQUIRED";
+        error.clientMessage = "Authenticated Zelf identity is required";
+        throw error;
+    }
+
+    const normalized = normalizeZelfName(raw.trim(), domain);
     return {
-        identifier: normalized.tagName || raw,
+        identifier: normalized.tagName || raw.trim(),
         domain: normalized.domain || domain,
     };
 };
@@ -1174,6 +1189,7 @@ const listData = async (data, authToken) => {
             totalCount: results.length,
         };
     } catch (error) {
+        if (error?.status === 401 || error?.status === 403) throw error;
         console.error("Error listing data:", error);
         throw new Error(`Failed to list data: ${error.message}`);
     }
@@ -1196,7 +1212,7 @@ const listDataForDashboard = async (identifier, category, authToken) => {
 
     const accountType = authToken?.accountType || authToken?.publicData?.accountType || "";
     const isPrivileged = ["staff", "staff_account", "lawyer", "lawyer_account"].includes(accountType);
-    const userIdentifier = authToken?.tagName || authToken?.identifier;
+    const userIdentifier = authToken?.verifiedTagName || authToken?.tagName || authToken?.claimedTagName;
     const requestedOwner = normalizeZelfName(identifier, domainPart);
     if (!isPrivileged) {
         const userTagName = userIdentifier ? normalizeZelfName(userIdentifier, authToken?.domain || domainPart).zelfName : "";
@@ -1431,6 +1447,13 @@ const deleteZelfKey = async (data, authToken) => {
     }
 };
 
+/** The face matched this owner in this request: later steps (limits, metadata) read it from authToken. */
+const _adoptProvenOwner = (authToken, owner) => {
+    if (!authToken || typeof authToken !== "object") return;
+    authToken.tagName = owner.identifier;
+    authToken.domain = owner.domain;
+};
+
 const _validateOwnership = async (faceBase64, zelfIdPassword, authToken, extraParams = {}) => {
     const owner = ownerParts(authToken);
     const sessionParams = {
@@ -1443,11 +1466,16 @@ const _validateOwnership = async (faceBase64, zelfIdPassword, authToken, extraPa
 
     try {
         // this will throw an error if the tag is not found or the password is incorrect or the face is incorrect
-        return await TagsModule.decryptTag(sessionParams, authToken);
+        const decrypted = await TagsModule.decryptTag(sessionParams, authToken);
+        _adoptProvenOwner(authToken, owner);
+        return decrypted;
     } catch (error) {
         if (!extraParams?.zelfIdPassword && _isPasswordMismatchOrRequiredError(error)) {
             const verifiedViaKey = await _tryVerifyOwnershipViaOwnedKey(faceBase64, zelfIdPassword, authToken, extraParams);
-            if (verifiedViaKey) return verifiedViaKey;
+            if (verifiedViaKey) {
+                _adoptProvenOwner(authToken, owner);
+                return verifiedViaKey;
+            }
         }
 
         remapZelfKeyCaughtError(error);

@@ -117,9 +117,9 @@ const trimmed = (value) => (typeof value === "string" ? value.trim() : "");
  * @returns {{ tagName: string, domain: string, zelfName: string }|null}
  */
 const resolveOwner = (authUser, { requireTagName = false } = {}) => {
-    const tagNameClaim = trimmed(authUser?.tagName);
-    const identifier = trimmed(authUser?.identifier);
-    const raw = tagNameClaim || (requireTagName ? "" : identifier);
+    // Only a proven owner counts: the verified session name, or the name a face check proved in this request.
+    // A device/session identifier and the client's unverified claim are never an owner.
+    const raw = trimmed(authUser?.verifiedTagName) || trimmed(authUser?.tagName);
 
     if (!raw) {
         if (requireTagName) {

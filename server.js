@@ -88,6 +88,7 @@ const server = app.listen(config.port, () => {
         );
 
         app.use(acceptAccessToken);
+        app.use(require("./Repositories/Session/middlewares/session.middleware").hydrateOwner);
 
         // Protected routes
         const protectedRoutes = require("./Routes/protected");

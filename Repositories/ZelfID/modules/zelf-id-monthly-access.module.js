@@ -309,7 +309,7 @@ const observedBalance = async (input, publicData) => {
 
 const resolveContext = async (input) => {
     const domainHint = input.domain || input.authUser?.domain || "zelf";
-    const rawName = input.zelfName || input.tagName || input.authUser?.tagName;
+    const rawName = input.zelfName || input.tagName || input.authUser?.tagName || input.authUser?.claimedTagName;
     const normalized = normalizeZelfName(rawName, domainHint);
     if (!normalized.zelfName) return null;
 
@@ -1116,7 +1116,7 @@ const confirmMonthlyAccess = async (input) => {
     const decoded = verifyQuoteToken(input.token);
     const now = input.now ? new Date(input.now) : new Date();
     const currentPeriod = periodKeyFromDate(now);
-    const owner = normalizeZelfName(input.authUser?.tagName, input.authUser?.domain || "zelf");
+    const owner = normalizeZelfName(input.authUser?.tagName || input.authUser?.claimedTagName, input.authUser?.domain || "zelf");
 
     if (!owner.zelfName || owner.zelfName !== String(decoded.zelfName || "").toLowerCase()) {
         throw accessError(403, "ERR_SESSION_OWNER_MISMATCH", "Session is not the owner of this Zelf ID");

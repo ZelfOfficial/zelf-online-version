@@ -81,6 +81,18 @@ const decryptValidation = async (ctx, next) => {
 	await next();
 };
 
+/**
+ * Global, after the JWT is accepted: session tokens never expose the client tagName claim as `tagName`.
+ */
+const hydrateOwner = async (ctx, next) => {
+	if (ctx.state.user?.session) {
+		const SessionModule = require("../modules/session.module");
+		ctx.state.user = await SessionModule.hydrateSessionOwner(ctx.state.user);
+	}
+
+	await next();
+};
+
 const validateJWT = async (ctx, next) => {
 	const authUser = ctx.state.user || {};
 
@@ -134,6 +146,7 @@ const validateJWT = async (ctx, next) => {
 };
 
 module.exports = {
+	hydrateOwner,
 	getValidation,
 	showValidation,
 	createValidation,

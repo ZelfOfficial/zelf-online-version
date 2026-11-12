@@ -40,8 +40,23 @@ const get = async (params, authUser = {}) => {
  * share or clear another session's verification stamp.
  * @param {*} params
  */
+/**
+ * Name the client says the session is for. Same raw format the apps always sent.
+ * It is a claim only: no route trusts it until verifiedTagName is stamped from a decrypted record.
+ * @param {*} value
+ * @returns {string|null}
+ */
+const claimedTagName = (value) => {
+	if (typeof value !== "string") return null;
+	const trimmed = value.trim();
+	if (!trimmed || trimmed.length > 128) return null;
+	return trimmed;
+};
+
 const insert = async (params) => {
 	await Model.ensureNonUniqueIdentifierIndex();
+
+	const claim = claimedTagName(params.tagName || params.zelfName);
 
 	const session = new Model({
 		clientIP: params.clientIP,
@@ -50,8 +65,8 @@ const insert = async (params) => {
 		identifier: params.identifier || params.clientIP,
 		isWebExtension: params.isWebExtension || false,
 		status: "active",
-		// A session is not tag-verified until a decrypt stamps verifiedTagName from the record.
-		tagName: null,
+		// Client claim only. A session is not tag-verified until a decrypt stamps verifiedTagName from the record.
+		tagName: claim,
 		type: params.type || "general",
 		verifiedTagName: null,
 		verifiedAt: null,
@@ -77,6 +92,7 @@ const insert = async (params) => {
 				identifier: session.identifier,
 				ip: session.clientIP,
 				session: session._id,
+				tagName: claim,
 			},
 			config.JWT_SECRET,
 			{ typ: TOKEN_TYPES.session, expiresIn: "10m" }
@@ -364,7 +380,40 @@ const markSessionIdentityVerified = async (authUser, tagName, domain) => {
 		}
 	);
 
+	// Same request: later steps (capacity, metadata, plan limits) read the proven owner from authUser.
+	authUser.verifiedTagName = normalized.zelfName;
+	authUser.tagName = normalized.tagName;
+	authUser.domain = normalized.domain;
+
 	return { ...normalized, verifiedAt, verifiedUntil };
+};
+
+/**
+ * Session tokens carry a client tagName claim. Replace it with what the server stamped:
+ * `tagName`/`verifiedTagName` only while the face check is current, otherwise the claim moves to `claimedTagName`.
+ * @param {Object} authUser JWT payload
+ * @returns {Promise<Object>}
+ */
+const hydrateSessionOwner = async (authUser) => {
+	if (!authUser?.session) return authUser;
+
+	const { tagName: claim, ...rest } = authUser;
+	const next = { ...rest, claimedTagName: claim || null, tagName: undefined, verifiedTagName: undefined };
+
+	let session = null;
+	try {
+		session = await Model.findById(authUser.session).lean();
+	} catch (_error) {
+		session = null;
+	}
+
+	const stillValid = session && session.status === "active" && session.verifiedTagName && session.verifiedUntil && new Date(session.verifiedUntil).getTime() > Date.now();
+	if (!stillValid) return next;
+
+	const normalized = normalizeZelfName(session.verifiedTagName, authUser.domain || session.domain || "zelf");
+	if (!normalized.zelfName) return next;
+
+	return { ...next, tagName: normalized.tagName, verifiedTagName: normalized.zelfName, domain: normalized.domain };
 };
 
 module.exports = {
@@ -381,6 +430,7 @@ module.exports = {
 	walletDecrypt,
 	deleteSession,
 	markSessionIdentityVerified,
+	hydrateSessionOwner,
 	stampVerifiedFromRecord,
 	nameOnRecord,
 	IDENTITY_VERIFIED_WINDOW_MS,

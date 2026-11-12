@@ -610,8 +610,11 @@ const changeMasterPasswordValidation = async (ctx, next) => {
 };
 
 const requireZelfIdentity = (ctx) => {
-	const tagName = typeof ctx.state.user?.tagName === "string" ? ctx.state.user.tagName.trim() : "";
-	if (tagName) return true;
+	// Slots are paid with a face check in the same request, so a claimed name is enough to reach it.
+	// The module verifies that face for the claimed name before anything is charged.
+	const user = ctx.state.user || {};
+	const name = [user.verifiedTagName, user.tagName, user.claimedTagName].find((value) => typeof value === "string" && value.trim());
+	if (name) return true;
 
 	ctx.status = 401;
 	ctx.body = {

@@ -224,29 +224,14 @@ describe("Zelf Keys store enforces plan limits", () => {
         expect(IPFS.deleteFiles).toHaveBeenCalledWith(["zotp-0"]);
     });
 
-    test("an identifier-only session can still save, and the cap applies to that owner", async () => {
+    test("an identifier-only session can never save: the device identifier is not an owner", async () => {
         const deviceAuth = { identifier: "device-fingerprint-abc", domain: "zelf" };
         IPFS.filter.mockResolvedValue([]);
 
-        await ZelfKeyModule.storeData(passwordBody(), deviceAuth);
-        expect(ZelfProofModule.encrypt).toHaveBeenCalled();
+        await expect(ZelfKeyModule.storeData(passwordBody(), deviceAuth)).rejects.toThrow(/ERR_ZELF_IDENTITY_REQUIRED/);
 
-        ZelfProofModule.encrypt.mockClear();
-        IPFS.filter.mockImplementation(async (_key, value) => {
-            if (!String(value).includes("_password")) return [];
-            return rows("password", 5).map((row) => ({
-                ...row,
-                publicData: {
-                    ...row.publicData,
-                    keyOwner: "device-fingerprint-abc.zelf",
-                    category: "device-fingerprint-abc.zelf_password",
-                },
-            }));
-        });
-
-        await expect(ZelfKeyModule.storeData(passwordBody(), deviceAuth)).rejects.toMatchObject({
-            clientCode: "ERR_PLAN_LIMIT_REACHED",
-        });
+        expect(ZelfProofModule.encrypt).not.toHaveBeenCalled();
+        expect(IPFS.pinFile).not.toHaveBeenCalled();
     });
 
     test("slot purchase checks the face the same way a key save does", async () => {

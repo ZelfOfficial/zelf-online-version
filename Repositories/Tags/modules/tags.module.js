@@ -247,7 +247,8 @@ const decryptTag = async (params, authUser) => {
 
     const searchResult = await searchTag({ tagName, domain, domainConfig, environment: "all", includeAllAddressPages: true }, authUser);
 
-    if (searchResult.available) return searchResult;
+    // A name that does not exist can never be "verified": no 2xx without decrypting a real record.
+    if (searchResult.available) throw new Error("404:tag_not_found");
 
     const tagObject = searchResult.tagObject;
 

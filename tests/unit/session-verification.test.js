@@ -70,13 +70,13 @@ describe("session verification comes from the decrypted record", () => {
         return { created, claims, stored };
     };
 
-    test("POST /api/sessions ignores a client tagName and does not verify the session", async () => {
+    test("POST /api/sessions keeps a client tagName as a claim and does not verify the session", async () => {
         const { claims, stored } = await openSession();
-        expect(stored.tagName).toBeFalsy();
+        expect(stored.tagName).toBe("bob.zelf");
+        expect(claims.tagName).toBe("bob.zelf");
         expect(stored.verifiedTagName).toBeFalsy();
         expect(stored.verifiedAt).toBeFalsy();
         expect(stored.verifiedUntil).toBeFalsy();
-        expect(claims.tagName).toBeUndefined();
         expect(claims.verifiedTagName).toBeUndefined();
         expect(claims.typ).toBe("session");
     });
@@ -100,7 +100,7 @@ describe("session verification comes from the decrypted record", () => {
 
         const after = await Session.findById(stored._id).lean();
         expect(after.verifiedTagName).toBeFalsy();
-        expect(after.tagName).toBeFalsy();
+        expect(after.tagName).toBe("bob.zelf"); // still only the client's claim
     });
 
     test("a decrypt that is not the stored record does not verify the session", async () => {

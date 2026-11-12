@@ -22,13 +22,14 @@ const fail = (ctx, status, message, code) => {
  */
 const requireOwner = (ctx, tagName, domain) => {
     const authUser = ctx.state.user;
-    if (!authUser?.tagName) {
+    const sessionName = authUser?.tagName || authUser?.claimedTagName;
+    if (!sessionName) {
         fail(ctx, 401, "Authenticated Zelf identity is required", "ERR_ZELF_IDENTITY_REQUIRED");
         return null;
     }
 
     const target = normalizeZelfName(tagName, domain || authUser.domain || "zelf");
-    const owner = normalizeZelfName(authUser.tagName, authUser.domain || target.domain || "zelf");
+    const owner = normalizeZelfName(sessionName, authUser.domain || target.domain || "zelf");
     if (!target.zelfName || !owner.zelfName || owner.zelfName !== target.zelfName) {
         fail(ctx, 403, "Session is not the owner of this Zelf ID", "ERR_SESSION_OWNER_MISMATCH");
         return null;
@@ -59,7 +60,7 @@ const confirmValidation = async (ctx, next) => {
         ctx.body = { validationError: valid.error.message };
         return;
     }
-    if (!ctx.state.user?.tagName) {
+    if (!ctx.state.user?.tagName && !ctx.state.user?.claimedTagName) {
         fail(ctx, 401, "Authenticated Zelf identity is required", "ERR_ZELF_IDENTITY_REQUIRED");
         return;
     }
