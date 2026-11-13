@@ -26,6 +26,7 @@
         "test:encrypt-compat": "jest --config jest.integration.http.config.js tests/integration/encrypt-stack-compat-api.test.js --verbose --no-coverage",
         "test:face-certificates": "jest --config jest.integration.http.config.js tests/integration/face-certificates-api.test.js --verbose --no-coverage",
         "test:zsend": "jest tests/unit/zsend-purpose.module.test.js tests/unit/zsend-envelope.client.test.js --verbose --no-coverage && jest --config jest.integration.http.config.js tests/integration/zsend-api.test.js --verbose --no-coverage",
+        "test:password-shares": "jest tests/unit/password-share.module.test.js tests/unit/password-share-rate-limit.test.js --verbose --no-coverage && jest --config jest.integration.http.config.js tests/integration/password-shares-api.test.js --verbose --no-coverage",
         "test:vault-legacy-demo": "jest --config jest.integration.config.js tests/integration/vault-legacy-demo.test.js --verbose --no-coverage",
         "test:license-theme": "jest tests/unit/license-theme-merge.test.js --verbose --no-coverage && jest --config jest.integration.http.config.js tests/integration/license-zelf-theme-api.test.js --verbose --no-coverage",
         "test:stellar": "jest tests/integration/stellar-api.test.js --verbose --no-coverage",

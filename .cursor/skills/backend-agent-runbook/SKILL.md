@@ -74,6 +74,14 @@ For a test file that expects another port, export that same `PORT` before starti
 - Plan caps for the signed-in Zelf ID (passwords, zOTP, monthly swaps, whether a new non-EVM chain may be activated) are `GET /api/zelf-keys/limits` and the same payload at `GET /api/zelf-ids/limits`. Chain status is `GET /api/zelf-ids/chains`. Activating a chain is `POST /api/zelf-ids/chains/activate` (the only route that blocks a new non-EVM chain on Free). Activate accepts the logged-in session whose Zelf ID matches the token; it does not require the face-verified window. `GET /api/zelf-ids/limits` and `GET /api/zelf-ids/chains` still require that window. `POST /api/zelf-ids/sync-addresses` and offline lease with `sync: true` always store addresses derived from the owner's seed and record those non-EVM chains as already activated. A successful LI.FI execution is counted on `POST /api/lifi/execute-advanced-step-transaction`. `GET /api/lifi/quote` is a price lookup and is not counted. The quote `data` object is the step execute accepts unchanged. Integrator is `LIFI_INTEGRATOR` on both calls. There is no fee percentage in config; LI.FI applies the fee configured for that integrator, and the quote reports it on `estimate.feeCosts`.
 - Cross-platform availability regression: `npm run test:tag-registration` (Node 24; read-only real provider failure, no API server/Mongo required).
 
+### Secure password shares
+
+- Feature root: `Repositories/PasswordShare/`. Contract: `Repositories/PasswordShare/CONTRACT.md`.
+- `POST /api/password-shares`, `GET /api/password-shares`, and `DELETE /api/password-shares/:id` require a session JWT (protected registry). Ownership is the session `identifier`.
+- `GET /api/password-shares/:id` and `POST /api/password-shares/:id/reveal` are public (unprotected registry). Metadata does not consume a view. Reveal decrements views and purges ciphertext at zero.
+- The server stores ciphertext only. The AES-256-GCM key stays in the landing URL fragment (`config.landingUrl`, production `https://zelf.world`).
+- Focused check: `PORT=3003 npm run test:password-shares`.
+
 ### zSend (encrypt to someone else)
 
 - `Repositories/ZSend/` builds on Face Certificates: `/api/zsend` (directory lookup) and `/api/my-zsend` (publish, send, open). Both JWT, registered in `Routes/protected-repositories.js`.
