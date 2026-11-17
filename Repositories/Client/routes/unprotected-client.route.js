@@ -9,8 +9,7 @@ const base = "/clients";
 module.exports = (server) => {
 	const PATH = config.basePath(base);
 
-	// Routes
-	server.get(`${PATH}`, Middleware.verifyClientValidation, Controller.verifyClient);
+	// Account creation and sign-in stay public. Lookup by email or phone is on the protected router.
 	server.post(`${PATH}`, Middleware.createValidation, FaceMiddleware.gate("client-face"), Controller.create);
 	server.post(`${PATH}/auth`, Middleware.authValidation, FaceMiddleware.gate("client-face"), Controller.auth);
 };

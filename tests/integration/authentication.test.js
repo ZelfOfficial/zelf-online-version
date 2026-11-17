@@ -10,6 +10,7 @@ const sampleFaceFromJSON = require("../../config/0012589021.json");
 
 describe("Client Authentication API Integration Tests - Real Server", () => {
     let authToken;
+    let ownerToken;
     let accountEmail;
     let testEmail;
     let testPhone;
@@ -56,6 +57,7 @@ describe("Client Authentication API Integration Tests - Real Server", () => {
 
             // Store the created client ID for later tests (using email as identifier)
             accountEmail = response.body.data.zelfAccount.publicData.accountEmail;
+            ownerToken = response.body.data.token;
 
             expect(accountEmail).toBeDefined();
         });
@@ -92,9 +94,7 @@ describe("Client Authentication API Integration Tests - Real Server", () => {
     });
 
     describe("2. GET /api/clients - Verify Client (Account Available)", () => {
-        it("should verify that the created client exists by email", async () => {
-            const response = await request(API_BASE_URL).get("/api/clients").query({ email: testEmail });
-
+        const expectClientRecord = (response) => {
             expect(response.status).toBe(200);
             expect(response.body).toHaveProperty("data");
             expect(response.body.data).toHaveProperty("id");
@@ -106,37 +106,71 @@ describe("Client Authentication API Integration Tests - Real Server", () => {
             expect(response.body.data.publicData).toHaveProperty("accountCompany", "Test Company");
             expect(response.body.data.publicData).toHaveProperty("accountCountryCode", testCountryCode);
             expect(response.body.data.publicData).toHaveProperty("accountType", "client_account");
+        };
+
+        it("should verify that the created client exists by email for the owner", async () => {
+            const response = await request(API_BASE_URL)
+                .get("/api/clients")
+                .set("Origin", "https://test.example.com")
+                .set("Authorization", `Bearer ${ownerToken}`)
+                .query({ email: testEmail });
+
+            expectClientRecord(response);
         });
 
-        it("should verify that the created client exists by phone", async () => {
-            const response = await request(API_BASE_URL).get("/api/clients").query({
-                countryCode: testCountryCode,
-                phone: testPhone,
+        it("should return the same response for anonymous lookups of registered and unregistered identifiers", async () => {
+            const registered = await request(API_BASE_URL)
+                .get("/api/clients")
+                .set("Origin", "https://test.example.com")
+                .query({ email: testEmail });
+            const unregistered = await request(API_BASE_URL)
+                .get("/api/clients")
+                .set("Origin", "https://test.example.com")
+                .query({ email: "nonexistent@example.com" });
+            const registeredPhone = await request(API_BASE_URL)
+                .get("/api/clients")
+                .set("Origin", "https://test.example.com")
+                .query({ phone: testPhone });
+            const missingParams = await request(API_BASE_URL).get("/api/clients").set("Origin", "https://test.example.com");
+
+            const anonymousBody = { error: "Protected resource, use Authorization header to get access" };
+
+            for (const response of [registered, unregistered, registeredPhone, missingParams]) {
+                expect(response.status).toBe(401);
+                expect(response.body).toEqual(anonymousBody);
+                expect(JSON.stringify(response.body)).not.toMatch(/publicData|accountEmail|accountPhone|cid|CLIENT_NOT_FOUND|client_not_found/i);
+            }
+
+            expect(JSON.stringify(registered.body)).toBe(JSON.stringify(unregistered.body));
+            expect(JSON.stringify(registered.body)).toBe(JSON.stringify(registeredPhone.body));
+        });
+
+        it("should forbid the owner from looking up a different email", async () => {
+            const otherExistingShape = await request(API_BASE_URL)
+                .get("/api/clients")
+                .set("Origin", "https://test.example.com")
+                .set("Authorization", `Bearer ${ownerToken}`)
+                .query({ email: "other-person@example.com" });
+            const another = await request(API_BASE_URL)
+                .get("/api/clients")
+                .set("Origin", "https://test.example.com")
+                .set("Authorization", `Bearer ${ownerToken}`)
+                .query({ email: "nonexistent@example.com" });
+
+            expect(otherExistingShape.status).toBe(403);
+            expect(otherExistingShape.body).toEqual({
+                error: "CLIENT_LOOKUP_FORBIDDEN",
+                code: "CLIENT_LOOKUP_FORBIDDEN",
             });
-
-            expect(response.status).toBe(200);
-            expect(response.body).toHaveProperty("data");
-            expect(response.body.data).toHaveProperty("id");
-            expect(response.body.data).toHaveProperty("cid");
-            expect(response.body.data).toHaveProperty("url");
-            expect(response.body.data).toHaveProperty("publicData");
-            expect(response.body.data.publicData).toHaveProperty("accountEmail", testEmail);
-            expect(response.body.data.publicData).toHaveProperty("accountPhone", testPhone);
-            expect(response.body.data.publicData).toHaveProperty("accountCompany", "Test Company");
-            expect(response.body.data.publicData).toHaveProperty("accountCountryCode", testCountryCode);
-            expect(response.body.data.publicData).toHaveProperty("accountType", "client_account");
+            expect(JSON.stringify(otherExistingShape.body)).toBe(JSON.stringify(another.body));
+            expect(another.status).toBe(403);
         });
 
-        it("should return client not found for non-existent email", async () => {
-            const response = await request(API_BASE_URL).get("/api/clients").query({ email: "nonexistent@example.com" });
-
-            expect(response.status).toBe(404);
-            expect(response.body).toHaveProperty("code", "NotFound");
-            expect(response.body).toHaveProperty("message", "client_not_found");
-        });
-
-        it("should reject listing all clients when no parameters are provided", async () => {
-            const response = await request(API_BASE_URL).get("/api/clients");
+        it("should reject listing all clients when an owner omits the identifier", async () => {
+            const response = await request(API_BASE_URL)
+                .get("/api/clients")
+                .set("Origin", "https://test.example.com")
+                .set("Authorization", `Bearer ${ownerToken}`);
 
             expect(response.status).toBe(400);
             expect(response.body).toHaveProperty("code", "CLIENT_IDENTIFIER_REQUIRED");
@@ -164,6 +198,19 @@ describe("Client Authentication API Integration Tests - Real Server", () => {
             authToken = response.body.data.token;
 
             expect(authToken).toBeDefined();
+        });
+
+        it("should verify that the created client exists by phone for the authenticated owner", async () => {
+            const response = await request(API_BASE_URL)
+                .get("/api/clients")
+                .set("Origin", "https://test.example.com")
+                .set("Authorization", `Bearer ${authToken}`)
+                .query({ phone: testPhone });
+
+            expect(response.status).toBe(200);
+            expect(response.body.data.publicData).toHaveProperty("accountEmail", testEmail);
+            expect(response.body.data.publicData).toHaveProperty("accountPhone", testPhone);
+            expect(response.body.data.publicData).toHaveProperty("accountType", "client_account");
         });
     });
 
@@ -363,11 +410,25 @@ describe("Client Authentication API Integration Tests - Real Server", () => {
     });
 
     describe("7. Verify Account After Deletion", () => {
-        it("should confirm client no longer exists after deletion", async () => {
-            const response = await request(API_BASE_URL).get("/api/clients").query({ email: testEmail });
+        it("should confirm the owner no longer has a client record", async () => {
+            const response = await request(API_BASE_URL)
+                .get("/api/clients")
+                .set("Origin", "https://test.example.com")
+                .set("Authorization", `Bearer ${ownerToken}`)
+                .query({ email: testEmail });
             expect(response.status).toBe(404);
-            expect(response.body).toHaveProperty("code", "NotFound");
-            expect(response.body).toHaveProperty("message", "client_not_found");
+            expect(response.body).toHaveProperty("code", "CLIENT_NOT_FOUND");
+            expect(response.body).toHaveProperty("message", "CLIENT_NOT_FOUND");
+            expect(response.body).not.toHaveProperty("data");
+        });
+
+        it("should keep the anonymous response unchanged after deletion", async () => {
+            const response = await request(API_BASE_URL)
+                .get("/api/clients")
+                .set("Origin", "https://test.example.com")
+                .query({ email: testEmail });
+            expect(response.status).toBe(401);
+            expect(response.body).toEqual({ error: "Protected resource, use Authorization header to get access" });
         });
     });
 });

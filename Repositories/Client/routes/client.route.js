@@ -8,7 +8,13 @@ const base = "/clients";
 module.exports = (server) => {
 	const PATH = config.basePath(base);
 
-	// Routes
+	// Lookup is limited to the verified owner, or to a staff / super-admin token.
+	server.get(
+		`${PATH}`,
+		Middleware.verifyClientValidation,
+		Middleware.authorizeClientLookup,
+		Controller.get
+	);
 	server.put(`${PATH}/sync`, Middleware.updateValidation, FaceMiddleware.gate("client-face"), Controller.update);
 	server.put(`${PATH}/sync/password`, Middleware.updatePasswordValidation, FaceMiddleware.gate("client-face"), Controller.updatePassword);
 	server.del(`${PATH}`, Middleware.destroyValidation, Controller.destroy);
