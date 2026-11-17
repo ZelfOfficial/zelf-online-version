@@ -471,10 +471,57 @@ const _publicDataFromKeyvalues = (keyvalues = {}) => {
 	return publicData;
 };
 
+const _applyPinKeyvalues = async (pinId, nextKeyvalues = {}, existingRow = null) => {
+	const existingKeyvalues = existingRow?.metadata?.keyvalues || existingRow?.keyvalues || {};
+	const removals = {};
+
+	for (const key of Object.keys(existingKeyvalues)) {
+		if (!Object.prototype.hasOwnProperty.call(nextKeyvalues, key)) {
+			removals[key] = null;
+		}
+	}
+
+	const removalKeys = Object.keys(removals);
+	const nextKeys = Object.keys(nextKeyvalues);
+
+	if (removalKeys.length > 0 && nextKeys.length + removalKeys.length > 9) {
+		await IPFS.updateFileKeyvalues(pinId, removals);
+		return await IPFS.updateFileKeyvalues(pinId, nextKeyvalues);
+	}
+
+	return await IPFS.updateFileKeyvalues(pinId, { ...nextKeyvalues, ...removals });
+};
+
+const _upsertContinuationPage = async (page, pageIndex, name, pinIt, primaryPinId, authUser) => {
+	const existing = await _findContinuationPinRow(page);
+	if (existing?.id) {
+		if (existing.id !== primaryPinId) {
+			await _applyPinKeyvalues(existing.id, page.keyvalues, existing);
+		}
+		return existing;
+	}
+
+	const placeholder = _continuationPlaceholderBase64(name, pageIndex);
+	const inserted = await insert(
+		{
+			base64: placeholder,
+			name: page.name,
+			metadata: page.keyvalues,
+			pinIt,
+		},
+		authUser
+	);
+
+	if (inserted?.id && inserted.id !== primaryPinId) {
+		await _applyPinKeyvalues(inserted.id, page.keyvalues, inserted);
+	}
+
+	return inserted;
+};
+
 const upsertSearchablePins = async (data, authUser) => {
 	const { base64, reserved, addresses, name, pinIt, existingPrimaryPinId } = data;
 	const addressMap = addresses || extractAddressKeyvaluesFromPublicData(data.addressSource || {});
-	const packedPrimaryKeyvalues = buildUpsertPrimarySearchableKeyvalues(reserved, addressMap);
 	const pages = buildSearchablePinPages({
 		reserved,
 		addresses: addressMap,
@@ -485,62 +532,30 @@ const upsertSearchablePins = async (data, authUser) => {
 	let primaryRow = null;
 
 	if (primaryPinId) {
-		primaryRow = await IPFS.updateFileKeyvalues(existingPrimaryPinId, packedPrimaryKeyvalues);
+		const existingPrimary = await IPFS.getFileById(primaryPinId);
+
+		for (let pageIndex = 0; pageIndex < pages.continuations.length; pageIndex += 1) {
+			await _upsertContinuationPage(pages.continuations[pageIndex], pageIndex, name, pinIt, primaryPinId, authUser);
+		}
+
+		primaryRow = await _applyPinKeyvalues(primaryPinId, pages.primary.keyvalues, existingPrimary);
 		primaryRow = { ...primaryRow, name };
 	} else {
 		const inserted = await insert(
 			{
 				base64,
 				name,
-				metadata: packedPrimaryKeyvalues,
+				metadata: pages.primary.keyvalues,
 				pinIt,
 			},
 			authUser
 		);
 
 		primaryPinId = inserted?.id || null;
-		if (primaryPinId && existingPrimaryPinId && inserted?.id === existingPrimaryPinId) {
-			primaryRow = await IPFS.updateFileKeyvalues(existingPrimaryPinId, packedPrimaryKeyvalues);
-			primaryRow = { ...primaryRow, name };
-		} else {
-			primaryRow = inserted;
-		}
-	}
+		primaryRow = inserted;
 
-	const packedPublic = _publicDataFromKeyvalues(packedPrimaryKeyvalues);
-	const needsContinuationPages = pages.continuations.some((page) =>
-		Object.keys(page.keyvalues).some((key) => {
-			if (key === CONTINUATION_LINK_KEY || key === CONTINUATION_LINK_KEY_2) return false;
-			const appKey = key.endsWith("Address") ? key : null;
-			return appKey && addressMap[appKey] && !packedPublic[appKey];
-		})
-	);
-
-	if (needsContinuationPages) {
 		for (let pageIndex = 0; pageIndex < pages.continuations.length; pageIndex += 1) {
-			const page = pages.continuations[pageIndex];
-			const existing = await _findContinuationPinRow(page);
-			if (existing?.id) {
-				if (existing.id !== primaryPinId) {
-					await IPFS.updateFileKeyvalues(existing.id, page.keyvalues);
-				}
-				continue;
-			}
-
-			const placeholder = _continuationPlaceholderBase64(name, pageIndex);
-			const inserted = await insert(
-				{
-					base64: placeholder,
-					name: page.name,
-					metadata: page.keyvalues,
-					pinIt,
-				},
-				authUser
-			);
-
-			if (inserted?.id && inserted.id !== primaryPinId) {
-				await IPFS.updateFileKeyvalues(inserted.id, page.keyvalues);
-			}
+			await _upsertContinuationPage(pages.continuations[pageIndex], pageIndex, name, pinIt, primaryPinId, authUser);
 		}
 	}
 
