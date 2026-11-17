@@ -1,13 +1,13 @@
 const Module = require("../modules/client.module");
-const { errorHandler } = require("../../../Core/http-handler");
+const { errorHandler, codedError } = require("../../../Core/http-handler");
 
 const get = async (ctx) => {
 	try {
-		const data = await Module.get(ctx.request.params, ctx.state.user);
+		const data = await Module.get(ctx.request.query, ctx.state.user);
 
-		if (!data) throw new Error("404:client_not_found");
+		if (!data) throw codedError("404:CLIENT_NOT_FOUND");
 
-		ctx.body = data;
+		ctx.body = { data };
 	} catch (error) {
 		const _exception = errorHandler(error, ctx);
 

@@ -400,12 +400,19 @@ describe("verifySuperAdmin", () => {
                 .set("Authorization", `Bearer ${token}`);
             expect(listAdminsRes.status).toBe(403);
 
-            // Cannot list all clients
+            // Client lookup is not a blog route. A blog token is rejected before any identifier is read.
             const listClientsRes = await request(app.callback())
                 .get("/api/clients")
+                .query({ email: "someone@example.com" })
                 .set("Authorization", `Bearer ${token}`);
-            expect(listClientsRes.status).toBe(400);
-            expect(listClientsRes.body.code).toBe("CLIENT_IDENTIFIER_REQUIRED");
+            expect(listClientsRes.status).toBe(403);
+            expect(listClientsRes.body.code).toBe("SUPER_ADMIN_ROLE_FORBIDDEN");
+
+            const listClientsNoQueryRes = await request(app.callback())
+                .get("/api/clients")
+                .set("Authorization", `Bearer ${token}`);
+            expect(listClientsNoQueryRes.status).toBe(403);
+            expect(listClientsNoQueryRes.body.code).toBe("SUPER_ADMIN_ROLE_FORBIDDEN");
         });
 
         test("downgrading an admin in MongoDB to role=blog immediately blocks an already-issued super_admin token on non-blog routes", async () => {
@@ -533,6 +540,14 @@ describe("verifySuperAdmin", () => {
                 .set("Authorization", `Bearer ${sessionToken}`);
             expect(listRes.status).toBe(400);
             expect(listRes.body.code).toBe("CLIENT_IDENTIFIER_REQUIRED");
+
+            // A wallet session cannot probe whether an email is registered
+            const probeRes = await request(app.callback())
+                .get("/api/clients")
+                .query({ email: "person@example.com" })
+                .set("Authorization", `Bearer ${sessionToken}`);
+            expect(probeRes.status).toBe(403);
+            expect(probeRes.body.code).toBe("CLIENT_LOOKUP_FORBIDDEN");
 
             // Module methods never return a list when email/phone are omitted
             expect(await ClientModule.get({})).toBeNull();

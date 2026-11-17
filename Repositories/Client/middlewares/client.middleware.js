@@ -1,6 +1,6 @@
 const { string, validate, boolean, number, stringEnum, email } = require("../../../Core/JoiUtils");
 const configuration = require("../../../Core/config");
-const { TOKEN_TYPES, BLOCKED_PRIVILEGE_TYPES } = require("../../../Core/jwt-claims");
+const { TOKEN_TYPES, BLOCKED_PRIVILEGE_TYPES, isBlogOnlySuperAdmin } = require("../../../Core/jwt-claims");
 
 const isClientCaller = (user) => {
 	if (!user || typeof user !== "object") return false;
@@ -36,6 +36,66 @@ const verifyClientValidation = async (ctx, next) => {
 			validationError: "email or phone is required",
 		};
 		return;
+	}
+
+	await next();
+};
+
+const normalizedEmail = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
+
+const normalizedPhone = (value) => (typeof value === "string" ? value.trim() : "");
+
+const sessionEmails = (user) => [user?.email, user?.staffEmail].map(normalizedEmail).filter(Boolean);
+
+const sessionPhones = (user) => [user?.phone, user?.staffPhone].map(normalizedPhone).filter(Boolean);
+
+/**
+ * Staff and full super-admins may look up any client.
+ * A client token may look up only the email or phone carried on that token.
+ */
+const canLookupClient = (user, email, phone) => {
+	if (!user || typeof user !== "object") return false;
+	if (isBlogOnlySuperAdmin(user)) return false;
+
+	if (user.typ === TOKEN_TYPES.superAdmin || user.typ === TOKEN_TYPES.staff) return true;
+
+	if (!isClientCaller(user)) return false;
+
+	const emails = sessionEmails(user);
+	const phones = sessionPhones(user);
+
+	if (email && !emails.includes(normalizedEmail(email))) return false;
+	if (phone && !phones.includes(normalizedPhone(phone))) return false;
+
+	return Boolean(email || phone);
+};
+
+const authorizeClientLookup = async (ctx, next) => {
+	const query = ctx.request?.query || ctx.query || {};
+	const email = normalizedEmail(query.email);
+	const phone = normalizedPhone(query.phone);
+	const user = ctx.state?.user;
+
+	if (!canLookupClient(user, email, phone)) {
+		ctx.status = 403;
+		ctx.body = {
+			error: "CLIENT_LOOKUP_FORBIDDEN",
+			code: "CLIENT_LOOKUP_FORBIDDEN",
+		};
+		return;
+	}
+
+	// Client lookups use the identifier from the verified token, not a caller-supplied variant.
+	if (isClientCaller(user)) {
+		const query = ctx.request?.query || ctx.query;
+		if (query && email) {
+			const exactEmail = [user.email, user.staffEmail].find((value) => normalizedEmail(value) === email);
+			if (exactEmail) query.email = exactEmail.trim();
+		}
+		if (query && phone) {
+			const exactPhone = [user.phone, user.staffPhone].find((value) => normalizedPhone(value) === phone);
+			if (exactPhone) query.phone = exactPhone.trim();
+		}
 	}
 
 	await next();
@@ -223,6 +283,8 @@ const updatePasswordValidation = async (ctx, next) => {
 
 module.exports = {
 	verifyClientValidation,
+	authorizeClientLookup,
+	canLookupClient,
 	isClientCaller,
 	getValidation,
 	showValidation,
