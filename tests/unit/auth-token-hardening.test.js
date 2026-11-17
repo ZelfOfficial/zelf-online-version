@@ -1,3 +1,6 @@
+// stellar-hd-wallet is ESM and cannot load under Jest; the controllers only need it at runtime.
+jest.mock("../../Repositories/Wallet/modules/stellar", () => ({ createStellarWallet: jest.fn(), healPublicDataXlm: jest.fn() }));
+
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const moment = require("moment");
@@ -8,12 +11,20 @@ const koaJwt = require("koa-jwt");
 const { MongoMemoryServer } = require("mongodb-memory-server");
 
 const config = require("../../Core/config");
-const { signToken, acceptAccessToken, TOKEN_TYPES } = require("../../Core/jwt-claims");
-const { verifySuperAdmin } = require("../../Repositories/SuperAdmin/middlewares/verify-super-admin.middleware");
+const { createBodyParser } = require("../../Core/request-body");
+const { signToken, acceptAccessToken, TOKEN_TYPES, SUPER_ADMIN_ROLES } = require("../../Core/jwt-claims");
+const { verifySuperAdmin, verifyBlogSuperAdmin } = require("../../Repositories/SuperAdmin/middlewares/verify-super-admin.middleware");
 const BlogMiddleware = require("../../Repositories/Blogs/middlewares/blog.middleware");
+const BlogModel = require("../../Repositories/Blogs/models/blog.model");
 const SubscriberMiddleware = require("../../Repositories/Subscribers/middlewares/subscriber.middleware");
 const SuperAdmin = require("../../Repositories/SuperAdmin/models/super-admin.model");
 const SuperAdminModule = require("../../Repositories/SuperAdmin/modules/super-admin.module");
+const ClientMiddleware = require("../../Repositories/Client/middlewares/client.middleware");
+const ClientModule = require("../../Repositories/Client/modules/client.module");
+const StaffModule = require("../../Repositories/Staff/modules/staff.module");
+const LawyerModule = require("../../Repositories/Lawyer/modules/lawyer.module");
+const WalletMiddleware = require("../../Repositories/Wallet/middlewares/wallet.middleware");
+const WalletModule = require("../../Repositories/Wallet/modules/wallet.module");
 const { assertSuperAdminOtpRateLimit, _resetSuperAdminOtpRateLimit } = require("../../Repositories/SuperAdmin/modules/super-admin-otp-rate-limit.module");
 
 const secret = config.JWT_SECRET || "test-jwt-secret-key-for-testing-only";
@@ -238,5 +249,383 @@ describe("verifySuperAdmin", () => {
         const stored = await SuperAdmin.findById(admin._id);
         expect(stored.otp).toBeFalsy();
         expect(stored.otpExpiration).toBeFalsy();
+    });
+
+    describe("blog-role super-admin restrictions", () => {
+        const buildProtectedTestApp = () => {
+            const app = new Koa();
+            app.use(createBodyParser());
+            app.use(async (ctx, next) => {
+                try {
+                    await next();
+                } catch (err) {
+                    if (err.status === 401) {
+                        ctx.status = 401;
+                        ctx.body = { error: "Protected resource, use Authorization header to get access" };
+                        return;
+                    }
+                    throw err;
+                }
+            });
+
+            // Unprotected routes (e.g. /api/super-admins, /api/clients, public /api/blogs)
+            const unprotectedRouter = new Router();
+            require("../../Repositories/SuperAdmin/routes/super-admin.route")(unprotectedRouter);
+            require("../../Repositories/Client/routes/unprotected-client.route")(unprotectedRouter);
+            require("../../Repositories/Blogs/routes/blog-public.routes")(unprotectedRouter);
+            app.use(unprotectedRouter.routes());
+
+            // JWT + acceptAccessToken gate (same order as server.js)
+            app.use(koaJwt({ secret: config.JWT_SECRET }));
+            app.use(acceptAccessToken);
+
+            const protectedRouter = new Router();
+            require("../../Repositories/Blogs/routes/blog-protected.routes")(protectedRouter);
+            require("../../Repositories/Articles/routes/article.route")(protectedRouter);
+            require("../../Repositories/ZelfID/routes/zelf-ids-coupons.routes")(protectedRouter);
+            require("../../Repositories/Tags/routes/tags.routes")(protectedRouter);
+            require("../../Repositories/ZelfNameService/routes/zns.routes")(protectedRouter);
+            require("../../Repositories/IPFS/routes/ipfs.routes")(protectedRouter);
+            require("../../Repositories/Client/routes/client.route")(protectedRouter);
+            require("../../Repositories/Staff/routes/staff.route")(protectedRouter);
+            require("../../Repositories/Lawyer/routes/lawyer.routes")(protectedRouter);
+            require("../../Repositories/Wallet/routes/wallet.route")(protectedRouter);
+            app.use(protectedRouter.routes());
+            return app;
+        };
+
+        test("a blog-role super-admin can create, update, and delete blogs", async () => {
+            const app = buildProtectedTestApp();
+            const blogAdmin = await createAdmin({ role: SUPER_ADMIN_ROLES.blog });
+            const token = SuperAdminModule.signSuperAdminToken(blogAdmin);
+
+            const decoded = jwt.verify(token, config.JWT_SECRET);
+            expect(decoded.role).toBe("blog");
+
+            const slug = `security-test-post-${Date.now()}`;
+            const createRes = await request(app.callback())
+                .post("/api/blogs")
+                .set("Authorization", `Bearer ${token}`)
+                .send({
+                    slug,
+                    title: "Security Hardening Post",
+                    description: "Testing blog role permissions",
+                    markdownContent: "# Hello World",
+                    locale: "en",
+                    published: false,
+                });
+
+            expect(createRes.status).toBe(200);
+            expect(createRes.body.data).toBeDefined();
+            expect(createRes.body.data.slug).toBe(slug);
+            const blogId = createRes.body.data._id;
+
+            const updateRes = await request(app.callback())
+                .put(`/api/blogs/${blogId}`)
+                .set("Authorization", `Bearer ${token}`)
+                .send({
+                    title: "Updated Security Hardening Post",
+                });
+
+            expect(updateRes.status).toBe(200);
+            expect(updateRes.body.data.title).toBe("Updated Security Hardening Post");
+
+            const deleteRes = await request(app.callback())
+                .delete(`/api/blogs/${blogId}`)
+                .set("Authorization", `Bearer ${token}`);
+
+            expect(deleteRes.status).toBe(200);
+            expect(await BlogModel.findById(blogId)).toBeNull();
+        });
+
+        test("a blog-role super-admin is blocked from all non-blog super-admin and protected routes", async () => {
+            const app = buildProtectedTestApp();
+            const blogAdmin = await createAdmin({ role: SUPER_ADMIN_ROLES.blog });
+            const token = SuperAdminModule.signSuperAdminToken(blogAdmin);
+
+            // Cannot create or send articles
+            const articleRes = await request(app.callback())
+                .post("/api/articles")
+                .set("Authorization", `Bearer ${token}`)
+                .send({ slug: "blocked-article", title: "Blocked", markdownContent: "No" });
+            expect(articleRes.status).toBe(403);
+            expect(articleRes.body.code).toBe("SUPER_ADMIN_ROLE_FORBIDDEN");
+
+            const sendAllRes = await request(app.callback())
+                .post("/api/articles/blocked-article/send-all")
+                .set("Authorization", `Bearer ${token}`)
+                .send({});
+            expect(sendAllRes.status).toBe(403);
+            expect(sendAllRes.body.code).toBe("SUPER_ADMIN_ROLE_FORBIDDEN");
+
+            // Cannot list, create, or deactivate Zelf ID coupons
+            const couponListRes = await request(app.callback())
+                .get("/api/zelf-ids/coupons")
+                .set("Authorization", `Bearer ${token}`);
+            expect(couponListRes.status).toBe(403);
+            expect(couponListRes.body.code).toBe("SUPER_ADMIN_ROLE_FORBIDDEN");
+
+            const couponCreateRes = await request(app.callback())
+                .post("/api/zelf-ids/coupons")
+                .set("Authorization", `Bearer ${token}`)
+                .send({ code: "HACK100", percentOff: 100, plans: ["premium"], maxRedemptions: 10 });
+            expect(couponCreateRes.status).toBe(403);
+            expect(couponCreateRes.body.code).toBe("SUPER_ADMIN_ROLE_FORBIDDEN");
+
+            // Cannot trigger referral or purchase rewards
+            const tagRewardRes = await request(app.callback())
+                .post("/api/tags/referral-rewards")
+                .set("Authorization", `Bearer ${token}`)
+                .send({});
+            expect(tagRewardRes.status).toBe(403);
+            expect(tagRewardRes.body.code).toBe("SUPER_ADMIN_ROLE_FORBIDDEN");
+
+            const znsRewardRes = await request(app.callback())
+                .post("/api/zelf-name-service/referral-rewards")
+                .set("Authorization", `Bearer ${token}`)
+                .send({});
+            expect(znsRewardRes.status).toBe(403);
+            expect(znsRewardRes.body.code).toBe("SUPER_ADMIN_ROLE_FORBIDDEN");
+
+            // Cannot query /api/ipfs, /api/staff, /api/lawyers, /api/my-wallets, /api/clients/sync
+            for (const path of ["/api/ipfs", "/api/staff", "/api/lawyers", "/api/lawyers/all", "/api/lawyers/invitations", "/api/my-wallets"]) {
+                const res = await request(app.callback()).get(path).set("Authorization", `Bearer ${token}`);
+                expect(res.status).toBe(403);
+                expect(res.body.code).toBe("SUPER_ADMIN_ROLE_FORBIDDEN");
+            }
+
+            // Cannot list or create super-admins
+            const listAdminsRes = await request(app.callback())
+                .get("/api/super-admins")
+                .set("Authorization", `Bearer ${token}`);
+            expect(listAdminsRes.status).toBe(403);
+
+            // Cannot list all clients
+            const listClientsRes = await request(app.callback())
+                .get("/api/clients")
+                .set("Authorization", `Bearer ${token}`);
+            expect(listClientsRes.status).toBe(400);
+            expect(listClientsRes.body.code).toBe("CLIENT_IDENTIFIER_REQUIRED");
+        });
+
+        test("downgrading an admin in MongoDB to role=blog immediately blocks an already-issued super_admin token on non-blog routes", async () => {
+            const admin = await createAdmin({ role: SUPER_ADMIN_ROLES.superAdmin });
+            const legacyFullToken = adminToken(admin); // signed before role downgrade
+
+            await SuperAdmin.findByIdAndUpdate(admin._id, { role: SUPER_ADMIN_ROLES.blog });
+
+            const nonBlogNext = jest.fn();
+            const nonBlogCtx = { headers: { authorization: `Bearer ${legacyFullToken}` }, state: {}, status: 200 };
+            await verifySuperAdmin(nonBlogCtx, nonBlogNext);
+            expect(nonBlogCtx.status).toBe(403);
+            expect(nonBlogCtx.body.code).toBe("SUPER_ADMIN_ROLE_FORBIDDEN");
+            expect(nonBlogNext).not.toHaveBeenCalled();
+
+            const blogNext = jest.fn();
+            const blogCtx = { headers: { authorization: `Bearer ${legacyFullToken}` }, state: {}, status: 200 };
+            await verifyBlogSuperAdmin(blogCtx, blogNext);
+            expect(blogNext).toHaveBeenCalledTimes(1);
+            expect(blogCtx.state.user.role).toBe("blog");
+        });
+
+        test("verifyOtp with role=blog issues a blog-only token even for a full super_admin account", async () => {
+            const admin = await createAdmin({ role: SUPER_ADMIN_ROLES.superAdmin });
+            admin.otp = "654321";
+            admin.otpExpiration = moment().add(10, "minutes").toDate();
+            admin.otpAttempts = 0;
+            await admin.save();
+
+            const result = await SuperAdminModule.verifyOtp({
+                email: admin.email,
+                code: "654321",
+                role: "blog",
+            });
+
+            expect(result.role).toBe("blog");
+            const decoded = jwt.verify(result.token, config.JWT_SECRET);
+            expect(decoded.role).toBe("blog");
+
+            // Cannot pass verifySuperAdmin (non-blog routes)
+            const nonBlogNext = jest.fn();
+            const nonBlogCtx = { headers: { authorization: `Bearer ${result.token}` }, state: {}, status: 200 };
+            await verifySuperAdmin(nonBlogCtx, nonBlogNext);
+            expect(nonBlogCtx.status).toBe(403);
+            expect(nonBlogCtx.body.code).toBe("SUPER_ADMIN_ROLE_FORBIDDEN");
+            expect(nonBlogNext).not.toHaveBeenCalled();
+
+            // Can pass verifyBlogSuperAdmin (blog routes)
+            const blogNext = jest.fn();
+            const blogCtx = { headers: { authorization: `Bearer ${result.token}` }, state: {}, status: 200 };
+            await verifyBlogSuperAdmin(blogCtx, blogNext);
+            expect(blogNext).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe("normal wallet session tokens cannot access admin, client, staff, lawyer, or wallet lists", () => {
+        const mintSessionToken = (claims = {}) =>
+            signToken(
+                {
+                    identifier: "wallet-device-1",
+                    session: new mongoose.Types.ObjectId().toString(),
+                    tagName: "user.zelf",
+                    ...claims,
+                },
+                config.JWT_SECRET,
+                { typ: TOKEN_TYPES.session, expiresIn: "30m" }
+            );
+
+        test("session token cannot list, view, create, or delete super-admins", async () => {
+            const app = new Koa();
+            app.use(createBodyParser());
+            const router = new Router();
+            require("../../Repositories/SuperAdmin/routes/super-admin.route")(router);
+            app.use(router.routes());
+
+            const sessionToken = mintSessionToken();
+
+            const listRes = await request(app.callback())
+                .get("/api/super-admins")
+                .set("Authorization", `Bearer ${sessionToken}`);
+            expect(listRes.status).toBe(403);
+            expect(listRes.body.code).toBe("SUPER_ADMIN_SECRET_REQUIRED");
+
+            const showRes = await request(app.callback())
+                .get(`/api/super-admins/${new mongoose.Types.ObjectId().toString()}`)
+                .set("Authorization", `Bearer ${sessionToken}`);
+            expect(showRes.status).toBe(403);
+            expect(showRes.body.code).toBe("SUPER_ADMIN_SECRET_REQUIRED");
+
+            const createRes = await request(app.callback())
+                .post("/api/super-admins")
+                .set("Authorization", `Bearer ${sessionToken}`)
+                .send({
+                    name: "Attacker",
+                    countryCode: "+1",
+                    phone: "5551234567",
+                    email: "attacker@example.com",
+                });
+            expect(createRes.status).toBe(403);
+            expect(createRes.body.code).toBe("SUPER_ADMIN_SECRET_REQUIRED");
+
+            const deleteRes = await request(app.callback())
+                .delete(`/api/super-admins/${new mongoose.Types.ObjectId().toString()}`)
+                .set("Authorization", `Bearer ${sessionToken}`);
+            expect(deleteRes.status).toBe(403);
+            expect(deleteRes.body.code).toBe("SUPER_ADMIN_SECRET_REQUIRED");
+        });
+
+        test("session token cannot list all clients or mutate client accounts", async () => {
+            const sessionToken = mintSessionToken();
+            const app = new Koa();
+            app.use(createBodyParser());
+            const unprotectedRouter = new Router();
+            require("../../Repositories/Client/routes/unprotected-client.route")(unprotectedRouter);
+            app.use(unprotectedRouter.routes());
+            app.use(koaJwt({ secret: config.JWT_SECRET }));
+            app.use(acceptAccessToken);
+            const protectedRouter = new Router();
+            require("../../Repositories/Client/routes/client.route")(protectedRouter);
+            app.use(protectedRouter.routes());
+
+            // Unfiltered GET /api/clients is rejected (400)
+            const listRes = await request(app.callback())
+                .get("/api/clients")
+                .set("Authorization", `Bearer ${sessionToken}`);
+            expect(listRes.status).toBe(400);
+            expect(listRes.body.code).toBe("CLIENT_IDENTIFIER_REQUIRED");
+
+            // Module methods never return a list when email/phone are omitted
+            expect(await ClientModule.get({})).toBeNull();
+            expect(await ClientModule.show({})).toBeNull();
+
+            // Mutating client endpoints reject session tokens (403)
+            const syncRes = await request(app.callback())
+                .put("/api/clients/sync")
+                .set("Authorization", `Bearer ${sessionToken}`)
+                .send({ faceBase64: "abc", masterPassword: "pass" });
+            expect(syncRes.status).toBe(403);
+            expect(syncRes.body.code).toBe("CLIENT_AUTH_REQUIRED");
+
+            const deleteRes = await request(app.callback())
+                .delete("/api/clients")
+                .set("Authorization", `Bearer ${sessionToken}`)
+                .send({});
+            expect(deleteRes.status).toBe(403);
+            expect(deleteRes.body.code).toBe("CLIENT_AUTH_REQUIRED");
+        });
+
+        test("session token cannot list staff, lawyers, lawyer invitations, or wallets", async () => {
+            const sessionUser = {
+                identifier: "wallet-device-1",
+                session: new mongoose.Types.ObjectId().toString(),
+                tagName: "user.zelf",
+                typ: TOKEN_TYPES.session,
+                exp: moment().add(30, "minutes").unix(),
+            };
+
+            await expect(StaffModule.get({}, sessionUser)).rejects.toMatchObject({
+                status: 403,
+                code: "FORBIDDEN",
+            });
+
+            await expect(LawyerModule.get({}, sessionUser)).rejects.toMatchObject({
+                status: 403,
+                code: "FORBIDDEN",
+            });
+
+            await expect(LawyerModule.getAll({}, sessionUser)).rejects.toMatchObject({
+                status: 403,
+                code: "FORBIDDEN",
+            });
+
+            await expect(LawyerModule.getInvitations({}, sessionUser)).rejects.toMatchObject({
+                status: 403,
+                code: "FORBIDDEN",
+            });
+
+            const walletNext = jest.fn();
+            const walletCtx = { state: { user: sessionUser }, status: 200 };
+            await WalletMiddleware.getValidation(walletCtx, walletNext);
+            expect(walletCtx.status).toBe(403);
+            expect(walletCtx.body.code).toBe("FORBIDDEN");
+            expect(walletNext).not.toHaveBeenCalled();
+
+            await expect(WalletModule.get({}, sessionUser)).rejects.toMatchObject({
+                status: 403,
+                code: "FORBIDDEN",
+            });
+        });
+
+        test("session token cannot create, update, or delete blogs", async () => {
+            const app = new Koa();
+            app.use(createBodyParser());
+            app.use(koaJwt({ secret: config.JWT_SECRET }));
+            app.use(acceptAccessToken);
+            const router = new Router();
+            require("../../Repositories/Blogs/routes/blog-protected.routes")(router);
+            app.use(router.routes());
+
+            const sessionToken = mintSessionToken();
+
+            const createRes = await request(app.callback())
+                .post("/api/blogs")
+                .set("Authorization", `Bearer ${sessionToken}`)
+                .send({ slug: "hack", title: "Hack", markdownContent: "No" });
+            expect(createRes.status).toBe(403);
+            expect(createRes.body.code).toBe("SUPER_ADMIN_REQUIRED");
+
+            const updateRes = await request(app.callback())
+                .put(`/api/blogs/${new mongoose.Types.ObjectId().toString()}`)
+                .set("Authorization", `Bearer ${sessionToken}`)
+                .send({ title: "Hack" });
+            expect(updateRes.status).toBe(403);
+            expect(updateRes.body.code).toBe("SUPER_ADMIN_REQUIRED");
+
+            const deleteRes = await request(app.callback())
+                .delete(`/api/blogs/${new mongoose.Types.ObjectId().toString()}`)
+                .set("Authorization", `Bearer ${sessionToken}`);
+            expect(deleteRes.status).toBe(403);
+            expect(deleteRes.body.code).toBe("SUPER_ADMIN_REQUIRED");
+        });
     });
 });

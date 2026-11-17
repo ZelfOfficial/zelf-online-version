@@ -20,5 +20,5 @@ module.exports = (server) => {
 	
 	server.post(`${PATH}/verify-otp`, Middleware.verifyOtpValidation, Controller.verifyOtp);
 
-	server.del(`${PATH}/${primaryKey}`, Middleware.destroyValidation, Controller.destroy);
+	server.del(`${PATH}/:${primaryKey}`, Middleware.destroyValidation, Controller.destroy);
 };

@@ -1,5 +1,45 @@
 const { string, validate, boolean, number, stringEnum, email } = require("../../../Core/JoiUtils");
 const configuration = require("../../../Core/config");
+const { TOKEN_TYPES, BLOCKED_PRIVILEGE_TYPES } = require("../../../Core/jwt-claims");
+
+const isClientCaller = (user) => {
+	if (!user || typeof user !== "object") return false;
+	if (BLOCKED_PRIVILEGE_TYPES.has(user.typ)) return false;
+	if (
+		user.typ === TOKEN_TYPES.session ||
+		user.typ === TOKEN_TYPES.superAdmin ||
+		user.typ === TOKEN_TYPES.staff ||
+		user.typ === TOKEN_TYPES.lawyer ||
+		user.typ === TOKEN_TYPES.duration
+	) {
+		return false;
+	}
+	const callerEmail = typeof user.email === "string" ? user.email.trim() : "";
+	if (!callerEmail) return false;
+	return user.typ === TOKEN_TYPES.client || (!user.typ && Number.isFinite(user.exp));
+};
+
+const verifyClientValidation = async (ctx, next) => {
+	const query = ctx.request?.query || ctx.query || {};
+	const emailParam = typeof query.email === "string" ? query.email.trim() : "";
+	const phoneParam = typeof query.phone === "string" ? query.phone.trim() : "";
+
+	if (
+		(query.email !== undefined && typeof query.email !== "string") ||
+		(query.phone !== undefined && typeof query.phone !== "string") ||
+		(!emailParam && !phoneParam)
+	) {
+		ctx.status = 400;
+		ctx.body = {
+			error: "CLIENT_IDENTIFIER_REQUIRED",
+			code: "CLIENT_IDENTIFIER_REQUIRED",
+			validationError: "email or phone is required",
+		};
+		return;
+	}
+
+	await next();
+};
 
 const schemas = {
 	get: {},
@@ -95,6 +135,12 @@ const createValidation = async (ctx, next) => {
 };
 
 const destroyValidation = async (ctx, next) => {
+	if (!isClientCaller(ctx.state?.user)) {
+		ctx.status = 403;
+		ctx.body = { error: "CLIENT_AUTH_REQUIRED", code: "CLIENT_AUTH_REQUIRED" };
+		return;
+	}
+
 	const valid = validate(schemas.destroy, ctx.request.body);
 
 	if (valid.error) {
@@ -109,6 +155,12 @@ const destroyValidation = async (ctx, next) => {
 };
 
 const updateValidation = async (ctx, next) => {
+	if (!isClientCaller(ctx.state?.user)) {
+		ctx.status = 403;
+		ctx.body = { error: "CLIENT_AUTH_REQUIRED", code: "CLIENT_AUTH_REQUIRED" };
+		return;
+	}
+
 	const valid = validate(schemas.update, ctx.request.body);
 
 	if (valid.error) {
@@ -137,6 +189,12 @@ const authValidation = async (ctx, next) => {
 };
 
 const updatePasswordValidation = async (ctx, next) => {
+	if (!isClientCaller(ctx.state?.user)) {
+		ctx.status = 403;
+		ctx.body = { error: "CLIENT_AUTH_REQUIRED", code: "CLIENT_AUTH_REQUIRED" };
+		return;
+	}
+
 	const valid = validate(schemas.updatePassword, ctx.request.body);
 
 	if (valid.error) {
@@ -164,6 +222,8 @@ const updatePasswordValidation = async (ctx, next) => {
 };
 
 module.exports = {
+	verifyClientValidation,
+	isClientCaller,
 	getValidation,
 	showValidation,
 	createValidation,

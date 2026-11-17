@@ -18,6 +18,7 @@ const { requiredEnumField, optionalEnumField, requiredField, refField, defaultFi
 const SuperAdminSchema = new Schema({
     name: requiredField(String),
     status: requiredEnumField(String, ["invited", "joined", "banned", "inactive"], "joined"),
+    role: requiredEnumField(String, ["super_admin", "blog"], "super_admin"),
     avatar: defaultField(String, null),
     countryCode: {
         type: String,

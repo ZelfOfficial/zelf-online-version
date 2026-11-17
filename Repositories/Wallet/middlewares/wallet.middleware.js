@@ -49,6 +49,13 @@ const schemas = {
  * @param {*} next
  */
 const getValidation = async (ctx, next) => {
+	const clientId = ctx.state?.user?.clientId;
+	if (!clientId) {
+		ctx.status = 403;
+		ctx.body = { error: "FORBIDDEN", code: "FORBIDDEN", validationError: "Access forbidden. contact us for a valid API Key" };
+		return;
+	}
+
 	await next();
 };
 
@@ -59,6 +66,13 @@ const getValidation = async (ctx, next) => {
  * @param {*} next
  */
 const showValidation = async (ctx, next) => {
+	const clientId = ctx.state?.user?.clientId;
+	if (!clientId) {
+		ctx.status = 403;
+		ctx.body = { error: "FORBIDDEN", code: "FORBIDDEN", validationError: "Access forbidden. contact us for a valid API Key" };
+		return;
+	}
+
 	await next();
 };
 

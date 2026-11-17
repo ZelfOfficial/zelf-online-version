@@ -135,17 +135,11 @@ describe("Client Authentication API Integration Tests - Real Server", () => {
             expect(response.body).toHaveProperty("message", "client_not_found");
         });
 
-        it("should return all clients when no parameters provided", async () => {
+        it("should reject listing all clients when no parameters are provided", async () => {
             const response = await request(API_BASE_URL).get("/api/clients");
 
-            expect(response.status).toBe(200);
-            expect(response.body).toHaveProperty("data");
-            expect(response.body.data).toHaveProperty("data");
-            expect(response.body.data).toHaveProperty("pagination");
-            expect(Array.isArray(response.body.data.data)).toBe(true);
-            expect(response.body.data.pagination).toHaveProperty("total");
-            expect(response.body.data.pagination).toHaveProperty("page");
-            expect(response.body.data.pagination).toHaveProperty("limit");
+            expect(response.status).toBe(400);
+            expect(response.body).toHaveProperty("code", "CLIENT_IDENTIFIER_REQUIRED");
         });
     });
 

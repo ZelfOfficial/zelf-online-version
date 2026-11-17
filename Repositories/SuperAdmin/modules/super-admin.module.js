@@ -2,12 +2,28 @@ const Model = require("../models/super-admin.model");
 const MongoORM = require("../../../Core/mongo-orm");
 const crypto = require("crypto");
 const config = require("../../../Core/config");
-const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
+const { signToken, TOKEN_TYPES, SUPER_ADMIN_ROLES, normalizeSuperAdminRole } = require("../../../Core/jwt-claims");
 const moment = require("moment");
 const Mailgun = require("../../../Core/mailgun");
 
 const OTP_MAX_ATTEMPTS = 5;
 const SUPER_ADMIN_TOKEN_HOURS = 12;
+
+const SENSITIVE_FIELDS = ["apiKey", "otp", "otpExpiration", "otpAttempts", "secretKey", "JWTPhrase"];
+
+const sanitizeSuperAdmin = (record) => {
+    if (!record) return record;
+    const raw = typeof record.toObject === "function" ? record.toObject() : { ...(record._doc || record) };
+    for (const key of SENSITIVE_FIELDS) {
+        delete raw[key];
+    }
+    return raw;
+};
+
+const isInactive = (superAdmin) => {
+    if (!superAdmin) return true;
+    return superAdmin.disabled === true || superAdmin.active === false || superAdmin.status === "banned" || superAdmin.status === "inactive";
+};
 
 const generateOtp = () => {
     return Math.floor(100000 + Math.random() * 900000).toString();
@@ -20,25 +36,44 @@ const authError = (status, code) => {
     return error;
 };
 
-const signSuperAdminToken = (superAdmin) =>
-    signToken(
+const resolveIssuedRole = (superAdmin, requestedRole) => {
+    const adminRole = normalizeSuperAdminRole(superAdmin?.role);
+    const reqRole = requestedRole ? normalizeSuperAdminRole(requestedRole) : adminRole;
+    if (adminRole === SUPER_ADMIN_ROLES.blog || reqRole === SUPER_ADMIN_ROLES.blog) {
+        return SUPER_ADMIN_ROLES.blog;
+    }
+    return SUPER_ADMIN_ROLES.superAdmin;
+};
+
+const signSuperAdminToken = (superAdmin, options = {}) => {
+    const role = resolveIssuedRole(superAdmin, options.role || options.scope);
+    return signToken(
         {
             tokenVersion: Number(superAdmin.tokenVersion || 0),
+            role,
             exp: moment().add(SUPER_ADMIN_TOKEN_HOURS, "hours").unix(),
         },
         config.JWT_SECRET,
         {
             typ: TOKEN_TYPES.superAdmin,
             superAdminId: superAdmin._id,
+            role,
         }
     );
+};
 
-const get = async (params = {}, authUser = {}) => {
+const get = async (params = {}, authUser = {}, options = {}) => {
     const queryParams = {
         ...params,
     };
 
-    return await MongoORM.buildQuery(queryParams, Model, null, []);
+    const result = await MongoORM.buildQuery(queryParams, Model, null, []);
+    if (options.raw) return result;
+    if (Array.isArray(result)) return result.map(sanitizeSuperAdmin);
+    if (result && Array.isArray(result.docs)) {
+        return { ...result, docs: result.docs.map(sanitizeSuperAdmin) };
+    }
+    return sanitizeSuperAdmin(result);
 };
 
 const show = async (params = {}, authUser = {}) => {
@@ -55,7 +90,8 @@ const show = async (params = {}, authUser = {}) => {
         queryParams.where__id = authUser.superAdminId;
     }
 
-    return await MongoORM.buildQuery(queryParams, Model, null, populates);
+    const result = await MongoORM.buildQuery(queryParams, Model, null, []);
+    return sanitizeSuperAdmin(result);
 };
 
 const create = async (data, authUser) => {
@@ -64,6 +100,7 @@ const create = async (data, authUser) => {
     const superAdmin = new Model({
         name: data.name || "NA",
         status: data.status || "joined",
+        role: normalizeSuperAdminRole(data.role),
         avatar: data.avatar || null,
         countryCode: data.countryCode,
         phone: data.phone,
@@ -75,7 +112,7 @@ const create = async (data, authUser) => {
     await superAdmin.save();
 
     return {
-        ...superAdmin._doc,
+        ...sanitizeSuperAdmin(superAdmin),
         apiKey,
     };
 };
@@ -87,14 +124,18 @@ const destroy = async (data, authUser) => {};
 const auth = async (data, authUser) => {
     const { apiKey, email } = data;
 
-    const superAdmin = await get({
-        where_email: email,
-        findOne: true,
-    });
+    const superAdmin = await get(
+        {
+            where_email: email,
+            findOne: true,
+        },
+        {},
+        { raw: true }
+    );
 
     if (!superAdmin) throw authError(404, "SUPER_ADMIN_NOT_FOUND");
 
-    if (superAdmin.disabled === true || superAdmin.active === false || superAdmin.status === "banned" || superAdmin.status === "inactive") {
+    if (isInactive(superAdmin)) {
         throw authError(403, "SUPER_ADMIN_INACTIVE");
     }
 
@@ -102,20 +143,27 @@ const auth = async (data, authUser) => {
 
     if (!isKeyValid) throw authError(403, "SUPER_ADMIN_FORBIDDEN");
 
+    const role = resolveIssuedRole(superAdmin, data.role || data.scope);
+
     return {
-        token: signSuperAdminToken(superAdmin),
+        token: signSuperAdminToken(superAdmin, { role }),
+        role,
     };
 };
 
 const requestOtp = async (data) => {
     const { email } = data;
 
-    const superAdmin = await get({
-        where_email: email,
-        findOne: true,
-    });
+    const superAdmin = await get(
+        {
+            where_email: email,
+            findOne: true,
+        },
+        {},
+        { raw: true }
+    );
 
-    if (!superAdmin) {
+    if (!superAdmin || isInactive(superAdmin)) {
         // Do not leak existence, just return success
         return { message: "If this email is a super admin, an OTP has been sent." };
     }
@@ -130,12 +178,6 @@ const requestOtp = async (data) => {
 
     await superAdmin.save();
 
-    // Sending email
-    // Try creating a custom email. If a template doesn't exist, we fallback. We'll use a mocked EJS map or raw send.
-    // Since we don't know if 'super-admin-otp' EJS template exists, we'll try sendCustomEmail.
-    // If the template is missing, wait: we'll use sendCustomEmail with a generic 'otp_template' if it exists in the system or just use mailgun directly.
-    // We can use a template like 'auth_code' assuming one exists.
-    // For safety, let's pass an object that matches standard code emails.
     await Mailgun.sendCustomEmail(
         email,
         "otp",
@@ -157,12 +199,25 @@ const requestOtp = async (data) => {
 const verifyOtp = async (data) => {
     const { email, code } = data;
 
-    const superAdmin = await get({
-        where_email: email,
-        findOne: true,
-    });
+    const superAdmin = await get(
+        {
+            where_email: email,
+            findOne: true,
+        },
+        {},
+        { raw: true }
+    );
 
     if (!superAdmin) throw authError(401, "INVALID_EMAIL_OR_CODE");
+
+    if (isInactive(superAdmin)) {
+        superAdmin.otp = undefined;
+        superAdmin.otpExpiration = undefined;
+        superAdmin.otpAttempts = 0;
+        await superAdmin.save();
+        throw authError(403, "SUPER_ADMIN_INACTIVE");
+    }
+
     if (!superAdmin.otp || !superAdmin.otpExpiration) throw authError(401, "INVALID_EMAIL_OR_CODE");
 
     if (moment().isAfter(moment(superAdmin.otpExpiration))) {
@@ -196,8 +251,11 @@ const verifyOtp = async (data) => {
     superAdmin.otpAttempts = 0;
     await superAdmin.save();
 
+    const role = resolveIssuedRole(superAdmin, data.role || data.scope);
+
     return {
-        token: signSuperAdminToken(superAdmin),
+        token: signSuperAdminToken(superAdmin, { role }),
+        role,
     };
 };
 
@@ -210,6 +268,9 @@ module.exports = {
     auth,
     requestOtp,
     verifyOtp,
+    signSuperAdminToken,
+    resolveIssuedRole,
+    sanitizeSuperAdmin,
     OTP_MAX_ATTEMPTS,
     SUPER_ADMIN_TOKEN_HOURS,
 };

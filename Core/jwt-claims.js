@@ -4,7 +4,7 @@ const jwt = require("jsonwebtoken");
  * Claims a caller must not be able to smuggle into a signed payload.
  * Privileged ids are assigned only through signToken options.
  */
-const STRIPPED_CLAIMS = ["superAdminId", "staffId", "typ"];
+const STRIPPED_CLAIMS = ["superAdminId", "superAdminRole", "staffId", "typ"];
 
 const TOKEN_TYPES = {
     session: "session",
@@ -20,6 +20,31 @@ const TOKEN_TYPES = {
     staffInvitation: "staff_invitation",
     lawyerInvitation: "lawyer_invitation",
     vaultLegacy: "vault_legacy",
+};
+
+const SUPER_ADMIN_ROLES = {
+    superAdmin: "super_admin",
+    blog: "blog",
+};
+
+const BLOG_ROLE_ALIASES = new Set(["blog", "blogs", "blog_admin", "blog_editor"]);
+
+const normalizeSuperAdminRole = (role) => {
+    if (typeof role !== "string") return SUPER_ADMIN_ROLES.superAdmin;
+    const normalized = role.trim().toLowerCase();
+    if (BLOG_ROLE_ALIASES.has(normalized)) return SUPER_ADMIN_ROLES.blog;
+    return SUPER_ADMIN_ROLES.superAdmin;
+};
+
+const isBlogOnlySuperAdmin = (user) => {
+    if (!user || typeof user !== "object") return false;
+    if (user.typ !== TOKEN_TYPES.superAdmin && !user.superAdminId) return false;
+    return normalizeSuperAdminRole(user.role || user.superAdminRole) === SUPER_ADMIN_ROLES.blog;
+};
+
+const isBlogSuperAdminPath = (ctx) => {
+    const rawPath = String(ctx?.path || ctx?.request?.path || ctx?.url || "").split("?")[0];
+    return rawPath === "/api/blogs" || rawPath.startsWith("/api/blogs/");
 };
 
 /** Bearer tokens that may call ordinary protected routes. */
@@ -69,6 +94,10 @@ const signToken = (payload, secret, options = {}) => {
         claims.superAdminId = options.superAdminId;
     }
 
+    if (options.typ === TOKEN_TYPES.superAdmin) {
+        claims.role = normalizeSuperAdminRole(options.role || payload?.role);
+    }
+
     if (options.staffId) {
         claims.staffId = options.staffId;
     }
@@ -94,9 +123,14 @@ const isQuoteBearerPath = (ctx) => {
 /**
  * Legacy tokens (no typ) stay valid only when they already expire.
  * Tokens with neither typ nor exp are rejected.
+ * Blog-scoped super-admin tokens may only access /api/blogs routes.
  */
 const isAcceptedAccessToken = (user, ctx) => {
     if (!user || typeof user !== "object") return false;
+
+    if (isBlogOnlySuperAdmin(user) && !isBlogSuperAdminPath(ctx)) {
+        return false;
+    }
 
     if (typeof user.typ === "string") {
         if (GENERAL_ACCESS.has(user.typ)) return true;
@@ -108,6 +142,12 @@ const isAcceptedAccessToken = (user, ctx) => {
 };
 
 const acceptAccessToken = async (ctx, next) => {
+    if (isBlogOnlySuperAdmin(ctx.state.user) && !isBlogSuperAdminPath(ctx)) {
+        ctx.status = 403;
+        ctx.body = { error: "SUPER_ADMIN_ROLE_FORBIDDEN", code: "SUPER_ADMIN_ROLE_FORBIDDEN" };
+        return;
+    }
+
     if (!isAcceptedAccessToken(ctx.state.user, ctx)) {
         ctx.status = 401;
         ctx.body = { error: "INVALID_TOKEN_TYPE", code: "INVALID_TOKEN_TYPE" };
@@ -138,9 +178,13 @@ const bearerFromHeader = (header) => {
 module.exports = {
     STRIPPED_CLAIMS,
     TOKEN_TYPES,
+    SUPER_ADMIN_ROLES,
     GENERAL_ACCESS,
     BLOCKED_PRIVILEGE_TYPES,
     signToken,
+    normalizeSuperAdminRole,
+    isBlogOnlySuperAdmin,
+    isBlogSuperAdminPath,
     isQuoteBearerPath,
     isAcceptedAccessToken,
     acceptAccessToken,

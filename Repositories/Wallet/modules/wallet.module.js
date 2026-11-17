@@ -19,8 +19,16 @@ const populates = [];
  * @param {*} authUser
  */
 const get = async (params, authUser = {}) => {
+	if (!authUser?.clientId) {
+		const error = new Error("FORBIDDEN");
+		error.status = 403;
+		error.code = "FORBIDDEN";
+		throw error;
+	}
+
 	const queryParams = {
 		...params,
+		where_client: authUser.clientId,
 	};
 
 	return await MongoORM.buildQuery(queryParams, Model, null, populates);
@@ -31,17 +39,21 @@ const get = async (params, authUser = {}) => {
  * @param {*} authUser
  */
 const show = async (params, authUser = {}) => {
+	if (!authUser?.clientId) {
+		const error = new Error("FORBIDDEN");
+		error.status = 403;
+		error.code = "FORBIDDEN";
+		throw error;
+	}
+
 	let queryParams = {
 		findOne: true,
 		...params,
+		where_client: authUser.clientId,
 	};
 
 	if (params.id || params._id) {
 		queryParams.where__id = params.id || params._id;
-	}
-
-	if (authUser.clientId) {
-		queryParams.where_client = authUser.clientId;
 	}
 
 	return await MongoORM.buildQuery(queryParams, Model, null, populates);

@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const { string, validate, boolean, number, stringEnum } = require("../../../Core/JoiUtils");
 const configuration = require("../../../Core/config");
 const { assertSuperAdminOtpRateLimit } = require("../modules/super-admin-otp-rate-limit.module");
@@ -6,6 +7,21 @@ const rejectOtpRateLimit = (ctx, error) => {
 	ctx.status = error.status || 429;
 	ctx.body = { error: error.code || "OTP_RATE_LIMITED", code: error.code || "OTP_RATE_LIMITED" };
 	if (error.retryAfterSeconds) ctx.set("Retry-After", String(error.retryAfterSeconds));
+};
+
+const hasValidSuperAdminSecret = (ctx) => {
+	const configured = typeof configuration.SUPERADMIN_JWT_SECRET === "string" ? configuration.SUPERADMIN_JWT_SECRET.trim() : "";
+	if (!configured || configured === "your-secret-here") return false;
+
+	const rawHeader = ctx.headers?.["x-api-key"] ?? ctx.header?.["x-api-key"];
+	const apiKey = typeof rawHeader === "string" ? rawHeader.trim() : "";
+	if (!apiKey) return false;
+
+	const expectedBuf = Buffer.from(configured, "utf8");
+	const actualBuf = Buffer.from(apiKey, "utf8");
+	if (expectedBuf.length !== actualBuf.length) return false;
+
+	return crypto.timingSafeEqual(expectedBuf, actualBuf);
 };
 
 const schemas = {
@@ -17,11 +33,14 @@ const schemas = {
 		phone: string().required(),
 		email: string().required(),
 		language: stringEnum(["en", "es"]),
+		role: stringEnum(["super_admin", "blog"]),
 	},
 	update: {},
 	destroy: {},
 	auth: {
 		email: string().required(),
+		role: stringEnum(["super_admin", "blog"]),
+		scope: stringEnum(["super_admin", "blog"]),
 	},
 	requestOtp: {
 		email: string().required(),
@@ -29,16 +48,16 @@ const schemas = {
 	verifyOtp: {
 		email: string().required(),
 		code: string().required(),
+		role: stringEnum(["super_admin", "blog"]),
+		scope: stringEnum(["super_admin", "blog"]),
 	},
 };
 
 const getValidation = async (ctx, next) => {
-	const apiKey = ctx.headers["x-api-key"];
-
-	if (!apiKey || apiKey !== configuration.SUPERADMIN_JWT_SECRET) {
+	if (!hasValidSuperAdminSecret(ctx)) {
 		ctx.status = 403;
 
-		ctx.body = { validationError: "ApiKey not valid" };
+		ctx.body = { validationError: "ApiKey not valid", code: "SUPER_ADMIN_SECRET_REQUIRED" };
 
 		return;
 	}
@@ -57,12 +76,10 @@ const getValidation = async (ctx, next) => {
 };
 
 const showValidation = async (ctx, next) => {
-	const apiKey = ctx.headers["x-api-key"];
-
-	if (!apiKey || apiKey !== configuration.SUPERADMIN_JWT_SECRET) {
+	if (!hasValidSuperAdminSecret(ctx)) {
 		ctx.status = 403;
 
-		ctx.body = { validationError: "ApiKey not valid" };
+		ctx.body = { validationError: "ApiKey not valid", code: "SUPER_ADMIN_SECRET_REQUIRED" };
 
 		return;
 	}
@@ -81,12 +98,10 @@ const showValidation = async (ctx, next) => {
 };
 
 const createValidation = async (ctx, next) => {
-	const apiKey = ctx.headers["x-api-key"];
-
-	if (!apiKey || apiKey !== configuration.SUPERADMIN_JWT_SECRET) {
+	if (!hasValidSuperAdminSecret(ctx)) {
 		ctx.status = 403;
 
-		ctx.body = { validationError: "ApiKey not valid" };
+		ctx.body = { validationError: "ApiKey not valid", code: "SUPER_ADMIN_SECRET_REQUIRED" };
 
 		return;
 	}
@@ -105,12 +120,10 @@ const createValidation = async (ctx, next) => {
 };
 
 const destroyValidation = async (ctx, next) => {
-	const apiKey = ctx.headers["x-api-key"];
-
-	if (!apiKey || apiKey !== configuration.SUPERADMIN_JWT_SECRET) {
+	if (!hasValidSuperAdminSecret(ctx)) {
 		ctx.status = 403;
 
-		ctx.body = { validationError: "ApiKey not valid" };
+		ctx.body = { validationError: "ApiKey not valid", code: "SUPER_ADMIN_SECRET_REQUIRED" };
 
 		return;
 	}
@@ -129,12 +142,10 @@ const destroyValidation = async (ctx, next) => {
 };
 
 const updateValidation = async (ctx, next) => {
-	const apiKey = ctx.headers["x-api-key"];
-
-	if (!apiKey || apiKey !== configuration.SUPERADMIN_JWT_SECRET) {
+	if (!hasValidSuperAdminSecret(ctx)) {
 		ctx.status = 403;
 
-		ctx.body = { validationError: "ApiKey not valid" };
+		ctx.body = { validationError: "ApiKey not valid", code: "SUPER_ADMIN_SECRET_REQUIRED" };
 
 		return;
 	}

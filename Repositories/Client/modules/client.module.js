@@ -21,51 +21,34 @@ const IpfsLookupCache = require("../../../Core/ipfs-lookup-cache");
  * @returns
  */
 const get = async (params = {}, authUser = {}) => {
-	if (params.email) {
-		return IpfsLookupCache.getOrLoad(IpfsLookupCache.keys.clientEmail(params.email), async () => {
-			const emailRecord = await IPFSModule.get({ key: "accountEmail", value: params.email, limit: 1 });
+	const email = typeof params?.email === "string" ? params.email.trim() : "";
+	const phone = typeof params?.phone === "string" ? params.phone.trim() : "";
+
+	if (email) {
+		return IpfsLookupCache.getOrLoad(IpfsLookupCache.keys.clientEmail(email), async () => {
+			const emailRecord = await IPFSModule.get({ key: "accountEmail", value: email, limit: 1 });
 
 			if (emailRecord.length) return emailRecord[0];
 
-			const staffRecord = await IPFSModule.get({ key: "staffEmail", value: params.email, limit: 1 });
+			const staffRecord = await IPFSModule.get({ key: "staffEmail", value: email, limit: 1 });
 
 			return staffRecord.length ? staffRecord[0] : null;
 		});
 	}
 
-	if (params.phone) {
-		return IpfsLookupCache.getOrLoad(IpfsLookupCache.keys.clientPhone(params.phone), async () => {
-			const phoneRecord = await IPFSModule.get({ key: "accountPhone", value: params.phone, limit: 1 });
+	if (phone) {
+		return IpfsLookupCache.getOrLoad(IpfsLookupCache.keys.clientPhone(phone), async () => {
+			const phoneRecord = await IPFSModule.get({ key: "accountPhone", value: phone, limit: 1 });
 
 			if (phoneRecord.length) return phoneRecord[0];
 
-			const staffRecord = await IPFSModule.get({ key: "staffPhone", value: params.phone, limit: 1 });
+			const staffRecord = await IPFSModule.get({ key: "staffPhone", value: phone, limit: 1 });
 
 			return staffRecord.length ? staffRecord[0] : null;
 		});
 	}
 
-	// If no specific email/phone, return all client accounts with pagination
-	const allClientAccounts = await IPFSModule.get({ key: "accountType", value: "client_account" });
-
-	// Handle pagination if provided
-	const page = params.page || 1;
-	const limit = params.limit || 10;
-	const offset = (page - 1) * limit;
-
-	const paginatedResults = allClientAccounts;
-
-	return {
-		data: paginatedResults,
-		pagination: {
-			page,
-			limit,
-			total: allClientAccounts.length,
-			totalPages: Math.ceil(allClientAccounts.length / limit),
-			hasNext: offset + limit < allClientAccounts.length,
-			hasPrev: page > 1,
-		},
-	};
+	return null;
 };
 
 /**
@@ -93,41 +76,22 @@ const getByStaffEmail = async (email) => {
  * @returns
  */
 const show = async (params = {}, authUser = {}) => {
-	// Use IPFS-based approach instead of MongoDB
-	// If specific email or phone is provided, get that specific account
-	if (params.email) {
-		const emailRecord = await IPFSModule.get({ key: "accountEmail", value: params.email });
+	const email = typeof params?.email === "string" ? params.email.trim() : "";
+	const phone = typeof params?.phone === "string" ? params.phone.trim() : "";
+
+	if (email) {
+		const emailRecord = await IPFSModule.get({ key: "accountEmail", value: email });
 
 		return emailRecord.length ? emailRecord[0] : null;
 	}
 
-	if (params.phone) {
-		const phoneRecord = await IPFSModule.get({ key: "accountPhone", value: params.phone });
+	if (phone) {
+		const phoneRecord = await IPFSModule.get({ key: "accountPhone", value: phone });
 
 		return phoneRecord.length ? phoneRecord[0] : null;
 	}
 
-	// If no specific identifier, return all client accounts
-	const allClientAccounts = await IPFSModule.get({ key: "accountType", value: "client_account" });
-
-	// Handle pagination if provided
-	const page = params.page || 1;
-	const limit = params.limit || 10;
-	const offset = (page - 1) * limit;
-
-	const paginatedResults = allClientAccounts.slice(offset, offset + limit);
-
-	return {
-		data: paginatedResults,
-		pagination: {
-			page,
-			limit,
-			total: allClientAccounts.length,
-			totalPages: Math.ceil(allClientAccounts.length / limit),
-			hasNext: offset + limit < allClientAccounts.length,
-			hasPrev: page > 1,
-		},
-	};
+	return null;
 };
 
 /**

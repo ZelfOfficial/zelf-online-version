@@ -1,6 +1,6 @@
 const jwt = require("jsonwebtoken");
 const config = require("../../../Core/config");
-const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
+const { signToken, TOKEN_TYPES, isAccountAccessToken } = require("../../../Core/jwt-claims");
 const moment = require("moment");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const zelfProofModule = require("../../ZelfProof/modules/zelf-proof.module");
@@ -14,6 +14,20 @@ const { createSolanaWallet } = require("../../Wallet/modules/solana");
 const LAWYER_TYPE = "lawyer";
 const LAWYER_ACCOUNT_TYPE = "lawyer_account";
 
+const assertLawyerAdminReadAccess = (authUser) => {
+	const email = typeof (authUser?.email || authUser?.staffEmail || authUser?.ownerEmail) === "string"
+		? String(authUser.email || authUser.staffEmail || authUser.ownerEmail).trim()
+		: "";
+	if (!isAccountAccessToken(authUser) || !email) {
+		const error = new Error("403:FORBIDDEN");
+		error.status = 403;
+		error.code = "FORBIDDEN";
+		error.clientCode = "FORBIDDEN";
+		error.clientMessage = "FORBIDDEN";
+		throw error;
+	}
+};
+
 /**
  * Get lawyers for a domain (domain admin view)
  * @param {Object} params - { domain }
@@ -21,6 +35,7 @@ const LAWYER_ACCOUNT_TYPE = "lawyer_account";
  * @returns {Array}
  */
 const get = async (params = {}, authUser = {}) => {
+	assertLawyerAdminReadAccess(authUser);
 	const { domain = "zelf", status } = params;
 
 	const records = await IPFSModule.get({ key: "lawyerDomain", value: domain });
@@ -702,6 +717,7 @@ const remove = async (data, authUser) => {
  * @returns {Array}
  */
 const getInvitations = async (params = {}, authUser = {}) => {
+	assertLawyerAdminReadAccess(authUser);
 	const { domain = "zelf" } = params;
 
 	const records = await IPFSModule.get({ key: "lawyerDomain", value: domain });
@@ -720,6 +736,7 @@ const getInvitations = async (params = {}, authUser = {}) => {
  * @returns {Object} - { lawyers, invitations }
  */
 const getAll = async (params = {}, authUser = {}) => {
+	assertLawyerAdminReadAccess(authUser);
 	const { domain = "zelf", includeInvitations = true } = params;
 
 	const records = await IPFSModule.get({ key: "lawyerDomain", value: domain });

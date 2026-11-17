@@ -1,5 +1,5 @@
 const { string, boolean, array, any, validateStrict } = require("../../../Core/JoiUtils");
-const { verifySuperAdmin } = require("../../SuperAdmin/middlewares/verify-super-admin.middleware");
+const { verifyBlogSuperAdmin } = require("../../SuperAdmin/middlewares/verify-super-admin.middleware");
 
 const SUPPORTED_LOCALES = ["en", "es", "fr", "ja", "ko", "pt", "zh", "zh-TW"];
 
@@ -87,7 +87,8 @@ const setLocaleFromParams = async (ctx, next) => {
 };
 
 module.exports = {
-    verifySuperAdmin,
+    verifySuperAdmin: verifyBlogSuperAdmin,
+    verifyBlogSuperAdmin,
     createValidation,
     updateValidation,
     setLocaleFromParams,

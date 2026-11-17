@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const config = require("../../../Core/config");
-const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
+const { signToken, TOKEN_TYPES, isAccountAccessToken } = require("../../../Core/jwt-claims");
 const moment = require("moment");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const zelfProofModule = require("../../ZelfProof/modules/zelf-proof.module");
@@ -20,10 +20,15 @@ const sharp = require("sharp");
  * @returns {Array}
  */
 const get = async (params = {}, authUser = {}) => {
+    const ownerEmail = organizationEmailFor(authUser);
+    if (!isAccountAccessToken(authUser) || !ownerEmail) {
+        throw staffAccessError("FORBIDDEN");
+    }
+
     // Get all staff members for the authenticated client
     const staffRecords = await IPFSModule.get({
         key: "staffOwnerEmail",
-        value: authUser.email,
+        value: callerIsStaff(authUser) ? authUser.ownerEmail : authUser.email,
     });
 
     return staffRecords;
@@ -550,6 +555,20 @@ const updateRole = async (data, authUser) => {
  */
 const remove = async (data, authUser) => {
     const { staffEmail, faceBase64, masterPassword } = data;
+    const organizationEmail = organizationEmailFor(authUser);
+
+    if (!isAccountAccessToken(authUser) || !organizationEmail || callerIsStaff(authUser)) {
+        throw staffAccessError("FORBIDDEN");
+    }
+
+    // Get staff account first and verify organization ownership
+    const staffRecords = await IPFSModule.get({ key: "staffEmail", value: staffEmail });
+    if (!staffRecords.length) throw new Error("404:staff_not_found");
+
+    const staffAccount = staffRecords[0];
+    if (staffOwnerEmailOf(staffAccount) !== organizationEmail) {
+        throw staffAccessError("STAFF_NOT_IN_CLIENT");
+    }
 
     // Verify client owner
     const clientAccount = await ClientModule.get({ email: authUser.email });
@@ -566,11 +585,6 @@ const remove = async (data, authUser) => {
 
     if (!decryptedClient) throw new Error("409:verification_failed");
 
-    // Get and delete staff account
-    const staffRecords = await IPFSModule.get({ key: "staffEmail", value: staffEmail });
-    if (!staffRecords.length) throw new Error("404:staff_not_found");
-
-    const staffAccount = staffRecords[0];
     await IPFSModule.unPinFiles([staffAccount.id]);
 
     return {

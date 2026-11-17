@@ -1,7 +1,10 @@
 const Module = require("../modules/ipfs.module");
-const { TOKEN_TYPES } = require("../../../Core/jwt-claims");
+const { TOKEN_TYPES, isBlogOnlySuperAdmin } = require("../../../Core/jwt-claims");
 
-const isSuperAdminUser = (authUser) => Boolean(authUser) && (authUser.typ === TOKEN_TYPES.superAdmin || authUser.superAdminId);
+const isSuperAdminUser = (authUser) =>
+	Boolean(authUser) &&
+	(authUser.typ === TOKEN_TYPES.superAdmin || Boolean(authUser.superAdminId)) &&
+	!isBlogOnlySuperAdmin(authUser);
 
 const callerIdentityValues = (authUser) => {
 	const keys = ["email", "staffEmail", "phone", "staffPhone", "identifier", "tagName", "ethAddress", "solanaAddress", "walletAddress", "clientId"];

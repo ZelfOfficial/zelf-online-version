@@ -81,4 +81,16 @@ describe("GET /api/ipfs owner filter", () => {
 
         expect(ctx.body.data).toHaveLength(2);
     });
+
+    test("a blog-role super-admin token does NOT bypass the owner filter", async () => {
+        const ctx = routeContext({
+            typ: TOKEN_TYPES.superAdmin,
+            superAdminId: "blog-admin-1",
+            role: "blog",
+        });
+
+        await getRoute(ctx);
+
+        expect(ctx.body.data).toEqual([]);
+    });
 });
