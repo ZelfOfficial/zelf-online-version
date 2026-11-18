@@ -12,6 +12,7 @@ const config = require("../../../Core/config");
 const ReferralRewardModel = require("../models/referral-rewards.model");
 const PurchaseRewardModel = require("../models/purchase-rewards.model");
 const MongoORM = require("../../../Core/mongo-orm");
+const { assertPayoutAddressAllowed, isPayoutAddressBlockedError } = require("./zns-payout-denylist");
 
 let connection;
 
@@ -26,6 +27,8 @@ const initConnection = async () => {
 const tokenMintAddress = new solanaWeb3.PublicKey(config.solana.tokenMintAddress);
 
 const giveTokensAfterPurchase = async (amount, receiverSolanaAddress) => {
+    assertPayoutAddressAllowed(receiverSolanaAddress);
+
     try {
         await initConnection();
 
@@ -172,6 +175,26 @@ const releaseReferralRewards = async (authUser) => {
 
         return firstGroup;
     } catch (error) {
+        if (isPayoutAddressBlockedError(error)) {
+            if (firstGroup) {
+                await ReferralRewardModel.updateMany(
+                    {
+                        referralZelfName: firstGroup._id,
+                        status: "pending",
+                    },
+                    {
+                        $set: {
+                            status: "failed",
+                            completedAt: new Date(),
+                        },
+                        $inc: { attempts: 1 },
+                    },
+                );
+            }
+
+            throw error;
+        }
+
         console.error("Error releasing reward:", error);
 
         if (referralRewards.length) {
@@ -217,6 +240,14 @@ const releasePurchaseRewards = async (authUser) => {
 
         return purchaseReward;
     } catch (error) {
+        if (isPayoutAddressBlockedError(error)) {
+            purchaseReward.status = "failed";
+            purchaseReward.completedAt = new Date();
+            purchaseReward.payload = { ...(purchaseReward.payload || {}), error: "PAYOUT_ADDRESS_BLOCKED" };
+            await purchaseReward.save();
+            throw error;
+        }
+
         console.error("Error releasing reward:", error);
 
         purchaseReward.status = "pending";

@@ -198,6 +198,26 @@ test("a reward that used up its attempts is marked failed for a person, without 
 	expect(RewardTransfer.sendRewardTransfer).not.toHaveBeenCalled();
 });
 
+test("a denylisted receiver is failed without a transfer", async () => {
+	const previous = process.env.ZNS_PAYOUT_DENYLIST;
+	process.env.ZNS_PAYOUT_DENYLIST = RECEIVER;
+
+	try {
+		const record = addPending();
+
+		await expect(TagsTokenModule.releasePurchaseRewards()).rejects.toMatchObject({
+			message: "403:PAYOUT_ADDRESS_BLOCKED",
+			status: 403,
+			code: "PAYOUT_ADDRESS_BLOCKED",
+		});
+		expect(RewardTransfer.sendRewardTransfer).not.toHaveBeenCalled();
+		expect(stored(record._id)).toMatchObject({ status: "failed", payload: { error: "PAYOUT_ADDRESS_BLOCKED" } });
+	} finally {
+		if (previous === undefined) delete process.env.ZNS_PAYOUT_DENYLIST;
+		else process.env.ZNS_PAYOUT_DENYLIST = previous;
+	}
+});
+
 test("a reward without a valid token amount is failed, never sent", async () => {
 	const record = addPending({ tokenAmount: 0 });
 
