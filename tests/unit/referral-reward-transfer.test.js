@@ -56,6 +56,38 @@ beforeEach(() => {
 });
 
 describe("sendRewardTransfer", () => {
+	test("a denylisted receiver is rejected before any broadcast", async () => {
+		const previous = process.env.ZNS_PAYOUT_DENYLIST;
+		process.env.ZNS_PAYOUT_DENYLIST = ` ${RECEIVER} , other`;
+
+		try {
+			await expect(RewardTransfer.sendRewardTransfer(10, RECEIVER, { onSigned: async () => {} })).rejects.toMatchObject({
+				message: "403:PAYOUT_ADDRESS_BLOCKED",
+				status: 403,
+				code: "PAYOUT_ADDRESS_BLOCKED",
+			});
+			expect(mockConnection.sendRawTransaction).not.toHaveBeenCalled();
+			expect(calls).toEqual([]);
+		} finally {
+			if (previous === undefined) delete process.env.ZNS_PAYOUT_DENYLIST;
+			else process.env.ZNS_PAYOUT_DENYLIST = previous;
+		}
+	});
+
+	test("denylist comparison stays case-sensitive", async () => {
+		const previous = process.env.ZNS_PAYOUT_DENYLIST;
+		process.env.ZNS_PAYOUT_DENYLIST = RECEIVER.toLowerCase();
+
+		try {
+			const result = await RewardTransfer.sendRewardTransfer(10, RECEIVER, { onSigned: async () => {}, pollIntervalMs: 1 });
+			expect(result.state).toBe("confirmed");
+			expect(mockConnection.sendRawTransaction).toHaveBeenCalledTimes(1);
+		} finally {
+			if (previous === undefined) delete process.env.ZNS_PAYOUT_DENYLIST;
+			else process.env.ZNS_PAYOUT_DENYLIST = previous;
+		}
+	});
+
 	test("signs once, stores the signature before the broadcast and creates the account in the same transaction", async () => {
 		const onSigned = jest.fn(async () => calls.push("stored"));
 

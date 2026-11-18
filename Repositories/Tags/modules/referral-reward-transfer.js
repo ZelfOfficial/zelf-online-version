@@ -20,6 +20,7 @@ const solanaWeb3 = require("@solana/web3.js");
 const bs58 = require("bs58").default || require("bs58");
 const config = require("../../../Core/config");
 const spl = require("../../../Core/spl-token-manual");
+const { assertPayoutAddressAllowed } = require("../../ZelfNameService/modules/zns-payout-denylist");
 
 const ZNS_DECIMALS = 8;
 /** SPL Mint layout: 4-byte authority option + 32-byte authority + 8-byte supply, then decimals. */
@@ -94,6 +95,8 @@ const isConfirmed = (status) => ["confirmed", "finalized"].includes(status?.conf
  *   getRewardTransferOutcome
  */
 const sendRewardTransfer = async (amount, receiverSolanaAddress, options = {}) => {
+	assertPayoutAddressAllowed(receiverSolanaAddress);
+
 	const { onSigned, waitMs = DEFAULT_CONFIRM_WAIT_MS, pollIntervalMs = POLL_INTERVAL_MS } = options;
 	const conn = getConnection();
 	const sender = solanaWeb3.Keypair.fromSecretKey(Uint8Array.from(JSON.parse(config.solana.sender)));

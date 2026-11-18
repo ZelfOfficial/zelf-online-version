@@ -148,6 +148,24 @@ describe("first transaction reward ownership", () => {
         expect(ZNSTokenModule.giveTokensAfterPurchase).not.toHaveBeenCalled();
     });
 
+    test("rejects a denylisted wallet before a record or transfer", async () => {
+        const previous = process.env.ZNS_PAYOUT_DENYLIST;
+        process.env.ZNS_PAYOUT_DENYLIST = "SoLanaAddress111";
+
+        try {
+            await expect(rewardFirstTransaction(body, authUser)).rejects.toMatchObject({
+                message: "403:PAYOUT_ADDRESS_BLOCKED",
+                status: 403,
+                code: "PAYOUT_ADDRESS_BLOCKED",
+            });
+            expect(ZNSTokenModule.giveTokensAfterPurchase).not.toHaveBeenCalled();
+            expect(IPFS.pinFile).not.toHaveBeenCalled();
+        } finally {
+            if (previous === undefined) delete process.env.ZNS_PAYOUT_DENYLIST;
+            else process.env.ZNS_PAYOUT_DENYLIST = previous;
+        }
+    });
+
     test("stays one-time per name", async () => {
         IPFS.filter.mockResolvedValue([{ publicData: { amount: "12" } }]);
 

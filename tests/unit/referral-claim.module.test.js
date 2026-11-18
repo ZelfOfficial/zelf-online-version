@@ -181,6 +181,24 @@ describe("referral list (#514)", () => {
 });
 
 describe("referral claim (#515)", () => {
+	test("a denylisted referrer is rejected before a claim record or transfer", async () => {
+		const previous = process.env.ZNS_PAYOUT_DENYLIST;
+		process.env.ZNS_PAYOUT_DENYLIST = ` ${REFERRER_ADDRESS} `;
+
+		try {
+			await expect(claim()).rejects.toMatchObject({
+				message: "403:PAYOUT_ADDRESS_BLOCKED",
+				status: 403,
+				code: "PAYOUT_ADDRESS_BLOCKED",
+			});
+			expect(RewardTransfer.sendRewardTransfer).not.toHaveBeenCalled();
+			expect(ReferralRewardModel.store).toHaveLength(0);
+		} finally {
+			if (previous === undefined) delete process.env.ZNS_PAYOUT_DENYLIST;
+			else process.env.ZNS_PAYOUT_DENYLIST = previous;
+		}
+	});
+
 	test("a transfer that never left the server releases the reservation for a retry", async () => {
 		RewardTransfer.sendRewardTransfer.mockRejectedValueOnce(new Error("rewards_wallet_insufficient_balance"));
 
