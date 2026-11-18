@@ -1,4 +1,5 @@
 const RewardTransfer = require("./referral-reward-transfer");
+const { assertPayoutAddressAllowed, isPayoutAddressBlocked } = require("../../ZelfNameService/modules/zns-payout-denylist");
 const ReferralRewardModel = require("../models/referral-rewards.model");
 const PurchaseRewardModel = require("../models/purchase-rewards.model");
 const MongoORM = require("../../../Core/mongo-orm");
@@ -185,6 +186,12 @@ const releasePurchaseRewards = async () => {
 		const failedPayload = { ...payload, error: "invalid_reward_amount", requiresReconciliation: false };
 		await PurchaseRewardModel.updateOne(reserved, { $set: { status: "failed", payload: failedPayload } });
 		return _summary(purchaseReward, { status: "failed", payload: failedPayload });
+	}
+
+	if (isPayoutAddressBlocked(purchaseReward.solanaAddress)) {
+		const failedPayload = { ...payload, error: "PAYOUT_ADDRESS_BLOCKED", requiresReconciliation: false };
+		await PurchaseRewardModel.updateOne(reserved, { $set: { status: "failed", attempts, payload: failedPayload } });
+		assertPayoutAddressAllowed(purchaseReward.solanaAddress);
 	}
 
 	let storedSignature = null;

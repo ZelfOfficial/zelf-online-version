@@ -5,6 +5,7 @@ const Mailgun = require("../../../Core/mailgun");
 const IPFS = require("../../IPFS/modules/ipfs.module");
 
 const ZNSTokenModule = require("../../ZelfNameService/modules/zns-token.module");
+const { isPayoutAddressBlockedError } = require("../../ZelfNameService/modules/zns-payout-denylist");
 const MyTagsModule = require("../../Tags/modules/my-tags.module");
 const { extractDomainAndName } = require("../../Tags/middlewares/tags.middleware");
 const { isDomainActive } = require("../../Tags/config/supported-domains");
@@ -190,6 +191,8 @@ const _releasePendingTokens = async (amount, address) => {
 
         return { released: true, signature };
     } catch (err) {
+        if (isPayoutAddressBlockedError(err)) throw err;
+
         console.error("Failed to release tokens:", err);
         return { released: false, signature: "" };
     }

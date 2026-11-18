@@ -14,6 +14,7 @@ const {
     loadReferralRecords,
 } = require("./referral-capacity.module");
 const config = require("../../../Core/config");
+const { assertPayoutAddressAllowed } = require("../../ZelfNameService/modules/zns-payout-denylist");
 const { searchTag } = require("./tags.module");
 const moment = require("moment");
 const { getDomainConfig } = require("../config/supported-domains");
@@ -506,6 +507,8 @@ const _sendReferralRewardAndUpdateRecord = async (
         err.status = 400;
         throw err;
     }
+
+    assertPayoutAddressAllowed(referrerSolanaAddress);
 
     const keyFriendName = rewardFriendKeys(friendFullTagName, rewardType)[0];
 

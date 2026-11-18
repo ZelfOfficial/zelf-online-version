@@ -153,6 +153,26 @@ describe("POST /api/rewards/daily identity", () => {
         expect(JSON.stringify(result)).not.toMatch(/face-ok|mnemonic|secretKey/i);
     });
 
+    it("rejects a denylisted wallet before any reward record or transfer", async () => {
+        const previous = process.env.ZNS_PAYOUT_DENYLIST;
+        process.env.ZNS_PAYOUT_DENYLIST = " SoLanaAddress111 , OtherWallet ";
+
+        try {
+            await expect(dailyRewards(claimBody(), authUser)).rejects.toMatchObject({
+                message: "403:PAYOUT_ADDRESS_BLOCKED",
+                status: 403,
+                code: "PAYOUT_ADDRESS_BLOCKED",
+            });
+            expect(ZNSTokenModule.giveTokensAfterPurchase).not.toHaveBeenCalled();
+            expect(IPFS.pinFile).not.toHaveBeenCalled();
+            expect(Reward.deleteOne).not.toHaveBeenCalled();
+            expect(Reward.instances).toHaveLength(0);
+        } finally {
+            if (previous === undefined) delete process.env.ZNS_PAYOUT_DENYLIST;
+            else process.env.ZNS_PAYOUT_DENYLIST = previous;
+        }
+    });
+
     it("accepts the face-only placeholder as no password", async () => {
         jest.spyOn(Math, "random").mockReturnValue(0);
 

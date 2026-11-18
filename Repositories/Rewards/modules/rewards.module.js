@@ -12,6 +12,7 @@ const TagsPartsModule = require("../../Tags/modules/tags-parts.module");
 const TagsModule = require("../../Tags/modules/tags.module");
 const ZelfProofModule = require("../../ZelfProof/modules/zelf-proof.module");
 const { isNoPassword } = require("../../ZelfID/modules/zelf-id-password.module");
+const { assertPayoutAddressAllowed, isPayoutAddressBlockedError } = require("../../ZelfNameService/modules/zns-payout-denylist");
 
 /** Client codes for daily-reward identity checks. Statuses match Zelf Keys ownership decrypt. */
 const REWARD_IDENTITY_STATUS = {
@@ -429,6 +430,8 @@ const dailyRewards = async (data, authUser) => {
 
         await assertDailyRewardIdentity(data, tagObject, authUser);
 
+        assertPayoutAddressAllowed(tagObject?.publicData?.solanaAddress);
+
         // Check if the user's Solana account is active/funded
         const isAccountActive = await ZNSTokenModule.isAccountActive(tagObject.publicData.solanaAddress);
 
@@ -609,7 +612,7 @@ const dailyRewards = async (data, authUser) => {
                 : `Reward claimed but token transfer failed. Please contact support with error: ${tokenTransferError?.error}`,
         };
     } catch (error) {
-        if (isRewardIdentityError(error)) throw error;
+        if (isRewardIdentityError(error) || isPayoutAddressBlockedError(error)) throw error;
 
         console.error("Error in dailyRewards:", safeRewardErrorText(error));
         throw new Error(error.message || "Failed to process daily reward");
@@ -899,6 +902,8 @@ const rewardFirstTransaction = async (data, authUser) => {
             };
         }
 
+        assertPayoutAddressAllowed(tagObject?.publicData?.solanaAddress);
+
         // User is eligible for first transaction reward - random 1-100 ZNS
         const rewardAmount = Math.floor(Math.random() * 100) + 1;
         const rewardType = "first_transaction";
@@ -1011,7 +1016,7 @@ const rewardFirstTransaction = async (data, authUser) => {
             timestamp: rewardData.timestamp,
         };
     } catch (error) {
-        if (isRewardIdentityError(error)) throw error;
+        if (isRewardIdentityError(error) || isPayoutAddressBlockedError(error)) throw error;
 
         console.error("❌ Error in rewardFirstTransaction:", error);
         throw new Error(`Failed to process first transaction reward: ${error.message}`);

@@ -3,6 +3,7 @@ const ClientModule = require("../../Client/modules/client.module");
 const DefaultLicenseValues = require("../../License/modules/default-license.values");
 const SubscriptionZnsGrant = require("../models/subscription-zns-grant.model");
 const ZNSTokenModule = require("../../ZelfNameService/modules/zns-token.module");
+const { isPayoutAddressBlocked } = require("../../ZelfNameService/modules/zns-payout-denylist");
 
 /**
  * Stale `pending` rows are retried after this window. They likely indicate a process
@@ -163,6 +164,10 @@ const tryGrantMonthlyZnsForPaidInvoice = async ({ invoiceId, subscriptionId, cus
 
 		const { solanaAddress } = walletResolution;
 
+		if (isPayoutAddressBlocked(solanaAddress)) {
+			return noop("PAYOUT_ADDRESS_BLOCKED", { planCode: plan.code });
+		}
+
 		let grantDoc;
 		try {
 			grantDoc = await SubscriptionZnsGrant.create({
@@ -283,6 +288,11 @@ const retryGrantForExistingInvoice = async (grantDoc, { subscription, amountPaid
 	}
 
 	const { solanaAddress } = walletResolution;
+
+	if (isPayoutAddressBlocked(solanaAddress)) {
+		await markGrantFailed(grantDoc, new Error("403:PAYOUT_ADDRESS_BLOCKED"));
+		return noop("PAYOUT_ADDRESS_BLOCKED", { planCode });
+	}
 
 	grantDoc.status = "pending";
 	grantDoc.errorMessage = undefined;
