@@ -210,7 +210,7 @@ const _resolveContinuationToPrimary = async (continuationRow) => {
 	return primary;
 };
 
-const _mergeAllContinuationPages = async (primaryRow) => {
+const _mergeAllContinuationPages = async (primaryRow, options = {}) => {
 	let record = primaryRow;
 
 	if (isContinuationPublicData(record.publicData)) {
@@ -225,11 +225,20 @@ const _mergeAllContinuationPages = async (primaryRow) => {
 
 	if (!canonicalName) return record;
 
+	let lookupError = null;
+
 	for (const linkKey of [CONTINUATION_LINK_KEY, CONTINUATION_LINK_KEY_2]) {
-		const rows = await IPFS.filter(linkKey, canonicalName);
-		if (!rows?.[0]) continue;
-		mergeContinuationAddresses(record.publicData, _formatRecord(rows[0]).publicData);
+		try {
+			const rows = await IPFS.filter(linkKey, canonicalName, options.throwOnLookupError ? { throwOnError: true } : {});
+			if (!rows?.[0]) continue;
+			mergeContinuationAddresses(record.publicData, _formatRecord(rows[0]).publicData);
+		} catch (error) {
+			if (!options.throwOnLookupError) throw error;
+			lookupError = lookupError || error;
+		}
 	}
+
+	if (lookupError) throw lookupError;
 
 	return record;
 };
@@ -244,12 +253,17 @@ const hydrateContinuationAddresses = async (publicData) => {
 	if (!publicData || typeof publicData !== "object") return publicData;
 
 	try {
-		await _mergeAllContinuationPages({
-			publicData,
-			name: publicData.tagName || publicData.zelfName,
-		});
-	} catch {
-		/* keep primary publicData if continuation lookup fails */
+		await _mergeAllContinuationPages(
+			{
+				publicData,
+				name: publicData.tagName || publicData.zelfName,
+			},
+			{ throwOnLookupError: true }
+		);
+	} catch (error) {
+		const tagName = publicData.tagName || publicData.zelfName || "";
+		const message = typeof error?.message === "string" && error.message ? error.message : "continuation_lookup_failed";
+		console.warn("continuation address lookup failed:", tagName, message);
 	}
 
 	return publicData;
