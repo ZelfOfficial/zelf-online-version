@@ -11,6 +11,7 @@ const mongoose = require("mongoose"); // Add this line
 const { loadOfficialLicenses } = require("./Repositories/License/modules/license.module");
 const { getSupportedDomains } = require("./Repositories/Tags/config/supported-domains");
 const { warnIfTlsVerificationDisabled } = require("./Core/tls-verification");
+const { resolveListenHost, listenArgs } = require("./Core/listen-host");
 warnIfTlsVerificationDisabled();
 const app = new Koa();
 app.proxy = true; // Trust the proxy's X-Forwarded-For header
@@ -32,8 +33,11 @@ app.use((ctx, next) => {
     });
 });
 
-const server = app.listen(config.port, () => {
-    console.info(`Server running on port ${config.port}`);
+// HOST is optional. Unset keeps listen(port) on all interfaces. PM2 cluster mode
+// is Node's cluster: each worker makes this same call and the primary shares it.
+const listenHost = resolveListenHost();
+const server = app.listen(...listenArgs(config.port), () => {
+    console.info(listenHost ? `Server running on ${listenHost}:${config.port}` : `Server running on port ${config.port}`);
     const mongooseConnection = DatabaseModule.initMongoDB();
 
     mongooseConnection.on("error", (err) => {
