@@ -11,9 +11,12 @@ const mongoose = require("mongoose"); // Add this line
 const { loadOfficialLicenses } = require("./Repositories/License/modules/license.module");
 const { getSupportedDomains } = require("./Repositories/Tags/config/supported-domains");
 const { warnIfTlsVerificationDisabled } = require("./Core/tls-verification");
+const { accessLog } = require("./Core/access-log");
 warnIfTlsVerificationDisabled();
 const app = new Koa();
 app.proxy = true; // Trust the proxy's X-Forwarded-For header
+// First, so 401s from koa-jwt and later errors are included. Query strings are not logged.
+app.use(accessLog());
 // Shared with the unit tests; keeps the raw body for the Stripe webhook, zAI and the RPC proxy.
 app.use(createBodyParser());
 
