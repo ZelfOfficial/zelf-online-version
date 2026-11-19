@@ -21,7 +21,9 @@ const headerValue = (ctx, name) => {
 };
 
 /**
- * Client IP: first X-Forwarded-For hop, then X-Real-IP, then the socket.
+ * Client IP behind one reverse proxy. That proxy appends the peer address to
+ * X-Forwarded-For, so the last hop is the one it saw. Then X-Real-IP, then the socket.
+ * Matches `app.maxIpsCount = 1` in server.js.
  * @param {import("koa").Context} ctx
  * @returns {string}
  */
@@ -29,7 +31,11 @@ const clientIp = (ctx) => {
     const forwarded = headerValue(ctx, "x-forwarded-for");
 
     if (forwarded) {
-        const hop = forwarded.split(",")[0].trim();
+        const hops = forwarded
+            .split(",")
+            .map((part) => part.trim())
+            .filter(Boolean);
+        const hop = hops[hops.length - 1];
 
         if (hop) return hop;
     }

@@ -46,14 +46,15 @@ const userSubject = (userKey) => {
  * Increments the current window before enforcing limits (counts this request).
  * `options.userKey` (JWT identifier or session id) is counted in a separate bucket.
  */
-const consumeWindow = async (subject, { maxPerMinute, rollingMinutes, maxRolling, ttlMs }) => {
+const consumeWindow = async (subject, { maxPerMinute, rollingMinutes, maxRolling, ttlMs, count = 1 }) => {
+    const increment = Math.max(1, Math.floor(Number(count) || 1));
     const windowStart = utcMinuteStart();
     const expiresAt = new Date(windowStart.getTime() + ttlMs);
 
     const updated = await RpcCallerWindow.findOneAndUpdate(
         { ip: subject, windowStart },
         {
-            $inc: { count: 1 },
+            $inc: { count: increment },
             $setOnInsert: { expiresAt },
         },
         { upsert: true, new: true }
@@ -106,6 +107,67 @@ const assertWithinRateLimit = async (ip, options = {}) => {
             maxRolling: userMaxRolling,
             ttlMs,
         });
+    }
+};
+
+const positiveInt = (value, fallback) => {
+    const n = Number(value);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : fallback;
+};
+
+/** Distinct from the raw-IP bucket. Fits RpcCallerWindow.ip (max 45). */
+const sessionlessSubject = (ip) => {
+    const digest = crypto.createHash("sha256").update(String(ip)).digest("hex").slice(0, 32);
+    return `s:${digest}`;
+};
+
+const SESSIONLESS_GLOBAL_SUBJECT = "s:global";
+
+const sessionlessLimitConfig = (env = process.env) => ({
+    perMinute: positiveInt(env.RPC_SESSIONLESS_PER_IP_PER_MINUTE, 60),
+    perHour: positiveInt(env.RPC_SESSIONLESS_PER_IP_PER_HOUR, 600),
+    globalPerMinute: positiveInt(env.RPC_SESSIONLESS_GLOBAL_PER_MINUTE, 2000),
+});
+
+/**
+ * Separate buckets for the compatibility lane: `s:<hash>` per IP and `s:global`.
+ * `count` is the number of JSON-RPC calls in the request (a batch counts each item).
+ * Always enforced for that lane, including when RPC_RATE_LIMIT_ENABLED=false.
+ */
+const assertWithinSessionlessRateLimit = async (ip, count = 1) => {
+    const normalized = normalizeIp(ip);
+    if (!normalized) {
+        const error = new Error("Client address is required");
+        error.status = 400;
+        error.clientCode = "RPC_SESSIONLESS_IP_REQUIRED";
+        throw error;
+    }
+
+    const limits = sessionlessLimitConfig();
+    const ttlMs = Math.max(60000, Number(config.rpc?.rateLimit?.windowTtlMs) || 2 * 60 * 60 * 1000);
+    const increment = Math.max(1, Math.floor(Number(count) || 1));
+
+    try {
+        await consumeWindow(sessionlessSubject(normalized), {
+            maxPerMinute: limits.perMinute,
+            rollingMinutes: 60,
+            maxRolling: limits.perHour,
+            ttlMs,
+            count: increment,
+        });
+        await consumeWindow(SESSIONLESS_GLOBAL_SUBJECT, {
+            maxPerMinute: limits.globalPerMinute,
+            rollingMinutes: 1,
+            maxRolling: 0,
+            ttlMs,
+            count: increment,
+        });
+    } catch (error) {
+        if (error?.clientCode === "rpc_rate_limited") {
+            error.clientCode = "RPC_SESSIONLESS_RATE_LIMITED";
+            error.message = "RPC rate limit exceeded";
+        }
+        throw error;
     }
 };
 
@@ -210,8 +272,11 @@ const unbanIp = async (ip) => {
 module.exports = {
     normalizeIp,
     userSubject,
+    sessionlessSubject,
+    SESSIONLESS_GLOBAL_SUBJECT,
     assertNotBanned,
     assertWithinRateLimit,
+    assertWithinSessionlessRateLimit,
     recordRequest,
     listTopByVolume,
     banIp,

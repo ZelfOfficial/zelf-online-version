@@ -257,6 +257,27 @@ const stellarUpstream = () => envUrl("EXTENSION_STELLAR_HORIZON_URL");
 
 const methodsForKind = (kind) => METHODS_BY_KIND[kind] || [];
 
+const SESSIONLESS_PAID_METHODS = new Set(["eth_estimategas", "eth_sendrawtransaction"]);
+
+/**
+ * Compatibility lane for published native apps.
+ * Reads prefer the public URL. eth_sendRawTransaction and eth_estimateGas prefer the paid URL.
+ * `fallback` is the other URL when both exist and differ.
+ */
+const sessionlessUpstreamPlan = (chainKey, method) => {
+    const spec = CHAIN_SPECS.find((item) => item.key === chainKey);
+    if (!spec) return { primary: "", fallback: "" };
+
+    const paid = spec.paid();
+    const publicUrl = spec.publicUrl || "";
+    const preferPaid = SESSIONLESS_PAID_METHODS.has(String(method || "").trim().toLowerCase());
+    const primary = preferPaid ? paid || publicUrl : publicUrl || paid;
+    const other = primary && primary === paid ? publicUrl : paid;
+    const fallback = other && other !== primary ? other : "";
+
+    return { primary, fallback };
+};
+
 /** Largest upstream body the proxy will buffer. */
 const UPSTREAM_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -380,5 +401,6 @@ module.exports = {
     maxBodyBytes,
     methodsForKind,
     redactSecrets,
+    sessionlessUpstreamPlan,
     stellarUpstream,
 };

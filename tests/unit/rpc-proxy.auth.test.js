@@ -75,11 +75,16 @@ describe("RPC proxy auth", () => {
         proxyStellar.mockClear();
     });
 
-    it("keeps the JSON-RPC routes off the unprotected registry", () => {
+    it("keeps authenticated JSON-RPC routes on the protected registry", () => {
         const fs = require("fs");
         const path = require("path");
-        const source = fs.readFileSync(path.resolve(__dirname, "../../Routes/unprotected-repositories.js"), "utf8");
-        expect(source).not.toMatch(/rpc\.routes/);
+        const unprotected = fs.readFileSync(path.resolve(__dirname, "../../Routes/unprotected-repositories.js"), "utf8");
+        const protectedSource = fs.readFileSync(path.resolve(__dirname, "../../Routes/protected-repositories.js"), "utf8");
+        expect(unprotected).not.toMatch(/Repositories\/RPC\/routes\/rpc\.routes/);
+        expect(unprotected).not.toMatch(/protected-rpc\.routes/);
+        expect(unprotected).toMatch(/sessionless-rpc\.routes/);
+        expect(protectedSource).toMatch(/Repositories\/RPC\/routes\/rpc\.routes/);
+        expect(protectedSource).toMatch(/protected-rpc\.routes/);
     });
 
     it.each([
@@ -140,6 +145,80 @@ describe("RPC proxy auth", () => {
         expect(next).not.toHaveBeenCalled();
         expect(ctx.status).toBe(403);
         expect(ctx.body.error).toBe("forbidden_origin");
+        config.extension.rpc.allowedRequestOrigins = [];
+    });
+
+    it("allows an authenticated POST with no Origin when the allowlist is set", async () => {
+        config.extension.rpc.allowedRequestOrigins = ["chrome-extension://extensionidexample"];
+        try {
+            const extension = await request(app.callback())
+                .post("/api/protected/rpc/solana")
+                .set("Authorization", `Bearer ${token}`)
+                .send({ jsonrpc: "2.0", id: 9, method: "getHealth", params: [] });
+            const legacy = await request(app.callback())
+                .post("/api/rpc/ethereum")
+                .set("Authorization", `Bearer ${token}`)
+                .send({ jsonrpc: "2.0", id: 10, method: "eth_chainId", params: [] });
+            const broadcast = await request(app.callback())
+                .post("/api/protected/rpc/btc/mainnet/tx")
+                .set("Authorization", `Bearer ${token}`)
+                .send({ hex: "00" });
+
+            expect(extension.status).toBe(200);
+            expect(legacy.status).toBe(200);
+            expect(broadcast.status).toBe(200);
+            expect(forwardRequest).toHaveBeenCalled();
+        } finally {
+            config.extension.rpc.allowedRequestOrigins = [];
+        }
+    });
+
+    it("rejects an authenticated POST that sends a foreign Origin", async () => {
+        config.extension.rpc.allowedRequestOrigins = ["chrome-extension://extensionidexample"];
+        try {
+            const res = await request(app.callback())
+                .post("/api/protected/rpc/ethereum")
+                .set("Authorization", `Bearer ${token}`)
+                .set("Origin", "https://evil.example")
+                .send({ jsonrpc: "2.0", id: 11, method: "eth_chainId", params: [] });
+
+            expect(res.status).toBe(403);
+            expect(res.body.error).toBe("forbidden_origin");
+            expect(forwardRequest).not.toHaveBeenCalled();
+
+            const allowed = await request(app.callback())
+                .post("/api/protected/rpc/ethereum")
+                .set("Authorization", `Bearer ${token}`)
+                .set("Origin", "chrome-extension://extensionidexample")
+                .send({ jsonrpc: "2.0", id: 12, method: "eth_chainId", params: [] });
+            expect(allowed.status).toBe(200);
+        } finally {
+            config.extension.rpc.allowedRequestOrigins = [];
+        }
+    });
+
+    it("still rejects a POST with no Origin when the caller is not authenticated at the middleware", async () => {
+        config.extension.rpc.allowedRequestOrigins = ["chrome-extension://extensionidexample"];
+        const ctx = {
+            get: () => "",
+            method: "POST",
+            state: {},
+            headers: {},
+            status: 200,
+            body: null,
+        };
+        const next = jest.fn();
+        await requireAllowedProtectedRpcOrigin(ctx, next);
+        expect(next).not.toHaveBeenCalled();
+        expect(ctx.status).toBe(403);
+        expect(ctx.body.error).toBe("forbidden_origin");
+
+        ctx.state = { user: { identifier: "device-1" } };
+        ctx.status = 200;
+        ctx.body = null;
+        const allowed = jest.fn();
+        await requireAllowedProtectedRpcOrigin(ctx, allowed);
+        expect(allowed).toHaveBeenCalled();
         config.extension.rpc.allowedRequestOrigins = [];
     });
 

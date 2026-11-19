@@ -12,7 +12,9 @@ const {
     maxBodyBytes,
     methodsForKind,
     redactSecrets,
+    sessionlessUpstreamPlan,
 } = require("../../../Core/rpc-upstreams");
+const { canonicalSessionlessMethod, inspectLogFilter, SESSIONLESS_CHAINS } = require("./sessionless-lane.module");
 
 const instance = getCleanInstance(config.rpc?.timeoutMs || 15000);
 
@@ -271,8 +273,150 @@ const forwardRequest = async ({ chain, chainId, method, params = [], origin, pur
     }
 };
 
+const jsonRpcUnavailable = (data) => {
+    if (!data?.error) return false;
+    const code = data.error.code;
+    if (code === -32005 || code === -32016) return true;
+    return /rate limit|too many requests|temporarily unavailable|service unavailable|timeout exceeded/i.test(String(data.error.message || ""));
+};
+
+const postJsonRpc = async (url, body) => {
+    const { data } = await instance.post(url, body, {
+        headers: { "Content-Type": "application/json" },
+        maxRedirects: 0,
+        maxBodyLength: maxBodyBytes(),
+        maxContentLength: UPSTREAM_RESPONSE_MAX_BYTES,
+    });
+    return data;
+};
+
+const classifyUpstream = (data, url) => {
+    if (bodyContainsUpstreamSecret(data, url)) return { leak: true };
+    if (jsonRpcUnavailable(data)) return { unavailable: true };
+    if (data?.error) return { rpcError: data.error, id: data.id };
+    return { ok: true, result: data?.result ?? null, id: data?.id };
+};
+
+const attemptUpstream = async (url, payload) => {
+    try {
+        const data = await postJsonRpc(url, payload);
+        return classifyUpstream(data, url);
+    } catch (error) {
+        if (isUpstreamResponseTooLarge(error)) return { tooLarge: true };
+        const status = Number(error?.response?.status);
+        const data = error?.response?.data;
+        const answered = data && typeof data === "object" && data.error && status >= 400 && status < 500 && ![401, 402, 403, 408, 429].includes(status);
+        if (answered) return classifyUpstream(data, url);
+        const transport = !error?.response || status === 401 || status === 402 || status === 403 || status === 408 || status === 429 || status >= 500;
+        if (transport) return { unavailable: true };
+        return { failed: true };
+    }
+};
+
+/**
+ * One JSON-RPC call on the compatibility lane.
+ * Reads go to the public endpoint first. eth_sendRawTransaction and eth_estimateGas
+ * use the paid URL first. A transport failure or an unavailable public node tries the other URL once.
+ * The caller reserves the rate-limit budget (`skipRateLimit`) when a batch is counted up front.
+ */
+const forwardSessionlessCall = async ({ chain, method, params = [], rpcId, ip }, options = {}) => {
+    const chainKey = String(chain || "").trim().toLowerCase();
+    if (!SESSIONLESS_CHAINS.has(chainKey)) {
+        throw fail(400, "This compatibility lane allows ethereum, avalanche, polygon, and bsc.", "RPC_SESSIONLESS_CHAIN_NOT_ALLOWED");
+    }
+
+    const canonical = canonicalSessionlessMethod(method);
+    if (!canonical) {
+        throw fail(403, "RPC method is not available on the compatibility lane.", "RPC_SESSIONLESS_METHOD_NOT_ALLOWED");
+    }
+
+    const normalizedParams = params == null ? [] : Array.isArray(params) || (typeof params === "object" && params !== null) ? params : [];
+    if (canonical === "eth_getLogs") {
+        const problem = inspectLogFilter(normalizedParams);
+        if (problem) throw fail(400, problem.message, problem.code);
+    }
+
+    const paramSlotCount = Array.isArray(normalizedParams)
+        ? normalizedParams.length
+        : typeof normalizedParams === "object" && normalizedParams !== null
+          ? Object.keys(normalizedParams).length
+          : 0;
+    if (paramSlotCount > (config.rpc?.maxParamsLength || 25)) {
+        throw fail(400, "Too many RPC params", "RPC_PARAMS_TOO_LARGE");
+    }
+
+    const encodedParams = JSON.stringify(normalizedParams);
+    if (Buffer.byteLength(encodedParams) > maxBodyBytes()) {
+        throw fail(413, "Request too large", "RPC_BODY_TOO_LARGE");
+    }
+
+    if (!options.skipRateLimit) {
+        await RpcCallerModule.assertNotBanned(ip);
+        await RpcCallerModule.assertWithinSessionlessRateLimit(ip, 1);
+        RpcCallerModule.recordRequest(ip);
+    }
+
+    const plan = sessionlessUpstreamPlan(chainKey, canonical);
+    if (!plan.primary) {
+        throw fail(503, "RPC upstream is not configured", "RPC_UPSTREAM_NOT_CONFIGURED");
+    }
+
+    const payload = {
+        jsonrpc: "2.0",
+        id: rpcId ?? 1,
+        method: canonical,
+        params: normalizedParams,
+    };
+
+    const logContext = {
+        chain: chainKey,
+        method: canonical,
+        origin: "native-app",
+        purpose: "sessionless-json-rpc",
+        ip: ip || null,
+    };
+
+    let outcome = await attemptUpstream(plan.primary, payload);
+    if ((outcome.unavailable || outcome.failed) && plan.fallback) {
+        outcome = await attemptUpstream(plan.fallback, payload);
+    }
+
+    if (outcome.tooLarge) {
+        console.warn("[RPC proxy] upstream response too large", { chain: chainKey, route: canonical });
+        const error = fail(413, "Upstream response is too large", "RESPONSE_TOO_LARGE");
+        persistRpcAudit({ ...logContext, success: false, httpStatus: 413, errorMessage: error.message });
+        throw error;
+    }
+
+    if (outcome.leak || outcome.unavailable || outcome.failed || (outcome.ok == null && !outcome.rpcError)) {
+        const error = fail(502, "RPC upstream request failed", "RPC_UPSTREAM_FAILED");
+        persistRpcAudit({ ...logContext, success: false, httpStatus: 502, errorMessage: error.message });
+        throw error;
+    }
+
+    if (outcome.rpcError) {
+        const error = fail(502, redactSecrets(outcome.rpcError.message || "RPC upstream error"), "RPC_UPSTREAM_ERROR");
+        const details = outcome.rpcError.data;
+        if (details != null && !bodyContainsUpstreamSecret(details, plan.primary) && !bodyContainsUpstreamSecret(details, plan.fallback)) {
+            error.details = typeof details === "string" ? redactSecrets(details) : details;
+        }
+        persistRpcAudit({ ...logContext, success: false, httpStatus: 502, errorMessage: truncateMessage(error.message) });
+        throw error;
+    }
+
+    persistRpcAudit({ ...logContext, success: true, httpStatus: 200 });
+
+    return {
+        chain: chainKey,
+        method: canonical,
+        result: outcome.result,
+        upstreamId: outcome.id ?? rpcId ?? 1,
+    };
+};
+
 module.exports = {
     forwardRequest,
+    forwardSessionlessCall,
     getChains,
     getExtensionChains,
 };

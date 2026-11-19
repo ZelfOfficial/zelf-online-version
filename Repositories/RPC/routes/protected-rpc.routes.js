@@ -12,10 +12,13 @@ const base = "/protected/rpc";
  * Auth: `Authorization: Bearer <token>` from `POST /api/sessions`.
  * The extension already mints that session from a device fingerprint before
  * unlock (`AuthService.checkAccessToken`), including onboarding balance reads.
- * There is no anonymous RPC route.
+ * Published native builds that cannot send a session use the separate
+ * compatibility lane on `POST /api/rpc/:chainKey` (`RPC_ALLOW_SESSIONLESS_APPS`).
  *
  * Origin: enforced only when `PROTECTED_RPC_ALLOWED_ORIGINS` or
- * `PROTECTED_RPC_CHROME_EXTENSION_IDS` is set.
+ * `PROTECTED_RPC_CHROME_EXTENSION_IDS` is set. A present Origin must match.
+ * An authenticated request with no Origin (native apps, and Chrome MV3 GET/HEAD)
+ * is allowed.
  *
  * JSON-RPC (single object or a batch of at most `RPC_PROXY_MAX_BATCH`, default 10):
  *   POST /api/protected/rpc/:chainKey

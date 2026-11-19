@@ -16,6 +16,9 @@ const { accessLog } = require("./Core/access-log");
 warnIfTlsVerificationDisabled();
 const app = new Koa();
 app.proxy = true; // Trust the proxy's X-Forwarded-For header
+// One reverse proxy appends the client address. Keep that hop so ctx.ip
+// (and every limiter that keys on it) stays on the proxy-appended address.
+app.maxIpsCount = 1;
 // First, so 401s from koa-jwt and later errors are included. Query strings are not logged.
 app.use(accessLog());
 // Shared with the unit tests; keeps the raw body for the Stripe webhook, zAI and the RPC proxy.
