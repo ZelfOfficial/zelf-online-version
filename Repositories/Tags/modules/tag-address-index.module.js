@@ -190,10 +190,54 @@ const hydrateMissingAddresses = (publicData, records = []) => {
     return publicData;
 };
 
+const _hasAddressValue = (value) => typeof value === "string" && value.trim() !== "";
+
+/**
+ * Last resort after IPFS continuation lookup: fill packed fields that are still
+ * empty from tagaddressindexes for this tag and domain. Does not overwrite a
+ * value already on the record and does not call Pinata.
+ */
+const fillMissingIndexedAddresses = async (publicData, { domain, tagName } = {}) => {
+    if (!publicData || typeof publicData !== "object") return publicData;
+    if (!_isReady()) return publicData;
+
+    const missing = PACKED_ONLY_ADDRESS_FIELDS.filter((key) => !_hasAddressValue(publicData[key]));
+    if (!missing.length) return publicData;
+
+    const resolvedName = _baseTagName(publicData, tagName);
+    const resolvedDomain = typeof domain === "string" && domain.trim() !== "" ? domain.trim() : publicData.domain;
+    if (!resolvedName || typeof resolvedDomain !== "string" || resolvedDomain.trim() === "") return publicData;
+
+    try {
+        const rows = await TagAddressIndex.find({
+            tagName: resolvedName,
+            domain: resolvedDomain.trim(),
+            key: { $in: missing },
+        })
+            .sort({ updatedAt: -1 })
+            .lean();
+
+        const filled = new Set();
+
+        for (const row of rows) {
+            if (!row || filled.has(row.key) || !missing.includes(row.key)) continue;
+            if (!_hasAddressValue(row.value)) continue;
+
+            publicData[row.key] = row.value.trim();
+            filled.add(row.key);
+        }
+    } catch (error) {
+        console.warn("tag-address-index address fallback failed:", resolvedName, error?.message || "read_failed");
+    }
+
+    return publicData;
+};
+
 module.exports = {
     canonicalKey,
     canonicalValue,
     entriesForRecord,
+    fillMissingIndexedAddresses,
     findTagNames,
     hydrateMissingAddresses,
     indexRecords,

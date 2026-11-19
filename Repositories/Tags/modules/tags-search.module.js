@@ -155,6 +155,12 @@ const searchTag = async (params, authUser) => {
                     (await TagsIPFSModule.hydrateContinuationAddresses(combinedResults.tagObject.publicData)) ||
                     combinedResults.tagObject.publicData;
             }
+
+            combinedResults.tagObject.publicData =
+                (await TagAddressIndexModule.fillMissingIndexedAddresses(combinedResults.tagObject.publicData, {
+                    domain,
+                    tagName,
+                })) || combinedResults.tagObject.publicData;
         }
 
         if (combinedResults.available && domainConfig && tagName) {
