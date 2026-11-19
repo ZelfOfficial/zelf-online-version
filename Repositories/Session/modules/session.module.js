@@ -9,6 +9,7 @@ const PGPKeyModule = require("../../PGP/modules/pgp-keys.module");
 const MongoORM = require("../../../Core/mongo-orm");
 const moment = require("moment");
 const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
+const { grantError, issueOwnerGrant, verifyOwnerGrant } = require("./owner-grant.module");
 const populates = [];
 
 /** Same 10-minute window as the session TTL (`activatedAt` expires after 600s). */
@@ -53,24 +54,50 @@ const claimedTagName = (value) => {
 	return trimmed;
 };
 
+/**
+ * A presented owner grant, or null when the client did not send one.
+ * The owner and the device identifier come from the signature. Body tagName is ignored.
+ * @param {Object} params
+ * @param {string} identifier value that will be stored on the new session
+ * @returns {{ zelfName: string, domain: string, identifier: string }|null}
+ */
+const ownerFromGrant = (params, identifier) => {
+	if (params.ownerGrant == null || params.ownerGrant === "") return null;
+
+	const presented = typeof params.ownerGrant === "string" ? params.ownerGrant.trim() : params.ownerGrant;
+	if (presented === "") return null;
+
+	const verified = verifyOwnerGrant(presented);
+	const requestedDomain = typeof params.domain === "string" && params.domain.trim() ? params.domain.trim().toLowerCase() : "zelf";
+	if (!identifier || verified.identifier !== identifier || requestedDomain !== verified.domain) {
+		throw grantError("ERR_OWNER_GRANT_INVALID");
+	}
+
+	return verified;
+};
+
 const insert = async (params) => {
 	await Model.ensureNonUniqueIdentifierIndex();
 
 	const claim = claimedTagName(params.tagName || params.zelfName);
+	const identifier = params.identifier || params.clientIP;
+	const grantOwner = ownerFromGrant(params, identifier);
+	const verifiedAt = grantOwner ? new Date() : null;
+	const verifiedUntil = grantOwner ? new Date(verifiedAt.getTime() + IDENTITY_VERIFIED_WINDOW_MS) : null;
 
 	const session = new Model({
 		clientIP: params.clientIP,
 		domain: params.domain || "zelf",
 		ethAddress: params.ethAddress || null,
-		identifier: params.identifier || params.clientIP,
+		identifier,
 		isWebExtension: params.isWebExtension || false,
 		status: "active",
-		// Client claim only. A session is not tag-verified until a decrypt stamps verifiedTagName from the record.
+		// Client claim only. A session is not tag-verified until a decrypt or an owner grant stamps verifiedTagName.
 		tagName: claim,
 		type: params.type || "general",
-		verifiedTagName: null,
-		verifiedAt: null,
-		verifiedUntil: null,
+		verifiedTagName: grantOwner ? grantOwner.zelfName : null,
+		verifiedAt,
+		verifiedUntil,
 	});
 
 	try {
@@ -84,7 +111,7 @@ const insert = async (params) => {
 		throw exception;
 	}
 
-	return {
+	const created = {
 		token: signToken(
 			{
 				domain: session.domain || "zelf",
@@ -100,6 +127,13 @@ const insert = async (params) => {
 		activatedAt: moment(session.activatedAt).utc().unix(),
 		expiresAt: moment(session.activatedAt).utc().add(10, "minutes").unix(),
 	};
+
+	if (grantOwner) {
+		created.verifiedTagName = grantOwner.zelfName;
+		created.verifiedUntil = moment(verifiedUntil).utc().unix();
+	}
+
+	return created;
 };
 
 const extractPublicKey = async (params) => {
@@ -369,6 +403,8 @@ const markSessionIdentityVerified = async (authUser, tagName, domain) => {
 	const verifiedAt = new Date();
 	const verifiedUntil = new Date(verifiedAt.getTime() + IDENTITY_VERIFIED_WINDOW_MS);
 
+	const existing = await Model.findById(authUser.session).select("identifier").lean();
+
 	await Model.updateOne(
 		{ _id: authUser.session },
 		{
@@ -385,7 +421,18 @@ const markSessionIdentityVerified = async (authUser, tagName, domain) => {
 	authUser.tagName = normalized.tagName;
 	authUser.domain = normalized.domain;
 
-	return { ...normalized, verifiedAt, verifiedUntil };
+	const issued = issueOwnerGrant({
+		zelfName: normalized.zelfName,
+		domain: normalized.domain,
+		identifier: existing?.identifier,
+	});
+
+	return {
+		...normalized,
+		verifiedAt,
+		verifiedUntil,
+		...(issued ? { ownerGrant: issued.ownerGrant, ownerGrantExpiresAt: issued.ownerGrantExpiresAt } : {}),
+	};
 };
 
 /**

@@ -38,6 +38,7 @@ const QRZelfProofExtractor = require("../../Tags/modules/qr-zelfproof-extractor.
 const ArweaveModule = require("../../Arweave/modules/arweave.module");
 const { unPinFiles, unpinContinuationSiblings } = require("../../Tags/modules/tags-ipfs.module");
 const { signToken, TOKEN_TYPES } = require("../../../Core/jwt-claims");
+const { withOwnerGrant } = require("../../Session/modules/owner-grant.module");
 const {
     resolveZelfIdPlan,
     resolveComplimentaryPlan,
@@ -196,10 +197,9 @@ const leaseTag = async (params, authUser) => {
         password
     );
 
-    const SessionModule = require("../../Session/modules/session.module");
-    await SessionModule.markSessionIdentityVerified(authUser, tagName, domain);
+    const stamp = await SessionModule.markSessionIdentityVerified(authUser, tagName, domain);
 
-    return {
+    return withOwnerGrant({
         ipfs: [tagObject.ipfs],
         available: false,
         name: tagName,
@@ -222,7 +222,7 @@ const leaseTag = async (params, authUser) => {
                     stellarSecretKey: stellar.secretKey,
                     substrateSecretKey: polkadot.secretKey,
                 },
-    };
+    }, stamp);
 };
 
 /**
@@ -386,16 +386,15 @@ const decryptTag = async (params, authUser) => {
         }
     }
 
-    const SessionModule = require("../../Session/modules/session.module");
     const decryptedRecord = {
         publicData: {
             ...(tagObject.publicData || {}),
             ...(decryptedZelfProof.publicData || {}),
         },
     };
-    await SessionModule.stampVerifiedFromRecord(authUser, decryptedRecord, tagName, domain);
+    const stamp = await SessionModule.stampVerifiedFromRecord(authUser, decryptedRecord, tagName, domain);
 
-    return {
+    return withOwnerGrant({
         ...tagObject,
         domain,
         pgp: { encryptedMessage, privateKey },
@@ -417,7 +416,7 @@ const decryptTag = async (params, authUser) => {
                     substrateSecretKey: (await createPolkadotWallet(mnemonic)).secretKey,
                 }
                 : undefined,
-    };
+    }, stamp);
 };
 
 /**

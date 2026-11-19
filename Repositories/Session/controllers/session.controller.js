@@ -75,6 +75,15 @@ const create = async (ctx) => {
 
 		ctx.body = { data };
 	} catch (error) {
+		const code = typeof error.code === "string" && /^ERR_[A-Z0-9_]+$/.test(error.code) ? error.code : null;
+
+		if (code) {
+			console.error({ code, status: error.status || 401 });
+			ctx.status = error.status || 401;
+			ctx.body = { error: code, code, message: error.message };
+			return;
+		}
+
 		console.error({ error });
 
 		ctx.status = error.status || 500;
