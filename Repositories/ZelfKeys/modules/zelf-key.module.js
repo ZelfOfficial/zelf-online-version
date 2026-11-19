@@ -38,33 +38,76 @@ const {
 } = require("./zelf-key-zotp.module");
 const PlanLimits = require("./zelf-key-plan-limits.module");
 
+const throwZelfIdentityRequired = () => {
+    const error = new Error("401:ERR_ZELF_IDENTITY_REQUIRED");
+    error.status = 401;
+    error.clientCode = "ERR_ZELF_IDENTITY_REQUIRED";
+    error.clientMessage = "Authenticated Zelf identity is required";
+    throw error;
+};
+
+const partsFromRawName = (raw, domainHint) => {
+    const domain = domainHint || "zelf";
+    const normalized = normalizeZelfName(String(raw).trim(), domain);
+
+    if (!normalized.tagName) throwZelfIdentityRequired();
+
+    return {
+        identifier: normalized.tagName,
+        domain: normalized.domain || domain,
+        zelfName: normalized.zelfName,
+    };
+};
+
+const firstNamed = (authToken, fields) =>
+    fields
+        .map((field) => authToken?.[field])
+        .find((value) => typeof value === "string" && value.trim());
+
 /**
- * Owner of a ZelfKey request: the server-verified name, or the name the app claims for this session
- * (only used by routes that face-verify it in the same request). A device/session `identifier` is never an owner.
+ * Owner written on a Zelf Key (create, save, update).
+ * Only the server-verified session identity: `verifiedTagName`, or `tagName` when hydrate /
+ * markSessionIdentityVerified set it from that stamp. A client claim (`claimedTagName`, or
+ * tagName / owner / keyOwner on the body) is never an owner. A device `identifier` is never an owner.
+ */
+const verifiedOwnerParts = (authToken) => {
+    const raw = firstNamed(authToken, ["verifiedTagName", "tagName"]);
+
+    if (!raw) throwZelfIdentityRequired();
+
+    return partsFromRawName(raw, authToken?.domain || "zelf");
+};
+
+/**
+ * Owner used to find records on read, list, and delete.
+ * Prefers the verified identity. A session claim is accepted only so an existing face-checked
+ * read or delete can still find that caller's records. It must not choose the owner written on a pin.
  */
 const ownerParts = (authToken) => {
-    const domain = authToken?.domain || "zelf";
-    const raw = [authToken?.verifiedTagName, authToken?.tagName, authToken?.claimedTagName].find(
-        (value) => typeof value === "string" && value.trim(),
-    );
+    const raw = firstNamed(authToken, ["verifiedTagName", "tagName", "claimedTagName"]);
 
-    if (!raw) {
-        const error = new Error("401:ERR_ZELF_IDENTITY_REQUIRED");
-        error.status = 401;
-        error.clientCode = "ERR_ZELF_IDENTITY_REQUIRED";
-        error.clientMessage = "Authenticated Zelf identity is required";
-        throw error;
-    }
+    if (!raw) throwZelfIdentityRequired();
 
-    const normalized = normalizeZelfName(raw.trim(), domain);
-    return {
-        identifier: normalized.tagName || raw.trim(),
-        domain: normalized.domain || domain,
-    };
+    return partsFromRawName(raw, authToken?.domain || "zelf");
 };
 
 const TYPES_REQUIRING_TRANSPORT_ENCRYPTION = new Set(["password", "notes", "note", "credit_card", "payment-card"]);
 const SUPPORTED_CATEGORIES = ["password", "notes", "credit_card", "contact", "zotp"];
+
+/**
+ * keyOwner and category on a pin always name the verified owner, in lowercase `name.domain` form.
+ * Fields the client put in the proof or the body do not override that.
+ */
+const withVerifiedKeyOwner = (publicData, owner) => {
+    const fullTagName = TagsPartsModule.getFullTagName(owner.identifier, owner.domain);
+    const type = typeof publicData?.type === "string" ? publicData.type : "";
+
+    return {
+        ...publicData,
+        keyOwner: fullTagName,
+        ...(SUPPORTED_CATEGORIES.includes(type) ? { category: `${fullTagName}_${type}` } : {}),
+    };
+};
 
 const ZELF_KEY_CLIENT_ERROR_STATUS = {
     ...ZELFPROOF_CLIENT_ERROR_STATUS,
@@ -268,7 +311,7 @@ const stampV4PublicData = (publicData) =>
     });
 
 const createMetadataAndPublicData = async (type, data, authToken) => {
-    const { identifier, domain } = ownerParts(authToken);
+    const { identifier, domain } = verifiedOwnerParts(authToken);
 
     const fullTagName = TagsPartsModule.getFullTagName(identifier, domain);
     const protection = resolveProtection(data.protection);
@@ -382,7 +425,7 @@ const createMetadataAndPublicData = async (type, data, authToken) => {
             throw new Error(`Unsupported data type: ${type}`);
     }
 
-    typePayload.publicData = stampV4PublicData(typePayload.publicData);
+    typePayload.publicData = stampV4PublicData(withVerifiedKeyOwner(typePayload.publicData, { identifier, domain }));
 
     return typePayload;
 };
@@ -522,6 +565,8 @@ const getShortTimestamp = () => {
  */
 const storeData = async (data, authToken) => {
     try {
+        verifiedOwnerParts(authToken);
+
         const { type, domain } = data;
 
         const protectionHint = resolveProtection(data.protection);
@@ -554,7 +599,10 @@ const storeData = async (data, authToken) => {
 
         const faceBase64 = decryptedParams.face;
 
-        const ownership = await _validateOwnership(data.faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
+        const ownership = await _validateOwnership(data.faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, {
+            ...data,
+            verifiedOwnerOnly: true,
+        });
 
         let capacityDecision = null;
         if (type === "password" || type === "zotp") {
@@ -734,6 +782,8 @@ const _storePasswordRecord = async (itemData, authToken, sharedContext, identifi
  * @returns {Promise<Object>}
  */
 const storePasswordsBulk = async (data, authToken) => {
+    verifiedOwnerParts(authToken);
+
     const { faceBase64, removePGP, passwords } = data;
 
     const batchProtectionHint = resolveProtection(data.protection);
@@ -741,7 +791,10 @@ const storePasswordsBulk = async (data, authToken) => {
 
     const decryptedParams = await decryptKeyCredentials({ faceBase64, removePGP, ...data }, authToken);
 
-    const ownership = await _validateOwnership(faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, data);
+    const ownership = await _validateOwnership(faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, {
+        ...data,
+        verifiedOwnerOnly: true,
+    });
     const capacity = await openPasswordCapacity(authToken, ownership?.publicData);
 
     const batchProtection = resolveProtection(data.protection);
@@ -1455,7 +1508,7 @@ const _adoptProvenOwner = (authToken, owner) => {
 };
 
 const _validateOwnership = async (faceBase64, zelfIdPassword, authToken, extraParams = {}) => {
-    const owner = ownerParts(authToken);
+    const owner = extraParams.verifiedOwnerOnly ? verifiedOwnerParts(authToken) : ownerParts(authToken);
     const sessionParams = {
         domain: owner.domain,
         faceBase64,
@@ -1630,7 +1683,7 @@ const _extractZelfProofFromItem = async (item) => {
     return { zelfProof, zelfProofQRCode };
 };
 
-const _prepareKeyReencrypt = async (item, faceBase64, oldPassword, newPassword) => {
+const _prepareKeyReencrypt = async (item, faceBase64, oldPassword, newPassword, owner) => {
     const { zelfProof } = await _extractZelfProofFromItem(item);
 
     const decrypted = await ZelfProofModule.decrypt({
@@ -1645,10 +1698,15 @@ const _prepareKeyReencrypt = async (item, faceBase64, oldPassword, newPassword) 
         remapZelfKeyCaughtError(decrypted.error);
     }
 
-    const publicData = stampV4PublicData({
-        ...(decrypted.publicData || item.publicData || {}),
-        protection: PROTECTION_FACE_PASSWORD,
-    });
+    const publicData = stampV4PublicData(
+        withVerifiedKeyOwner(
+            {
+                ...(decrypted.publicData || item.publicData || {}),
+                protection: PROTECTION_FACE_PASSWORD,
+            },
+            owner,
+        ),
+    );
 
     const identifier = item.name || item.publicData?.timestamp || item.id;
 
@@ -1686,6 +1744,7 @@ const _prepareKeyReencrypt = async (item, faceBase64, oldPassword, newPassword) 
  * @returns {Promise<Object>}
  */
 const changeMasterPassword = async (data, authToken) => {
+    const owner = verifiedOwnerParts(authToken);
     const { faceBase64, oldMasterPassword, newMasterPassword, removePGP } = data;
 
     const oldDecrypted = await TagsPartsModule.decryptParams(
@@ -1726,6 +1785,7 @@ const changeMasterPassword = async (data, authToken) => {
         await _validateOwnership(faceBase64, resolveZelfIdPasswordForOwnership(data), authToken, {
             ...data,
             skipKeyFallback: targets.length > 0,
+            verifiedOwnerOnly: true,
         });
     } catch (ownershipError) {
         if (!targets.length || data.zelfIdPassword || !_isPasswordMismatchOrRequiredError(ownershipError)) {
@@ -1752,6 +1812,7 @@ const changeMasterPassword = async (data, authToken) => {
                 oldDecrypted.face,
                 oldDecrypted.password,
                 newPassword,
+                owner,
             );
             prepared.push({ item, payload });
         } catch (error) {

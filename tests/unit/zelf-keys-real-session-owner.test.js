@@ -89,19 +89,97 @@ describe("Zelf Keys owner comes from the session, never from the identifier", ()
         expect(IPFS.pinFile).not.toHaveBeenCalled();
     });
 
-    test("a save with a claimed name face-verifies that name, and a failed check pins nothing", async () => {
+    test("a save with only a client-claimed name fails and pins nothing", async () => {
         const user = await sessionUser({ tagName: "johansecurity.zelf" });
-        TagsModule.decryptTag.mockRejectedValue(new Error("404:tag_not_found"));
 
         await expect(
-            ZelfKeyModule.storeData({ type: "zotp", faceBase64: "face", issuer: "Vercel", username: "a@a.com" }, user),
+            ZelfKeyModule.storeData(
+                {
+                    type: "zotp",
+                    faceBase64: "face",
+                    issuer: "Vercel",
+                    username: "a@a.com",
+                    tagName: "johansecurity.zelf",
+                    owner: "johansecurity.zelf",
+                    keyOwner: "johansecurity.zelf",
+                },
+                user,
+            ),
+        ).rejects.toMatchObject({
+            status: 401,
+            clientCode: "ERR_ZELF_IDENTITY_REQUIRED",
+        });
+
+        expect(TagsModule.decryptTag).not.toHaveBeenCalled();
+        expect(IPFS.pinFile).not.toHaveBeenCalled();
+    });
+
+    test("a verified session is the owner even when the client claims another name", async () => {
+        const created = await SessionModule.insert({
+            clientIP: "203.0.113.20",
+            identifier: "device-mismatch",
+            domain: "zelf",
+            tagName: "bob.zelf",
+        });
+        const payload = jwt.verify(created.token, config.JWT_SECRET);
+        await SessionModule.stampVerifiedFromRecord({ session: payload.session, domain: "zelf" }, { publicData: { zelfName: "Alice.Zelf" } });
+
+        const user = await SessionModule.hydrateSessionOwner(payload);
+        expect(user.verifiedTagName).toBe("alice.zelf");
+        expect(user.tagName).toBe("alice");
+        expect(user.claimedTagName).toBe("bob.zelf");
+
+        IPFS.filter.mockResolvedValue([]);
+        const listed = await ZelfKeyModule.listData({ category: "password", tagName: "bob.zelf" }, user);
+        expect(listed.fullTagName).toBe("alice.zelf");
+
+        TagsModule.decryptTag.mockRejectedValue(new Error("404:tag_not_found"));
+        await expect(
+            ZelfKeyModule.storeData(
+                {
+                    type: "zotp",
+                    faceBase64: "face",
+                    issuer: "Vercel",
+                    username: "a@a.com",
+                    tagName: "bob.zelf",
+                    owner: "bob.zelf",
+                    keyOwner: "bob.zelf",
+                },
+                user,
+            ),
         ).rejects.toBeDefined();
 
         expect(TagsModule.decryptTag).toHaveBeenCalledWith(
-            expect.objectContaining({ tagName: "johansecurity", domain: "zelf" }),
-            user,
+            expect.objectContaining({ tagName: "alice", domain: "zelf" }),
+            expect.anything(),
         );
         expect(IPFS.pinFile).not.toHaveBeenCalled();
+    });
+
+    test("list and delete still resolve a claimed name for that caller", async () => {
+        const user = await sessionUser({ tagName: "johansecurity.zelf" });
+        IPFS.filter.mockResolvedValue([]);
+
+        const listed = await ZelfKeyModule.listData({ category: "zotp" }, user);
+        expect(listed.fullTagName).toBe("johansecurity.zelf");
+
+        IPFS.getFileById.mockResolvedValue({
+            id: "pin-1",
+            publicData: {
+                keyOwner: "johansecurity.zelf",
+                category: "johansecurity.zelf_zotp",
+                type: "zotp",
+                protection: "face",
+            },
+        });
+        TagsModule.decryptTag.mockRejectedValue(new Error("404:tag_not_found"));
+
+        await expect(ZelfKeyModule.deleteZelfKey({ id: "pin-1", faceBase64: "face" }, user)).rejects.toBeDefined();
+        expect(TagsModule.decryptTag).toHaveBeenCalledWith(
+            expect.objectContaining({ tagName: "johansecurity", domain: "zelf" }),
+            expect.anything(),
+        );
+        expect(IPFS.deleteFiles).not.toHaveBeenCalled();
     });
 
     test("a verified session resolves owner for slots, swaps and limits without a tagName in the JWT", async () => {
