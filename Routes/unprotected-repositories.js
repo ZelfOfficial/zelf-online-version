@@ -30,7 +30,10 @@ module.exports = (server) => {
 
     //Q
     //R
-    // RPC proxy routes are registered with the protected routers (session JWT required).
+    // Authenticated RPC routes stay in protected-repositories.js.
+    // This lane answers POST /api/rpc/:chainKey only when RPC_ALLOW_SESSIONLESS_APPS=true
+    // and the request has no Authorization header. Every other request falls through to JWT.
+    require("../Repositories/RPC/routes/sessionless-rpc.routes")(server);
     //S
     require("../Repositories/SuperAdmin/routes/super-admin.route")(server);
     require("../Repositories/Session/routes/session.route")(server);

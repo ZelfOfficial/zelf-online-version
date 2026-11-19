@@ -92,7 +92,7 @@ describe("access log", () => {
 
         const response = await request(app.callback())
             .get(`/api/public/search?token=${TOKEN_QUERY}&page=2`)
-            .set("X-Forwarded-For", "198.51.100.10, 10.1.1.1")
+            .set("X-Forwarded-For", "198.51.100.10, 203.0.113.10")
             .set("X-Real-IP", "192.0.2.5")
             .set("Authorization", AUTH_HEADER)
             .set("Cookie", COOKIE)
@@ -108,7 +108,7 @@ describe("access log", () => {
         expect(line.path).toBe("/api/public/search");
         expect(line.path.includes("?")).toBe(false);
         expect(line.status).toBe(200);
-        expect(line.ip).toBe("198.51.100.10");
+        expect(line.ip).toBe("203.0.113.10");
         expect(line.userAgent).toHaveLength(USER_AGENT_LIMIT);
         expect(line.userAgent).toBe(userAgent.slice(0, USER_AGENT_LIMIT));
         expect(line.bytes).toBe(Buffer.byteLength(JSON.stringify({ ok: true })));

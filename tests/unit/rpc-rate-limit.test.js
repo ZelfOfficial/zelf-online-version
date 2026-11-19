@@ -10,7 +10,14 @@ jest.mock("../../Repositories/RPCCaller/models/rpc-caller-window.model", () => (
 
 const RpcCaller = require("../../Repositories/RPCCaller/models/rpc-caller.model");
 const RpcCallerWindow = require("../../Repositories/RPCCaller/models/rpc-caller-window.model");
-const { assertNotBanned, assertWithinRateLimit, userSubject } = require("../../Repositories/RPCCaller/modules/rpc-caller.module");
+const {
+    assertNotBanned,
+    assertWithinRateLimit,
+    assertWithinSessionlessRateLimit,
+    sessionlessSubject,
+    SESSIONLESS_GLOBAL_SUBJECT,
+    userSubject,
+} = require("../../Repositories/RPCCaller/modules/rpc-caller.module");
 
 describe("RPC caller rate limits", () => {
     beforeEach(() => {
@@ -57,6 +64,37 @@ describe("RPC caller rate limits", () => {
         await expect(assertWithinRateLimit("203.0.113.9")).rejects.toMatchObject({
             status: 429,
             clientCode: "rpc_rate_limited",
+        });
+    });
+
+    it("counts a sessionless batch on its own IP subject and the global subject", async () => {
+        RpcCallerWindow.findOneAndUpdate.mockReturnValue({
+            lean: async () => ({ count: 1 }),
+        });
+
+        await assertWithinSessionlessRateLimit("203.0.113.9", 3);
+
+        const updates = RpcCallerWindow.findOneAndUpdate.mock.calls.map((call) => ({
+            ip: call[0].ip,
+            inc: call[1].$inc.count,
+        }));
+        expect(updates).toEqual([
+            { ip: sessionlessSubject("203.0.113.9"), inc: 3 },
+            { ip: SESSIONLESS_GLOBAL_SUBJECT, inc: 3 },
+        ]);
+        expect(updates[0].ip).not.toBe("203.0.113.9");
+        expect(updates[0].ip.length).toBeLessThanOrEqual(45);
+        expect(updates[0].ip.startsWith("s:")).toBe(true);
+    });
+
+    it("returns RPC_SESSIONLESS_RATE_LIMITED from the compatibility lane bucket", async () => {
+        RpcCallerWindow.findOneAndUpdate.mockReturnValue({
+            lean: async () => ({ count: 100000 }),
+        });
+
+        await expect(assertWithinSessionlessRateLimit("203.0.113.9", 1)).rejects.toMatchObject({
+            status: 429,
+            clientCode: "RPC_SESSIONLESS_RATE_LIMITED",
         });
     });
 

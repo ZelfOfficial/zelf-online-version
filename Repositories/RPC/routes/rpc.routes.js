@@ -10,7 +10,9 @@ module.exports = (server) => {
 
     // Mounted with the protected routers, so koa-jwt runs first.
     // Same JSON-RPC body as POST /api/protected/rpc/:chainKey.
-    // Previously this path was unauthenticated. Callers must send a session JWT.
+    // Callers with a session JWT use this path. Published native builds that
+    // cannot send a session are answered earlier by the compatibility lane
+    // (Repositories/RPC/routes/sessionless-rpc.routes.js) only while that lane is on.
     // zelf-dashboard does not call it. The extension uses /api/protected/rpc.
     server.get(`${PATH}/chains`, requireAllowedProtectedRpcOrigin, Controller.getChains);
     server.post(
