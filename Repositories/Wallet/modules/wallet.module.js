@@ -6,6 +6,7 @@ const { createEthWallet } = require("./eth");
 const { createSolanaWallet } = require("./solana");
 const { createBTCWallet } = require("./btc");
 const sessionModule = require("../../Session/modules/session.module");
+const { withOwnerGrant } = require("../../Session/modules/owner-grant.module");
 const OfflineProofModule = require("../../../Core/offline-proof");
 const IPFSModule = require("../../IPFS/modules/ipfs.module");
 const { decryptWithPasswordFallback } = require("../../ZelfID/modules/zelf-id-password.module");
@@ -281,19 +282,22 @@ const decryptWallet = async (params, authUser) => {
 
 	// Verification uses the stored record for the claimed name. The name inside the client blob is only a lookup key.
 	const claimedName = requestedName != null && String(requestedName).trim() !== "" ? requestedName : recordName;
-	await verifySessionFromStoredRecord({
+	const stamp = await verifySessionFromStoredRecord({
 		authUser,
 		domain,
 		claimedName,
 		clientProof: zelfProof,
 	});
 
-	return {
-		...decryptedWallet,
-		image,
-		// zkProof: await OfflineProofModule.createProof(zelfProof),
-		zelfProof,
-	};
+	return withOwnerGrant(
+		{
+			...decryptedWallet,
+			image,
+			// zkProof: await OfflineProofModule.createProof(zelfProof),
+			zelfProof,
+		},
+		stamp
+	);
 };
 
 /**
@@ -441,8 +445,8 @@ const importWallet = async (params, authUser) => {
 
 	const saved = await _saveImportedWallet(wallet, params, dataToEncrypt, password, authUser);
 	const SessionModule = require("../../Session/modules/session.module");
-	await SessionModule.markSessionIdentityVerified(authUser, dataToEncrypt.publicData.zelfName, params.domain);
-	return saved;
+	const stamp = await SessionModule.markSessionIdentityVerified(authUser, dataToEncrypt.publicData.zelfName, params.domain);
+	return withOwnerGrant(saved, stamp);
 };
 
 /**

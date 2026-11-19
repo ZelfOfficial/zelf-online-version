@@ -20,6 +20,8 @@ const TOKEN_TYPES = {
     staffInvitation: "staff_invitation",
     lawyerInvitation: "lawyer_invitation",
     vaultLegacy: "vault_legacy",
+    /** Face-check owner grant. Not a session or bearer token. */
+    ownerGrant: "owner_grant",
 };
 
 const SUPER_ADMIN_ROLES = {
@@ -75,6 +77,7 @@ const BLOCKED_PRIVILEGE_TYPES = new Set([
     "monthly_access",
     "identity",
     "zai",
+    TOKEN_TYPES.ownerGrant,
 ]);
 
 const signToken = (payload, secret, options = {}) => {

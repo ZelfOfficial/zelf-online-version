@@ -56,6 +56,10 @@ Unknown inviter: `exists: false`, `spotsRemaining: 0`, `acceptsNewReferrals: fal
 
 A new signup (`POST /lease`, `POST /lease-offline`) or a checkout that attaches a referral not already stored on the record returns `409` with `code` and `message` `REFERRAL_LIMIT_REACHED` once `spotsRemaining` is 0. Address sync (`sync: true`) is not a new referral. The count is the same set used by `GET /api/my-tags/referrals` (`countedFriends` / the reward cap). Referrals already stored stay as they are, including ones over the cap. `POST /lease-recovery` does not return this error.
 
+## Owner grant
+
+A successful face check (`POST /decrypt`, `POST /lease`, and the wallet decrypt/import routes) adds `ownerGrant` and `ownerGrantExpiresAt` on `data`. The app stores that grant and sends it as `ownerGrant` on the next `POST /api/sessions`, with the same `identifier` used for the face-check session. The new session is stamped for 10 minutes as the owner named in the grant. `tagName` in the session body stays a claim. Contract: [`docs/api/owner-grant.md`](../../docs/api/owner-grant.md).
+
 ## Example — POST `/api/zelf-ids/lease`
 
 ```json
