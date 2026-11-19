@@ -312,4 +312,137 @@ describe("Zelf Keys store enforces plan limits", () => {
             tokenCost: 10,
         });
     });
+
+    test("save and bulk import record the verified owner and ignore a mismatched client tagName", async () => {
+        IPFS.filter.mockResolvedValue([]);
+        const user = {
+            verifiedTagName: "Alice.Zelf",
+            tagName: "Bob",
+            claimedTagName: "carol.zelf",
+            domain: "zelf",
+            identifier: "device-fingerprint-abc",
+        };
+        const clientNames = {
+            tagName: "bob.zelf",
+            owner: "bob.zelf",
+            keyOwner: "carol.zelf",
+            zelfName: "bob.zelf",
+        };
+        const ipfsModule = require("../../Repositories/ZelfKeys/modules/zelf-key-ipfs.module");
+
+        await ZelfKeyModule.storeData(passwordBody(clientNames), user);
+        await ZelfKeyModule.storeData(
+            {
+                type: "notes",
+                title: "Note",
+                keyValuePairs: { note: "a" },
+                faceBase64: "face",
+                ...clientNames,
+            },
+            user,
+        );
+        await ZelfKeyModule.storeData(
+            {
+                type: "zotp",
+                username: "user@zelf.world",
+                setupKey: "JBSWY3DPEHPK3PXP",
+                issuer: "GitHub",
+                faceBase64: "face",
+                ...clientNames,
+            },
+            user,
+        );
+        TagsPartsModule.decryptCreditCardParams.mockResolvedValue({
+            cardNumber: "4111111111111111",
+            cvv: "123",
+            expiryMonth: "12",
+            expiryYear: "2030",
+        });
+        await ZelfKeyModule.storeData(
+            {
+                type: "credit_card",
+                cardName: "Ada Lovelace",
+                cardNumber: "4111111111111111",
+                expiryMonth: "12",
+                expiryYear: "2030",
+                cvv: "123",
+                bankName: "Chase",
+                faceBase64: "face",
+                ...clientNames,
+            },
+            user,
+        );
+
+        const bulk = await ZelfKeyModule.storePasswordsBulk(
+            {
+                faceBase64: "face",
+                passwords: [{ website: "https://one.example", username: "one", password: "a" }],
+                ...clientNames,
+            },
+            user,
+        );
+        expect(bulk.successCount).toBe(1);
+
+        const saved = ipfsModule.saveZelfKey.mock.calls.map((call) => call[0]);
+        expect(saved).toHaveLength(5);
+        for (const row of saved) {
+            expect(row.publicData.keyOwner).toBe("alice.zelf");
+            expect(row.publicData.category.startsWith("alice.zelf_")).toBe(true);
+            expect(row.identifier.startsWith("alice.zelf_")).toBe(true);
+            expect(JSON.stringify(row.publicData)).not.toMatch(/bob|carol/i);
+        }
+
+        expect(TagsModule.decryptTag).toHaveBeenCalled();
+        for (const call of TagsModule.decryptTag.mock.calls) {
+            expect(call[0]).toEqual(expect.objectContaining({ tagName: "alice", domain: "zelf" }));
+        }
+    });
+
+    test("a client tagName without a verified owner is rejected before anything is pinned", async () => {
+        const claimOnly = {
+            claimedTagName: "bob.zelf",
+            domain: "zelf",
+            identifier: "device-fingerprint-abc",
+        };
+        const clientNames = { tagName: "bob.zelf", owner: "bob.zelf", keyOwner: "bob.zelf" };
+        const ipfsModule = require("../../Repositories/ZelfKeys/modules/zelf-key-ipfs.module");
+
+        await expect(ZelfKeyModule.storeData(passwordBody(clientNames), claimOnly)).rejects.toMatchObject({
+            status: 401,
+            clientCode: "ERR_ZELF_IDENTITY_REQUIRED",
+        });
+        await expect(
+            ZelfKeyModule.storePasswordsBulk(
+                {
+                    faceBase64: "face",
+                    passwords: [{ website: "https://one.example", username: "one", password: "a" }],
+                    ...clientNames,
+                },
+                claimOnly,
+            ),
+        ).rejects.toMatchObject({
+            status: 401,
+            clientCode: "ERR_ZELF_IDENTITY_REQUIRED",
+        });
+        await expect(
+            ZelfKeyModule.createMetadataAndPublicData("notes", { title: "Note", keyValuePairs: { note: "a" }, ...clientNames }, claimOnly),
+        ).rejects.toMatchObject({
+            status: 401,
+            clientCode: "ERR_ZELF_IDENTITY_REQUIRED",
+        });
+        await expect(
+            ZelfKeyModule.changeMasterPassword(
+                { faceBase64: "face", oldMasterPassword: "old", newMasterPassword: "new" },
+                claimOnly,
+            ),
+        ).rejects.toMatchObject({
+            status: 401,
+            clientCode: "ERR_ZELF_IDENTITY_REQUIRED",
+        });
+
+        expect(TagsModule.decryptTag).not.toHaveBeenCalled();
+        expect(ZelfProofModule.encrypt).not.toHaveBeenCalled();
+        expect(ipfsModule.saveZelfKey).not.toHaveBeenCalled();
+        expect(IPFS.pinFile).not.toHaveBeenCalled();
+    });
 });

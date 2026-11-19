@@ -210,6 +210,74 @@ describe("ZelfKeys changeMasterPassword", () => {
         expect(result.updatedCount).toBe(1);
     });
 
+    it("re-pins the verified owner when the stored metadata and the client claim name someone else", async () => {
+        const user = {
+            verifiedTagName: "Alice.Zelf",
+            tagName: "Bob",
+            claimedTagName: "carol.zelf",
+            domain: "zelf",
+        };
+        ZelfProofModule.decrypt.mockResolvedValue({
+            metadata: { password: "site-secret" },
+            publicData: {
+                ...facePasswordItem.publicData,
+                keyOwner: "bob.zelf",
+                category: "bob.zelf_password",
+            },
+        });
+
+        await ZelfKeyModule.changeMasterPassword(
+            {
+                faceBase64: "face",
+                oldMasterPassword: "old-secret",
+                newMasterPassword: "new-secret",
+                removePGP: true,
+                tagName: "bob.zelf",
+                owner: "bob.zelf",
+                keyOwner: "carol.zelf",
+            },
+            user,
+        );
+
+        expect(IPFS.pinFile).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.anything(),
+            null,
+            expect.objectContaining({
+                keyOwner: "alice.zelf",
+                category: "alice.zelf_password",
+            }),
+        );
+        const searched = IPFS.filter.mock.calls.map((call) => String(call[1]));
+        expect(searched.some((value) => value.includes("alice.zelf"))).toBe(true);
+        expect(searched.some((value) => /bob|carol/i.test(value))).toBe(false);
+        expect(TagsModule.decryptTag).toHaveBeenCalledWith(
+            expect.objectContaining({ tagName: "alice", domain: "zelf" }),
+            expect.anything(),
+        );
+    });
+
+    it("rejects a master-password change when the session has no verified owner", async () => {
+        await expect(
+            ZelfKeyModule.changeMasterPassword(
+                {
+                    faceBase64: "face",
+                    oldMasterPassword: "old-secret",
+                    newMasterPassword: "new-secret",
+                    tagName: "bob.zelf",
+                },
+                { claimedTagName: "bob.zelf", domain: "zelf" },
+            ),
+        ).rejects.toMatchObject({
+            status: 401,
+            clientCode: "ERR_ZELF_IDENTITY_REQUIRED",
+        });
+
+        expect(TagsPartsModule.decryptParams).not.toHaveBeenCalled();
+        expect(IPFS.filter).not.toHaveBeenCalled();
+        expect(IPFS.pinFile).not.toHaveBeenCalled();
+    });
+
     it("propagates 401:ERR_INVALID_PASSWORD when oldMasterPassword fails to decrypt face_password keys", async () => {
         const wrongKeyPass = new Error("ERR_INVALID_PASSWORD");
         wrongKeyPass.code = "ERR_INVALID_PASSWORD";
