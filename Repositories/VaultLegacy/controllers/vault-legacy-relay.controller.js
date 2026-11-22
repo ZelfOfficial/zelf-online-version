@@ -3,21 +3,20 @@
  *
  * Handles relay endpoints called by the Android WebView JS bundle:
  *   - POST /api/vault-legacy/relay/ipfs-upload     → Pinata proxy
- *   - POST /api/vault-legacy/relay/send-tx         → broadcast pre-built calldata
+ *   - POST /api/vault-legacy/relay/send-tx         → vault-registry calls for a vault-legacy session
  *   - POST /api/vault-legacy/relay/register-emails → email registry (MongoDB)
  *   - POST /api/vault-legacy/relay/collect-share   → in-memory share store
  *   - GET  /api/vault-legacy/relay/shares/:vaultId → retrieve collected shares
  */
 
 const { ethers } = require("ethers");
-const fs = require("fs");
-const path = require("path");
 
 const config = require("../../../Core/config");
 const VaultLegacy = require("../models/vault-legacy.model");
 const LegacyDemo = require("../modules/vault-legacy-demo.module");
 const VaultLegacyModule = require("../modules/vault-legacy.module");
 const RelayerHealth = require("../modules/vault-legacy-relayer.module");
+const RelayPolicy = require("../modules/vault-legacy-relay-policy.module");
 
 const { sendLawyerNewPlan, sendTestatorPlanActive } = require("../modules/email");
 
@@ -33,7 +32,6 @@ const CONTRACT_ADDRESS = process.env.LEGACY_VAULT_REGISTRY_ADDRESS;
 
 let provider = null;
 let relayerWallet = null;
-let iface = null;
 
 function initRelayer() {
     if (relayerWallet) return;
@@ -46,14 +44,6 @@ function initRelayer() {
     provider = new ethers.JsonRpcProvider(AVALANCHE_RPC_URL);
     relayerWallet = new ethers.Wallet(RELAYER_PRIVATE_KEY, provider);
     console.log(`🔑 VaultLegacy relayer wallet: ${relayerWallet.address}`);
-
-    try {
-        const abiPath = path.resolve(__dirname, "../contracts/VaultRegistry.json");
-        const artifact = JSON.parse(fs.readFileSync(abiPath, "utf8"));
-        iface = new ethers.Interface(artifact.abi);
-    } catch {
-        console.warn("⚠️  VaultRegistry ABI not found — calldata decoding disabled");
-    }
 
     if (CONTRACT_ADDRESS) {
         RelayerHealth.getRelayerHealth()
@@ -165,37 +155,44 @@ const registerEmails = async (ctx) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/vault-legacy/relay/send-tx
 // ─────────────────────────────────────────────────────────────────────────────
+const sendRelayError = (ctx, error) => {
+    if (error && error.status && RelayPolicy.RELAY_CLIENT_CODES.has(error.code)) {
+        ctx.status = error.status;
+        ctx.body = { error: error.code, code: error.code };
+        return true;
+    }
+    return false;
+};
+
 const sendTx = async (ctx) => {
     try {
+        RelayPolicy.assertRelaySession(ctx.state?.legacyUser);
+
+        const normalized = RelayPolicy.normalizeRelayTransaction(ctx.request.body || {});
+
         initRelayer();
-        if (!relayerWallet) {
+        if (!relayerWallet || !provider) {
             ctx.status = 503;
-            ctx.body = { error: "Relayer not configured" };
+            ctx.body = { error: "RELAY_NOT_CONFIGURED", code: "RELAY_NOT_CONFIGURED" };
             return;
         }
 
-        const { to, calldata, value } = ctx.request.body;
-        if (!to || !calldata) {
-            ctx.status = 400;
-            ctx.body = { error: "Missing required fields: to, calldata" };
-            return;
-        }
-
-        let fnName = "unknown";
-        let decoded = null;
-        if (iface) {
-            try {
-                decoded = iface.parseTransaction({ data: calldata });
-                fnName = decoded?.name || "unknown";
-            } catch {}
-        }
-        console.log(`📡 Relaying tx → ${fnName} (${calldata.substring(0, 10)}...)`);
+        const { to, data, fnName, decoded } = normalized;
+        console.log(`📡 Relaying vault tx → ${fnName}`);
 
         if (fnName === "createVault") {
             await RelayerHealth.assertRelayerMatchesContract();
         }
 
-        const tx = await relayerWallet.sendTransaction({ to, data: calldata, value: value || "0x0" });
+        const gas = await RelayPolicy.resolveRelayGas(provider, relayerWallet, { to, data });
+        const tx = await relayerWallet.sendTransaction({
+            to,
+            data,
+            value: 0n,
+            gasLimit: gas.gasLimit,
+            maxFeePerGas: gas.maxFeePerGas,
+            maxPriorityFeePerGas: gas.maxPriorityFeePerGas,
+        });
         console.log(`📤 Tx sent: ${tx.hash}`);
         let receipt;
         try {
@@ -267,6 +264,7 @@ const sendTx = async (ctx) => {
 
         ctx.body = { txHash: tx.hash, blockNumber: receipt.blockNumber };
     } catch (error) {
+        if (sendRelayError(ctx, error)) return;
         ctx.status = 500;
         ctx.body = { error: error.message };
     }

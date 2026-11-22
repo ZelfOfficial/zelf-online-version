@@ -1,6 +1,7 @@
 require("dotenv").config();
 const FormData = require("form-data");
 const axios = require("axios");
+const { unpinPublicCids } = require("./ipfs-unpin");
 
 const pinataEnv = process.env.PINATA_ENV || process.env.IPFS_ENV || process.env.NODE_ENV || "development";
 const prefix = pinataEnv === "development" ? "_" : "";
@@ -377,9 +378,7 @@ const filter = async (property = "name", value, options = {}) => {
     }
 };
 
-const unPinFiles = async (CIDs = []) => {
-    return await web3Instance.unpin(CIDs);
-};
+const unPinFiles = async (CIDs = []) => unpinPublicCids(web3Instance, CIDs);
 
 const deleteFiles = async (ids = []) => {
     if (!Array.isArray(ids)) {

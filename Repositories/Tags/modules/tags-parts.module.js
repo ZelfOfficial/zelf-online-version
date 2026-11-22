@@ -4,6 +4,7 @@ const { generateStorageKey, generateHoldDomain } = require("./domain-registry.mo
 const config = require("../../../Core/config");
 const { getDomainConfig } = require("../config/supported-domains");
 const SessionModule = require("../../Session/modules/session.module");
+const { fetchAllowedImage } = require("../../../Core/safe-image-fetch");
 
 /**
  * Tags Parts Module
@@ -135,30 +136,11 @@ const generateQRCode = async (params, authUser) => {
  */
 const urlToBase64 = async (url) => {
     try {
-        const response = await fetch(url, { signal: AbortSignal.timeout(3500) });
-
-        if (!response.ok) {
-            console.warn(`urlToBase64: HTTP ${response.status} for ${url}`);
-            return null;
-        }
-
-        const contentType = response.headers.get("content-type") || "";
-
-        if (
-            !contentType.startsWith("image/png") &&
-            !contentType.startsWith("image/jpeg") &&
-            !contentType.startsWith("application/octet-stream")
-        ) {
-            console.warn(`urlToBase64: expected image/png or image/jpeg, got ${contentType} for ${url}`);
-            return null;
-        }
-
-        const buffer = await response.arrayBuffer();
-        const base64 = Buffer.from(buffer).toString("base64");
+        const { buffer, contentType } = await fetchAllowedImage(url);
         const outputMimeType = contentType.startsWith("image/jpeg") ? "image/jpeg" : "image/png";
-        return `data:${outputMimeType};base64,${base64}`;
+        return `data:${outputMimeType};base64,${buffer.toString("base64")}`;
     } catch (error) {
-        console.error("Error converting URL to base64:", error);
+        console.warn("urlToBase64: image fetch rejected:", error.code || error.message);
         return null;
     }
 };
