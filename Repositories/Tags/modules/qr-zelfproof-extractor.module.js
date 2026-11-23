@@ -1,4 +1,5 @@
 const { Buffer } = require("buffer");
+const { fetchAllowedImage } = require("../../../Core/safe-image-fetch");
 
 // Use sharp for image decoding (avoids canvas/sharp native lib conflict)
 let sharp;
@@ -73,30 +74,14 @@ class QRZelfProofExtractor {
 	static async extractZelfProof(base64Image) {
 		if (!base64Image) return null;
 
-		if (base64Image?.includes("https")) {
+		const imageSource = typeof base64Image === "string" ? base64Image.trim() : "";
+		if (/^https:\/\//i.test(imageSource)) {
 			try {
-				const response = await fetch(base64Image);
-
-				if (!response.ok) {
-					console.warn(`extractZelfProof: HTTP ${response.status} for ${base64Image}`);
-					return null;
-				}
-
-				const contentType = response.headers.get("content-type") || "";
-				if (
-					!contentType.startsWith("image/png") &&
-					!contentType.startsWith("image/jpeg") &&
-					!contentType.startsWith("application/octet-stream")
-				) {
-					console.warn(`extractZelfProof: expected image/png or image/jpeg, got ${contentType} for ${base64Image}`);
-					return null;
-				}
-
-				const buffer = await response.arrayBuffer();
-				const base64 = Buffer.from(buffer).toString("base64");
-				base64Image = `data:image/png;base64,${base64}`;
+				const { buffer, contentType } = await fetchAllowedImage(imageSource);
+				const mime = contentType.startsWith("image/jpeg") ? "image/jpeg" : "image/png";
+				base64Image = `data:${mime};base64,${buffer.toString("base64")}`;
 			} catch (fetchError) {
-				console.warn("extractZelfProof: fetch failed:", fetchError.message);
+				console.warn("extractZelfProof: image fetch rejected:", fetchError.code || fetchError.message);
 				return null;
 			}
 		}

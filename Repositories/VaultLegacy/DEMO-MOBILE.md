@@ -41,7 +41,7 @@ When building `createVault` calldata:
 - Set **`lawyer`** to `demoLawyerAddress` from `/demo/status` (must match server `LEGACY_DEMO_LAWYER_ADDRESS`).
 - Optionally use a shorter `heartbeatInterval` for staging; server default is `LEGACY_DEMO_HEARTBEAT_INTERVAL` when omitted.
 
-Relay via `POST /api/vault-legacy/relay/send-tx` as today. The server **auto-accepts** demo vaults after creation; **do not** show a “waiting for lawyer acceptance” step.
+Relay via `POST /api/vault-legacy/relay/send-tx` with the vault-legacy bearer token. `to` must be the configured vault registry, `value` must be omitted or `0`, and `calldata` must be one of `createVault`, `updateHeartbeat`, `cancelVault`, `changeLawyer`, `acceptVault`, `rejectVault`, `confirmDeath`, or `executeVault`. Other targets, values, and selectors are rejected with an `UPPER_SNAKE` `code`. The server **auto-accepts** demo vaults after creation; **do not** show a “waiting for lawyer acceptance” step.
 
 ### 4. Active plan & liveness
 

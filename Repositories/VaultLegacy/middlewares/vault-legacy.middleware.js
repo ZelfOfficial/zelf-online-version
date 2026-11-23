@@ -15,6 +15,11 @@ const LEGACY_JWT_SECRET = process.env.LEGACY_JWT_SECRET || process.env.CONNECTIO
  * Require a valid Bearer JWT in the Authorization header.
  * Attaches the decoded payload to ctx.state.legacyUser.
  */
+const deny = (ctx, code) => {
+    ctx.status = 401;
+    ctx.body = { error: code, code };
+};
+
 const requireJWT = async (ctx, next) => {
     const authHeader = ctx.headers["authorization"] || "";
     let token = null;
@@ -24,22 +29,28 @@ const requireJWT = async (ctx, next) => {
     }
 
     if (!token) {
-        ctx.status = 401;
-        ctx.body = { error: "Authorization header with Bearer token is required" };
+        deny(ctx, "MISSING_AUTHORIZATION");
+        return;
+    }
+
+    if (!LEGACY_JWT_SECRET) {
+        deny(ctx, "INVALID_TOKEN");
         return;
     }
 
     try {
         const decoded = jwt.verify(token, LEGACY_JWT_SECRET);
         if (decoded.typ !== TOKEN_TYPES.vaultLegacy) {
-            ctx.status = 401;
-            ctx.body = { error: "INVALID_TOKEN_TYPE", code: "INVALID_TOKEN_TYPE" };
+            deny(ctx, "INVALID_TOKEN_TYPE");
+            return;
+        }
+        if (typeof decoded.identifier !== "string" || decoded.identifier.trim() === "") {
+            deny(ctx, "INVALID_TOKEN");
             return;
         }
         ctx.state.legacyUser = decoded;
-    } catch (e) {
-        ctx.status = 401;
-        ctx.body = { error: "Invalid or expired token" };
+    } catch (_error) {
+        deny(ctx, "INVALID_TOKEN");
         return;
     }
 

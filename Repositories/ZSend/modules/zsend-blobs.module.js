@@ -46,7 +46,9 @@ const pinCiphertext = async (params, authUser) => {
 };
 
 /**
- * Best-effort unpin. A failure here must not block deleting the envelope.
+ * Delete the pin zSend created for this ciphertext.
+ * The Pinata SDK deletes by file id, so the CID is resolved first.
+ * A failure is logged and does not block the envelope update.
  * @param {string} cid
  */
 const unpinCiphertext = async (cid) => {
@@ -57,7 +59,7 @@ const unpinCiphertext = async (cid) => {
 
 		return true;
 	} catch (exception) {
-		console.error("zsend_unpin_failed", { cid, message: exception?.message });
+		console.error("zsend_unpin_failed", { cid, code: exception?.code || null, message: exception?.message });
 
 		return false;
 	}
