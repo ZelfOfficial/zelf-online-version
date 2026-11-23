@@ -101,6 +101,7 @@ For a test file that expects another port, export that same `PORT` before starti
 - Demo mode env: `LEGACY_DEMO_MODE`, `LEGACY_DEMO_LAWYER_ADDRESS` (see `.env.example`). Do not enable on production.
 - Heartbeat cron: `node Repositories/VaultLegacy/check-vaults.js`.
 - Mobile demo contract: `Repositories/VaultLegacy/DEMO-MOBILE.md`.
+- Session proof contract: `Repositories/VaultLegacy/SESSION-PROOF.md`. `VAULT_LEGACY_SESSION_PROOF` defaults to `legacy` (installation id still issues a 24-hour token and is logged). `required` demands the challenge signature. Proven relay calls must match the wallet's vault role. Caps: `VAULT_LEGACY_RELAY_DAILY_CAP` (20 per wallet or legacy identifier per UTC day), `VAULT_LEGACY_RELAY_IP_DAILY_CAP` (200). Proven TTL: `VAULT_LEGACY_PROVEN_SESSION_TTL_SECONDS` (3600).
 
 ### Docs work
 

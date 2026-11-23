@@ -58,6 +58,7 @@ This is a Koa backend API with MongoDB, Mongoose, and JWT-protected routes.
 -   Never enable demo mode on production `v4.zelf.world`.
 -   Cron: `node Repositories/VaultLegacy/check-vaults.js` (auto-confirms succession for demo vaults after liveness expiry).
 -   Mobile contract: `Repositories/VaultLegacy/DEMO-MOBILE.md`.
+-   Session proof: `VAULT_LEGACY_SESSION_PROOF=legacy` (default) still accepts an installation id and logs it. `required` demands an EIP-191 signature over `POST /api/vault-legacy/sessions/challenge`. Proven tokens bind `relay/send-tx` to that wallet. Daily caps: `VAULT_LEGACY_RELAY_DAILY_CAP` (20) and `VAULT_LEGACY_RELAY_IP_DAILY_CAP` (200). Contract: `Repositories/VaultLegacy/SESSION-PROOF.md`.
 
 ## Development-only JWT encrypt mirrors
 

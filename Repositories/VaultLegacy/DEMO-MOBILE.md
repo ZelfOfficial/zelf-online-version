@@ -20,6 +20,8 @@ POST /api/vault-legacy/sessions
 
 Use returned `token` as `Authorization: Bearer <token>` on all vault-legacy routes.
 
+`VAULT_LEGACY_SESSION_PROOF` defaults to `legacy`, so this identifier-only body keeps working. The wallet-signature flow, relay binding, and daily relay caps are in `SESSION-PROOF.md`. Android and iOS should adopt that flow before the flag is set to `required`.
+
 ### 2. Register emails (before `createVault`)
 
 ```http

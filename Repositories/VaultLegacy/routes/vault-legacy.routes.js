@@ -16,7 +16,8 @@ module.exports = (server) => {
     const PATH = config.basePath(BASE);
     const RELAY_PATH = config.basePath(RELAY_BASE);
 
-    // --- Auth: unprotected session endpoint ---
+    // --- Auth: unprotected session endpoints ---
+    server.post(`${PATH}/sessions/challenge`, SessionController.challenge);
     server.post(`${PATH}/sessions`, SessionController.create);
 
     // --- Demo mode status (banner for mobile; only meaningful when LEGACY_DEMO_MODE=true) ---
