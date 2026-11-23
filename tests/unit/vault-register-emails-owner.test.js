@@ -61,6 +61,18 @@ describe("vault register-emails owner", () => {
         ).rejects.toMatchObject({ status: 403, code: "VAULT_OWNER_MISMATCH" });
     });
 
+    test("accepts a wallet-proven session before the vault is on chain", async () => {
+        const owner = ethers.Wallet.createRandom();
+        mockGetVault.mockResolvedValue({ exists: false, owner: ethers.ZeroAddress });
+
+        const proven = await assertCanRegisterVaultEmails({
+            vaultId,
+            legacyUser: { identifier: "install-1", proof: "eip191", ethAddress: owner.address },
+        });
+
+        expect(proven).toBe(owner.address);
+    });
+
     test("rejects a session that does not prove ownership before the vault exists", async () => {
         mockGetVault.mockResolvedValue({ exists: false, owner: ethers.ZeroAddress });
 

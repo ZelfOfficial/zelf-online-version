@@ -18,6 +18,7 @@ const VaultLegacy = require("../models/vault-legacy.model");
 const IPFSManager = require("./ipfs-legacy.module");
 const AvalancheManager = require("./avalanche-legacy.module");
 const LegacyDemo = require("./vault-legacy-demo.module");
+const { sessionProofMode } = require("./vault-legacy-session-proof.module");
 
 // Lazy-initialized singletons
 let _ipfsManager = null;
@@ -115,25 +116,22 @@ const assertCanRegisterVaultEmails = async ({ vaultId, authSig, legacyUser, exis
     const vaultIdNorm = LegacyDemo.normalizeVaultId(vaultId);
     const signer = addressOrNull(recoverRegisterEmailsSigner(authSig, vaultIdNorm));
     const sessionAddress = addressOrNull(legacyUser?.ethAddress || legacyUser?.walletAddress || legacyUser?.identifier);
+    const provenSession = legacyUser?.proof === "eip191" ? addressOrNull(legacyUser?.ethAddress) : null;
+    const sessionForExistingVault = sessionProofMode() === "required" ? provenSession : provenSession || sessionAddress;
     const onChainOwner = await lookupVaultOwner(vaultIdNorm);
     const storedOwner = addressOrNull(existing?.ownerAddress);
 
     if (typeof onChainOwner === "string") {
         const signerOwns = signer && signer === onChainOwner;
-        const sessionOwns = sessionAddress && sessionAddress === onChainOwner;
+        const sessionOwns = sessionForExistingVault && sessionForExistingVault === onChainOwner;
         if (!signerOwns && !sessionOwns) throw vaultOwnerMismatch();
         return onChainOwner;
     }
 
-    if (onChainOwner === undefined) {
-        if (!signer) throw vaultOwnerMismatch();
-        if (storedOwner && signer !== storedOwner) throw vaultOwnerMismatch();
-        return signer;
-    }
-
-    if (!signer) throw vaultOwnerMismatch();
-    if (storedOwner && signer !== storedOwner) throw vaultOwnerMismatch();
-    return signer;
+    const claimant = signer || provenSession;
+    if (!claimant) throw vaultOwnerMismatch();
+    if (storedOwner && claimant !== storedOwner) throw vaultOwnerMismatch();
+    return claimant;
 };
 
 const verifyAuthSig = (authSig, expectedPrefix) => {

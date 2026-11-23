@@ -69,6 +69,7 @@ const { signToken, TOKEN_TYPES } = require("../../Core/jwt-claims");
 const { requireJWT } = require("../../Repositories/VaultLegacy/middlewares/vault-legacy.middleware");
 const { sendTx } = require("../../Repositories/VaultLegacy/controllers/vault-legacy-relay.controller");
 const { iface } = require("../../Repositories/VaultLegacy/modules/vault-legacy-relay-policy.module");
+const { _resetRelayGuard } = require("../../Repositories/VaultLegacy/modules/vault-legacy-relay-guard.module");
 
 const VAULT_ID = `0x${"cd".repeat(32)}`;
 const calldata = iface.encodeFunctionData("updateHeartbeat", [VAULT_ID]);
@@ -91,6 +92,10 @@ describe("vault-legacy relay send-tx", () => {
 
     beforeEach(() => {
         process.env.LEGACY_VAULT_REGISTRY_ADDRESS = REGISTRY;
+        delete process.env.VAULT_LEGACY_SESSION_PROOF;
+        delete process.env.VAULT_LEGACY_RELAY_DAILY_CAP;
+        delete process.env.VAULT_LEGACY_RELAY_IP_DAILY_CAP;
+        _resetRelayGuard();
         mockSendTransaction.mockReset();
         mockEstimateGas.mockReset();
         mockGetFeeData.mockReset();
@@ -172,5 +177,44 @@ describe("vault-legacy relay send-tx", () => {
         expect(tx.value).toBe(0n);
         expect(tx.gasLimit).toBeLessThanOrEqual(2_000_000n);
         expect(tx.maxFeePerGas).toBeLessThanOrEqual(500n * 10n ** 9n);
+    });
+
+    test("rejects a proven session whose wallet is not the createVault owner", async () => {
+        const owner = "0x4444444444444444444444444444444444444444";
+        const other = "0x5555555555555555555555555555555555555555";
+        const createCalldata = iface.encodeFunctionData("createVault", [
+            other,
+            VAULT_ID,
+            [other],
+            other,
+            1,
+            2592000,
+            "cid",
+            "cid-validator",
+        ]);
+        const ctx = ctxFor(
+            { to: REGISTRY, calldata: createCalldata },
+            { typ: TOKEN_TYPES.vaultLegacy, identifier: "install-1", proof: "eip191", ethAddress: owner }
+        );
+
+        await sendTx(ctx);
+
+        expect(ctx.status).toBe(403);
+        expect(ctx.body.code).toBe("RELAY_IDENTITY_MISMATCH");
+        expect(mockSendTransaction).not.toHaveBeenCalled();
+    });
+
+    test("stops after the daily identity cap without sending another transaction", async () => {
+        process.env.VAULT_LEGACY_RELAY_DAILY_CAP = "1";
+        const first = ctxFor({ to: REGISTRY, calldata });
+        await sendTx(first);
+        expect(first.status).toBe(200);
+
+        const second = ctxFor({ to: REGISTRY, calldata });
+        await sendTx(second);
+
+        expect(second.status).toBe(429);
+        expect(second.body).toEqual({ error: "RELAY_DAILY_CAP_EXCEEDED", code: "RELAY_DAILY_CAP_EXCEEDED" });
+        expect(mockSendTransaction).toHaveBeenCalledTimes(1);
     });
 });

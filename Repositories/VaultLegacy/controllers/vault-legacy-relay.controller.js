@@ -17,6 +17,7 @@ const LegacyDemo = require("../modules/vault-legacy-demo.module");
 const VaultLegacyModule = require("../modules/vault-legacy.module");
 const RelayerHealth = require("../modules/vault-legacy-relayer.module");
 const RelayPolicy = require("../modules/vault-legacy-relay-policy.module");
+const RelayGuard = require("../modules/vault-legacy-relay-guard.module");
 
 const { sendLawyerNewPlan, sendTestatorPlanActive } = require("../modules/email");
 
@@ -169,6 +170,12 @@ const sendTx = async (ctx) => {
         RelayPolicy.assertRelaySession(ctx.state?.legacyUser);
 
         const normalized = RelayPolicy.normalizeRelayTransaction(ctx.request.body || {});
+        const verdict = RelayGuard.assessCall({
+            legacyUser: ctx.state?.legacyUser,
+            fnName: normalized.fnName,
+            decoded: normalized.decoded,
+        });
+        if (verdict.legacy) RelayGuard.logLegacyRelay(normalized.fnName);
 
         initRelayer();
         if (!relayerWallet || !provider) {
@@ -176,6 +183,16 @@ const sendTx = async (ctx) => {
             ctx.body = { error: "RELAY_NOT_CONFIGURED", code: "RELAY_NOT_CONFIGURED" };
             return;
         }
+
+        if (verdict.needsVault) {
+            const vault = await RelayGuard.lookupVault(provider, normalized.to, verdict.vaultId);
+            RelayGuard.assertVaultRole(verdict, vault);
+        }
+
+        await RelayGuard.reserveRelay({
+            legacyUser: ctx.state.legacyUser,
+            ip: RelayGuard.requestIp(ctx),
+        });
 
         const { to, data, fnName, decoded } = normalized;
         console.log(`📡 Relaying vault tx → ${fnName}`);
