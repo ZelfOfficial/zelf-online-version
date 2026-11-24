@@ -24,7 +24,11 @@ const rewardsSchema = new mongoose.Schema(
 		status: {
 			type: String,
 			default: "claimed",
-			enum: ["pending", "claimed", "expired", "failed"],
+			enum: ["pending", "processing", "claimed", "expired", "failed"],
+		},
+		// Signature and lock for an in-flight daily payout. The day is "claimed" only after that payout is confirmed.
+		payload: {
+			type: mongoose.Schema.Types.Mixed,
 		},
 		failReason: {
 			type: String,
