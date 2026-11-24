@@ -30,7 +30,7 @@ Registered in `Routes/protected-repositories.js`. `GET /referral-availability` i
 | GET | `/coupons` | super-admin list |
 | POST | `/coupons/:id/deactivate` | super-admin. Sets `active` false and keeps the code |
 | POST | `/smart-contract-payment-confirmation` | `tagName`, `network` (`AVAX_SC` / `BSC_SC` / `ETH_SC` / `POLYGON_SC` / `BASE_SC` / `BLOCKDAG_SC`), `token`, `txHash`; optional `domain` |
-| POST | `/lease` | `tagName`, `domain`, `faceBase64`, `type` (`create`\|`import`), `os`. A referral whose inviter is already at `REFERRAL_REWARD_LIMIT` (default 10) is `409` `REFERRAL_LIMIT_REACHED`. Recovery (`/lease-recovery`) is not capped: restoring an account is not a new referral |
+| POST | `/lease` | `tagName`, `domain`, `faceBase64`, `type` (`create`\|`import`), `os`. A referral whose inviter is already at the license cap (`tags.referrals.limit`, otherwise `REFERRAL_REWARD_LIMIT`, otherwise 10) is `409` `REFERRAL_LIMIT_REACHED`. Recovery (`/lease-recovery`) is not capped: restoring an account is not a new referral |
 | POST | `/lease-offline` | `tagName`, `domain`, plus `zelfProof` and/or `zelfProofQRCode`; optional `sync`, `syncPublicData`, `syncPassword`/`password` for address sync on an existing name |
 | POST | `/sync-addresses` | `tagName`, `domain`, `syncPublicData` (address fields plus `_syncSignature`, `_syncIssuedAt`; no `zelfProof`) |
 | POST | `/lease-recovery` | `zelfProof`, `tagName`, `domain`, `faceBase64`, `password`, `os` |
@@ -46,15 +46,21 @@ Registered in `Routes/protected-repositories.js`. `GET /referral-availability` i
 
 ### Referral cap
 
-`GET /api/zelf-ids/referral-availability?tagName=alice&domain=zelf` (also accepts `referralTagName` or `referral`). No session. Response `data` is only:
+`GET /api/zelf-ids/referral-availability?tagName=alice&domain=zelf` (also accepts `referralTagName` or `referral`). No session. Response `data`:
 
 ```json
-{ "exists": true, "limit": 10, "spotsRemaining": 3, "acceptsNewReferrals": true }
+{
+  "exists": true,
+  "limit": 5,
+  "spotsRemaining": 2,
+  "acceptsNewReferrals": true,
+  "tags": { "referrals": { "limit": 5 } }
+}
 ```
 
-Unknown inviter: `exists: false`, `spotsRemaining: 0`, `acceptsNewReferrals: false`, and the same `limit`. The body never includes the referral list, friend names, wallet addresses, emails, or plan.
+`limit` and `tags.referrals.limit` are the same cap. A positive integer on the domain license (`tags.referrals.limit`) wins. Otherwise `REFERRAL_REWARD_LIMIT`, otherwise 10. `Domain` keeps that license field when it rebuilds `tags`. Unknown inviter: `exists: false`, `spotsRemaining: 0`, `acceptsNewReferrals: false`, and that same cap. The body never includes the referral list, friend names, wallet addresses, emails, or plan.
 
-A new signup (`POST /lease`, `POST /lease-offline`) or a checkout that attaches a referral not already stored on the record returns `409` with `code` and `message` `REFERRAL_LIMIT_REACHED` once `spotsRemaining` is 0. Address sync (`sync: true`) is not a new referral. The count is the same set used by `GET /api/my-tags/referrals` (`countedFriends` / the reward cap). Referrals already stored stay as they are, including ones over the cap. `POST /lease-recovery` does not return this error.
+A new signup (`POST /lease`, `POST /lease-offline`) or a checkout that attaches a referral not already stored on the record returns `409` with `code` and `message` `REFERRAL_LIMIT_REACHED` once `spotsRemaining` is 0. Address sync (`sync: true`) is not a new referral. The count is the same set used by `GET /api/my-tags/referrals` and `POST /api/my-tags/referrals/claim` (`countedFriends` / the reward cap). A claim past the cap returns `409` `REFERRAL_LIMIT_REACHED`. Referrals already stored stay as they are, including ones over the cap. `POST /lease-recovery` does not return this error.
 
 ## Owner grant
 

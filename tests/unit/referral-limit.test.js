@@ -5,6 +5,28 @@ const {
     DEFAULT_REFERRAL_REWARD_LIMIT,
     canonicalReferralTagName,
 } = require("../../Repositories/Tags/modules/referral-reward.util");
+const { Domain } = require("../../Repositories/Tags/modules/domain.class");
+
+const withReferralEnv = (value, run) => {
+    const previous = process.env.REFERRAL_REWARD_LIMIT;
+    if (value === undefined) delete process.env.REFERRAL_REWARD_LIMIT;
+    else process.env.REFERRAL_REWARD_LIMIT = value;
+    try {
+        return run();
+    } finally {
+        if (previous === undefined) delete process.env.REFERRAL_REWARD_LIMIT;
+        else process.env.REFERRAL_REWARD_LIMIT = previous;
+    }
+};
+
+const license = (referrals) =>
+    new Domain({
+        name: "zelf",
+        tags: {
+            referrals,
+            payment: { discounts: {}, whitelist: {}, pricingTable: {} },
+        },
+    });
 
 const friends = (n) =>
     new Map(
@@ -12,11 +34,46 @@ const friends = (n) =>
     );
 
 describe("referral reward limit (#45)", () => {
-    test("default limit is 10, env override", () => {
+    test("license limit wins; env and 10 apply only when the license has no cap", () => {
         expect(DEFAULT_REFERRAL_REWARD_LIMIT).toBe(10);
-        expect(referralRewardLimit(undefined)).toBe(10);
-        expect(referralRewardLimit("5")).toBe(5);
-        expect(referralRewardLimit("x")).toBe(10);
+
+        withReferralEnv(undefined, () => {
+            expect(referralRewardLimit(undefined)).toBe(10);
+            expect(referralRewardLimit({})).toBe(10);
+            expect(referralRewardLimit("5")).toBe(5);
+            expect(referralRewardLimit("x")).toBe(10);
+            expect(referralRewardLimit({ tags: { referrals: { limit: 4 } } })).toBe(4);
+        });
+
+        withReferralEnv("7", () => {
+            expect(referralRewardLimit()).toBe(7);
+            expect(referralRewardLimit({})).toBe(7);
+            expect(referralRewardLimit({ tags: {} })).toBe(7);
+            expect(referralRewardLimit({ tags: { referrals: { limit: 4 } } })).toBe(4);
+            expect(referralRewardLimit({ tags: { referrals: { limit: "3" } } })).toBe(3);
+            expect(referralRewardLimit({ tags: { referrals: { limit: 0 } } })).toBe(7);
+            expect(referralRewardLimit({ tags: { referrals: { limit: -2 } } })).toBe(7);
+            expect(referralRewardLimit({ tags: { referrals: { limit: 1.5 } } })).toBe(7);
+            expect(referralRewardLimit({ tags: { referrals: { limit: "x" } } })).toBe(7);
+            expect(referralRewardLimit({ tags: { referrals: { limit: true } } })).toBe(7);
+            expect(referralRewardLimit("5")).toBe(5);
+            expect(referralRewardLimit("x")).toBe(10);
+        });
+    });
+
+    test("Domain keeps tags.referrals.limit through a license rebuild", () => {
+        const kept = license({ limit: "6", note: "cap" });
+        expect(kept.tags.referrals).toEqual({ limit: 6, note: "cap" });
+        expect(kept.toJSON().tags.referrals.limit).toBe(6);
+        expect(new Domain(kept.toJSON()).tags.referrals.limit).toBe(6);
+        expect(referralRewardLimit(kept)).toBe(6);
+
+        withReferralEnv("7", () => {
+            const dropped = license({ limit: 0 });
+            expect(dropped.tags.referrals).toBeUndefined();
+            expect(dropped.toJSON().tags.referrals).toBeUndefined();
+            expect(referralRewardLimit(dropped)).toBe(7);
+        });
     });
 
     test("11 friends: first 10 count, the 11th is history", () => {
