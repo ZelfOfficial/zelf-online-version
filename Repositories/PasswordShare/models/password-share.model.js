@@ -18,11 +18,11 @@ const PasswordShareSchema = new Schema(
 		/** Unguessable public id (256-bit, base64url). This is the path segment. */
 		shareId: { type: String, required: true, unique: true },
 
-		/** Session `identifier` from POST /api/sessions. Ownership checks use only this. */
-		ownerIdentifier: { type: String, required: true },
-
-		/** Display-only copy of the session tag, when the client sent one. Not an authz key. */
-		ownerTagName: { type: String, default: null },
+		/**
+		 * Verified session Zelf name (`verifiedTagName`), lowercase `name.domain`.
+		 * Not the device identifier, and not a name sent by the client.
+		 */
+		ownerZelfName: { type: String, required: true },
 
 		/** Standard base64 ciphertext. Nulled when the last view is consumed or the owner revokes. */
 		ciphertext: { type: String, default: null },
@@ -46,6 +46,6 @@ const PasswordShareSchema = new Schema(
 );
 
 PasswordShareSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
-PasswordShareSchema.index({ ownerIdentifier: 1, createdAt: -1 });
+PasswordShareSchema.index({ ownerZelfName: 1, createdAt: -1 });
 
 module.exports = mongoose.models.PasswordShare || mongoose.model("PasswordShare", PasswordShareSchema);

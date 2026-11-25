@@ -18,11 +18,13 @@ Password-share responses also send `Access-Control-Expose-Headers: Retry-After`.
 
 Success bodies are the objects below. They are not wrapped in `{ data }`.
 
-Error bodies are `{ "code": "<UPPER_SNAKE>", "message": "<same code>" }` plus the HTTP status in the table. A missing or invalid session on an owner route is the existing JWT 401: `{ "error": "Protected resource, use Authorization header to get access" }`.
+Error bodies are `{ "code": "<UPPER_SNAKE>", "message": "<same code>" }` plus the HTTP status in the table, except `ERR_ZELF_IDENTITY_REQUIRED`, whose `message` is `Authenticated Zelf identity is required` (same shape as Zelf Keys). A missing or invalid session on an owner route is the existing JWT 401: `{ "error": "Protected resource, use Authorization header to get access" }`.
 
 ## Owner routes
 
-Require `Authorization: Bearer <token>` from `POST /api/sessions`. The owner is that session's `identifier`. A later session with the same `identifier` can list and revoke. `tagName` is stored for display and is not the ownership key.
+Require `Authorization: Bearer <token>` from `POST /api/sessions`, and a current verified-session stamp. After JWT, `hydrateOwner` copies `verifiedTagName` onto the request only while that stamp is inside `verifiedUntil`. The owner of a share is that name (`name.domain`). List and revoke use the same name.
+
+A name in the body, query, or headers (`owner`, `tagName`, `identifier`, `keyOwner`, `zelfName`, `claimedTagName`) is ignored. The device `identifier` is not an owner. A session with no current `verifiedTagName` gets `401` `ERR_ZELF_IDENTITY_REQUIRED` on create, list, and revoke.
 
 ### `POST /api/password-shares`
 
@@ -128,7 +130,7 @@ When `remainingViews` reaches 0 the ciphertext and IV are deleted. A second conc
 | 400 | `INVALID_MAX_VIEWS` | `maxViews` is not an integer from 1 to 10 |
 | 400 | `INVALID_LABEL` | Label is not a string, is longer than 60, or contains control characters |
 | 400 | `SHARE_KEY_NOT_ACCEPTED` | Body includes `key`, `password`, `plaintext`, `secret`, `dek`, `contentKey`, `aesKey`, or `encryptionKey` |
-| 401 | `SHARE_SESSION_REQUIRED` | Owner route reached with a session that has no `identifier` |
+| 401 | `ERR_ZELF_IDENTITY_REQUIRED` | Owner route whose session has no current `verifiedTagName`. `message` is `Authenticated Zelf identity is required` |
 | 403 | `SHARE_FORBIDDEN` | Authenticated delete of a share owned by another `identifier` |
 | 404 | `SHARE_NOT_FOUND` | Unknown id, revoked, or consumed. These cases use the same code |
 | 410 | `SHARE_EXPIRED` | The row is past `expiresAt` and has not been reaped. Revoked rows stay `404` |
@@ -136,6 +138,6 @@ When `remainingViews` reaches 0 the ciphertext and IV are deleted. A second conc
 | 429 | `PASSWORD_SHARE_RATE_LIMITED` | Create, metadata, or reveal exceeded the per-minute cap. `Retry-After` is set and listed in `Access-Control-Expose-Headers` |
 | 500 | `SHARE_UNAVAILABLE` | The database write or read failed |
 
-Rate limits (per minute, in-memory, override with env): create `PASSWORD_SHARE_CREATE_RATE_LIMIT_PER_MINUTE` (default 30, keyed by session `identifier`), metadata `PASSWORD_SHARE_METADATA_RATE_LIMIT_PER_MINUTE` (default 60, per IP), reveal `PASSWORD_SHARE_REVEAL_RATE_LIMIT_PER_MINUTE` (default 20, per IP).
+Rate limits (per minute, in-memory, override with env): create `PASSWORD_SHARE_CREATE_RATE_LIMIT_PER_MINUTE` (default 30, keyed by the verified Zelf name), metadata `PASSWORD_SHARE_METADATA_RATE_LIMIT_PER_MINUTE` (default 60, per IP), reveal `PASSWORD_SHARE_REVEAL_RATE_LIMIT_PER_MINUTE` (default 20, per IP).
 
 Request bodies and ciphertext are not written to logs on these routes. The raw request body copy is discarded before the handler runs.

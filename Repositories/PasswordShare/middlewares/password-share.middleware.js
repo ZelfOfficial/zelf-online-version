@@ -43,7 +43,7 @@ const discardRawBody = async (ctx, next) => {
 
 const rateLimit = (kind) => async (ctx, next) => {
 	try {
-		const identifier = kind === "create" ? ctx.state?.user?.identifier : undefined;
+		const identifier = kind === "create" ? ctx.state?.user?.verifiedTagName : undefined;
 		assertPasswordShareRateLimit(kind, ctx.ip || ctx.request.ip, identifier);
 	} catch (error) {
 		const handled = errorHandler(error);

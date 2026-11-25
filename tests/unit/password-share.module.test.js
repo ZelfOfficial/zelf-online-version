@@ -14,7 +14,14 @@ const {
 	revokeShare,
 } = require("../../Repositories/PasswordShare/modules/password-share.module");
 
-const user = (identifier) => ({ identifier, tagName: "Alice.zelf", session: "session-1" });
+const user = (zelfName = "owner-a.zelf") => ({
+	verifiedTagName: String(zelfName).includes(".") ? zelfName : `${zelfName}.zelf`,
+	domain: "zelf",
+	session: "session-1",
+	identifier: `device-${zelfName}`,
+	claimedTagName: "claimed.zelf",
+	tagName: "claimed.zelf",
+});
 
 const payload = (overrides = {}) => ({
 	ciphertext: crypto.randomBytes(32).toString("base64"),
@@ -25,14 +32,14 @@ const payload = (overrides = {}) => ({
 	...overrides,
 });
 
-const expectCode = async (promise, status, code) => {
+const expectCode = async (promise, status, code, message = code) => {
 	try {
 		await promise;
 	} catch (error) {
 		const handled = errorHandler(error);
 		expect(handled.status).toBe(status);
 		expect(handled.code).toBe(code);
-		expect(handled.message).toBe(code);
+		expect(handled.message).toBe(message);
 		expect(JSON.stringify(handled)).not.toMatch(/ciphertext|BEGIN/);
 		return;
 	}
@@ -79,8 +86,9 @@ describe("password share module", () => {
 		expect(doc.version).toBe(1);
 		expect(doc.label).toBe("Bank");
 		expect(doc.remainingViews).toBe(3);
-		expect(doc.ownerIdentifier).toBe("owner-a");
-		expect(doc.ownerTagName).toBe("alice.zelf");
+		expect(doc.ownerZelfName).toBe("owner-a.zelf");
+		expect(doc.ownerIdentifier).toBeUndefined();
+		expect(doc.ownerTagName).toBeUndefined();
 		expect(doc.key).toBeUndefined();
 		expect(doc.password).toBeUndefined();
 		expect(doc.plaintext).toBeUndefined();
@@ -262,11 +270,57 @@ describe("password share module", () => {
 		await expectCode(createShare(payload({ label: "line\nbreak" }), owner), 400, "INVALID_LABEL");
 		await expectCode(createShare(payload({ key: crypto.randomBytes(32).toString("base64url") }), owner), 400, "SHARE_KEY_NOT_ACCEPTED");
 		await expectCode(createShare(payload({ plaintext: "hunter2" }), owner), 400, "SHARE_KEY_NOT_ACCEPTED");
-		await expectCode(createShare(payload(), {}), 401, "SHARE_SESSION_REQUIRED");
+		await expectCode(
+			createShare(payload(), { identifier: "device", tagName: "alice.zelf", claimedTagName: "alice.zelf" }),
+			401,
+			"ERR_ZELF_IDENTITY_REQUIRED",
+			"Authenticated Zelf identity is required"
+		);
 
-		const stored = await PasswordShare.find({ ownerIdentifier: "owner-a" }).lean();
+		const stored = await PasswordShare.find({ ownerZelfName: "owner-a.zelf" }).lean();
 		expect(stored).toHaveLength(1);
 		expect(JSON.stringify(stored)).not.toContain("hunter2");
+	});
+
+	test("a client-claimed owner is ignored and the verified session name is stored", async () => {
+		const created = await createShare(
+			payload({
+				owner: "mallory.zelf",
+				tagName: "mallory.zelf",
+				identifier: "mallory-device",
+				keyOwner: "mallory.zelf",
+				zelfName: "mallory.zelf",
+				claimedTagName: "mallory.zelf",
+			}),
+			{
+				verifiedTagName: "Alice.Zelf",
+				tagName: "mallory.zelf",
+				claimedTagName: "mallory.zelf",
+				identifier: "mallory-device",
+				domain: "zelf",
+				session: "session-1",
+			}
+		);
+
+		const doc = await PasswordShare.findOne({ shareId: created.id }).lean();
+		expect(doc.ownerZelfName).toBe("alice.zelf");
+		expect(JSON.stringify(doc)).not.toContain("mallory");
+
+		const mine = await listShares({ verifiedTagName: "alice.zelf", domain: "zelf" });
+		expect(mine.shares.map((share) => share.id)).toContain(created.id);
+
+		const claimed = await listShares({ verifiedTagName: "mallory.zelf", domain: "zelf" });
+		expect(claimed.shares).toHaveLength(0);
+	});
+
+	test("an unverified session cannot create, list, or revoke", async () => {
+		const unverified = { identifier: "device-1", tagName: "alice.zelf", claimedTagName: "alice.zelf", session: "session-1" };
+		const message = "Authenticated Zelf identity is required";
+
+		await expectCode(createShare(payload(), unverified), 401, "ERR_ZELF_IDENTITY_REQUIRED", message);
+		await expectCode(listShares(unverified), 401, "ERR_ZELF_IDENTITY_REQUIRED", message);
+		await expectCode(revokeShare("a".repeat(43), unverified), 401, "ERR_ZELF_IDENTITY_REQUIRED", message);
+		expect(await PasswordShare.countDocuments()).toBe(0);
 	});
 
 	test("omitted maxViews defaults to 1 and an empty label is dropped", async () => {

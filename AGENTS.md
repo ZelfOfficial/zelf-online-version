@@ -55,7 +55,7 @@ This is a Koa backend API with MongoDB, Mongoose, and JWT-protected routes.
 ## Secure password shares
 
 - Feature root: `Repositories/PasswordShare/`. Contract: `Repositories/PasswordShare/CONTRACT.md`.
-- Owner routes (`POST`, `GET` collection, `DELETE`) are session JWT. Public metadata and reveal are unauthenticated.
+- Owner routes (`POST`, `GET` collection, `DELETE`) are session JWT. The owner is the verified session `verifiedTagName`. Public metadata and reveal are unauthenticated.
 - The API stores ciphertext only. Production share links use `https://zelf.world` (`config.landingUrl`).
 - Focused check: `PORT=3003 npm run test:password-shares`.
 

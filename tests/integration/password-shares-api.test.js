@@ -4,6 +4,7 @@ const request = require("supertest");
 require("dotenv").config();
 
 const PasswordShare = require("../../Repositories/PasswordShare/models/password-share.model");
+const Session = require("../../Repositories/Session/models/session.model");
 
 const API_BASE_URL = `http://localhost:${process.env.PORT || 3003}`;
 const PATH = "/api/password-shares";
@@ -21,12 +22,35 @@ const payload = (overrides = {}) => ({
 	...overrides,
 });
 
-const openSession = async (identifier) => {
+const sessionIdFromToken = (token) => {
+	const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString());
+	return payload.session;
+};
+
+const mongoUri = () => process.env.MONGODB_URI || process.env.MONGODB_URI_PROD || "mongodb://127.0.0.1:27017/zelf_testing";
+
+const stampVerifiedOwner = async (token, zelfName) => {
+	if (mongoose.connection.readyState !== 1) await mongoose.connect(mongoUri());
+	const updated = await Session.updateOne(
+		{ _id: sessionIdFromToken(token) },
+		{
+			$set: {
+				verifiedTagName: zelfName,
+				verifiedAt: new Date(),
+				verifiedUntil: new Date(Date.now() + 10 * 60 * 1000),
+				status: "active",
+			},
+		}
+	);
+	expect(updated.matchedCount).toBe(1);
+};
+
+const openSession = async (identifier, tagName) => {
 	const response = await request(API_BASE_URL).post("/api/sessions").set("Origin", ORIGIN).send({
 		identifier,
 		type: "general",
 		isWebExtension: true,
-		tagName: "share-test.zelf",
+		tagName,
 	});
 
 	expect(response.status).toBe(200);
@@ -41,8 +65,10 @@ describe("password shares API", () => {
 	const otherId = uniqueId();
 
 	beforeAll(async () => {
-		token = await openSession(ownerId);
-		otherToken = await openSession(otherId);
+		token = await openSession(ownerId, "claimed-a.zelf");
+		otherToken = await openSession(otherId, "claimed-b.zelf");
+		await stampVerifiedOwner(token, "share-owner-a.zelf");
+		await stampVerifiedOwner(otherToken, "share-owner-b.zelf");
 	});
 
 	afterAll(async () => {
@@ -56,6 +82,41 @@ describe("password shares API", () => {
 		expect(response.status).toBe(200);
 		return response.body;
 	};
+
+	it("rejects an unverified session and ignores a client-claimed owner", async () => {
+		const unverified = await openSession(uniqueId(), "mallory.zelf");
+		const denied = await auth(request(API_BASE_URL).post(PATH), unverified).send(
+			payload({ owner: "share-owner-a.zelf", tagName: "share-owner-a.zelf", identifier: ownerId })
+		);
+
+		expect(denied.status).toBe(401);
+		expect(denied.body).toEqual({
+			code: "ERR_ZELF_IDENTITY_REQUIRED",
+			message: "Authenticated Zelf identity is required",
+		});
+
+		const created = await createShare(
+			payload({
+				owner: "share-owner-b.zelf",
+				tagName: "share-owner-b.zelf",
+				identifier: otherId,
+				keyOwner: "share-owner-b.zelf",
+				zelfName: "share-owner-b.zelf",
+				label: "Mine",
+			})
+		);
+
+		const doc = await PasswordShare.findOne({ shareId: created.id }).lean();
+		expect(doc.ownerZelfName).toBe("share-owner-a.zelf");
+
+		const mine = await auth(request(API_BASE_URL).get(PATH));
+		expect(mine.body.shares.some((share) => share.id === created.id)).toBe(true);
+
+		const theirs = await auth(request(API_BASE_URL).get(PATH), otherToken);
+		expect(theirs.body.shares.some((share) => share.id === created.id)).toBe(false);
+
+		await auth(request(API_BASE_URL).delete(`${PATH}/${created.id}`));
+	});
 
 	it("requires a session to create, list, and revoke", async () => {
 		const missing = await request(API_BASE_URL).post(PATH).set("Origin", ORIGIN).send(payload());
@@ -234,9 +295,7 @@ describe("password shares API", () => {
 	it("refuses an expired share that the TTL index has not reaped yet", async () => {
 		const body = payload();
 		const created = await createShare(body);
-		const uri = process.env.MONGODB_URI || process.env.MONGODB_URI_PROD || "mongodb://127.0.0.1:27017/zelf_testing";
-
-		if (mongoose.connection.readyState !== 1) await mongoose.connect(uri);
+		if (mongoose.connection.readyState !== 1) await mongoose.connect(mongoUri());
 		const updated = await PasswordShare.updateOne({ shareId: created.id }, { $set: { expiresAt: new Date(Date.now() - 5000) } });
 		expect(updated.matchedCount).toBe(1);
 

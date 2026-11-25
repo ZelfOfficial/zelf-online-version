@@ -1,5 +1,5 @@
 /**
- * Per-IP (and, for creation, per session identifier) caps.
+ * Per-IP (and, for creation, per verified Zelf name) caps.
  * Same in-memory minute window as the public referral-availability lookup.
  * The API process does not have a shared rate-limit middleware; this matches
  * the limiter that feature already uses.
@@ -31,7 +31,7 @@ const pruneExpired = (now) => {
 /**
  * @param {"create"|"metadata"|"reveal"} kind
  * @param {string} ip
- * @param {string} [identifier] session identifier; creation is keyed by it when present
+ * @param {string} [identifier] verified Zelf name; creation is keyed by it when present
  */
 const assertPasswordShareRateLimit = (kind, ip, identifier) => {
 	if (!LIMITS[kind]) return;

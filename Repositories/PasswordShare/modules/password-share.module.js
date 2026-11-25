@@ -2,6 +2,7 @@ const { randomBytes } = require("crypto");
 const mongoose = require("mongoose");
 
 const Model = require("../models/password-share.model");
+const { normalizeZelfName } = require("../../Tags/modules/zelf-name.util");
 const { fail } = require("./password-share-errors");
 
 /** Decoded ciphertext cap. 16 KiB. */
@@ -55,23 +56,34 @@ const readyIndexes = async () => {
  * No per-plan or license cap yet. `activeCount` is how many active shares
  * this owner already has. When product defines a quota, enforce it here
  * before insert and throw a coded error. Do not add a silent limit.
- * @param {{ ownerIdentifier: string, activeCount: number }} _owner
+ * @param {{ ownerZelfName: string, activeCount: number }} _owner
  */
 const assertOwnerMayCreateShare = async (_owner) => {
 	// PLAN_LIMIT_HOOK: no quota yet. `_owner.activeCount` is the live count.
 	void _owner;
 };
 
-const ownerFromSession = (user) => {
-	const identifier = typeof user?.identifier === "string" ? user.identifier.trim() : "";
-	if (!identifier) fail(401, "SHARE_SESSION_REQUIRED");
+/**
+ * Same rule as Zelf Keys saves: the owner is the server stamp `verifiedTagName`
+ * (hydrateSessionOwner copies it onto the request only while it is still valid).
+ * `tagName`, `claimedTagName`, `identifier`, and any body, query, or header name are not owners.
+ */
+const requireVerifiedOwner = () => {
+	const error = new Error("401:ERR_ZELF_IDENTITY_REQUIRED");
+	error.status = 401;
+	error.clientCode = "ERR_ZELF_IDENTITY_REQUIRED";
+	error.clientMessage = "Authenticated Zelf identity is required";
+	throw error;
+};
 
-	const tagName = typeof user?.tagName === "string" ? user.tagName.trim().toLowerCase() : "";
+const ownerFromVerifiedSession = (user) => {
+	const raw = typeof user?.verifiedTagName === "string" ? user.verifiedTagName.trim() : "";
+	if (!raw) requireVerifiedOwner();
 
-	return {
-		ownerIdentifier: identifier.slice(0, 256),
-		ownerTagName: tagName ? tagName.slice(0, 120) : null,
-	};
+	const normalized = normalizeZelfName(raw, user?.domain || "zelf");
+	if (!normalized.zelfName) requireVerifiedOwner();
+
+	return { ownerZelfName: normalized.zelfName };
 };
 
 const assertNoKeyMaterial = (body) => {
@@ -205,22 +217,21 @@ const hideDriverError = (error) => {
 const createShare = async (body, user) => {
 	try {
 		await readyIndexes();
-		const owner = ownerFromSession(user);
+		const owner = ownerFromVerifiedSession(user);
 		const parsed = parseCreateBody(body);
 		const now = new Date();
 		const activeCount = await Model.countDocuments({
-			ownerIdentifier: owner.ownerIdentifier,
+			ownerZelfName: owner.ownerZelfName,
 			...activeFilter(now),
 		});
-		await assertOwnerMayCreateShare({ ownerIdentifier: owner.ownerIdentifier, activeCount });
+		await assertOwnerMayCreateShare({ ownerZelfName: owner.ownerZelfName, activeCount });
 
 		const expiresAt = new Date(now.getTime() + parsed.expiresIn * 1000);
 		const shareId = randomBytes(SHARE_ID_BYTES).toString("base64url");
 
 		await Model.create({
 			shareId,
-			ownerIdentifier: owner.ownerIdentifier,
-			ownerTagName: owner.ownerTagName,
+			ownerZelfName: owner.ownerZelfName,
 			ciphertext: parsed.ciphertext,
 			iv: parsed.iv,
 			version: parsed.version,
@@ -334,10 +345,10 @@ const revealShare = async (id) => {
 const listShares = async (user) => {
 	try {
 		await readyIndexes();
-		const owner = ownerFromSession(user);
+		const owner = ownerFromVerifiedSession(user);
 		const now = new Date();
 		const rows = await Model.find({
-			ownerIdentifier: owner.ownerIdentifier,
+			ownerZelfName: owner.ownerZelfName,
 			...activeFilter(now),
 		})
 			.sort({ createdAt: -1 })
@@ -366,17 +377,17 @@ const listShares = async (user) => {
 const revokeShare = async (id, user) => {
 	try {
 		await readyIndexes();
-		const owner = ownerFromSession(user);
+		const owner = ownerFromVerifiedSession(user);
 		const shareId = normalizeId(id);
 		if (!shareId) fail(404, "SHARE_NOT_FOUND");
 
-		const share = await Model.findOne({ shareId }).select("ownerIdentifier revokedAt").lean();
+		const share = await Model.findOne({ shareId }).select("ownerZelfName revokedAt").lean();
 		if (!share) fail(404, "SHARE_NOT_FOUND");
-		if (share.ownerIdentifier !== owner.ownerIdentifier) fail(403, "SHARE_FORBIDDEN");
+		if (share.ownerZelfName !== owner.ownerZelfName) fail(403, "SHARE_FORBIDDEN");
 
 		if (!share.revokedAt) {
 			await Model.updateOne(
-				{ _id: share._id, ownerIdentifier: owner.ownerIdentifier },
+				{ _id: share._id, ownerZelfName: owner.ownerZelfName },
 				{ $set: { revokedAt: new Date(), ciphertext: null, iv: null } }
 			);
 		}

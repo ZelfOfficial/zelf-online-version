@@ -77,7 +77,7 @@ For a test file that expects another port, export that same `PORT` before starti
 ### Secure password shares
 
 - Feature root: `Repositories/PasswordShare/`. Contract: `Repositories/PasswordShare/CONTRACT.md`.
-- `POST /api/password-shares`, `GET /api/password-shares`, and `DELETE /api/password-shares/:id` require a session JWT (protected registry). Ownership is the session `identifier`.
+- `POST /api/password-shares`, `GET /api/password-shares`, and `DELETE /api/password-shares/:id` require a session JWT (protected registry). The owner is the verified session `verifiedTagName`. A session without that stamp gets `401` `ERR_ZELF_IDENTITY_REQUIRED`.
 - `GET /api/password-shares/:id` and `POST /api/password-shares/:id/reveal` are public (unprotected registry). Metadata does not consume a view. Reveal decrements views and purges ciphertext at zero.
 - The server stores ciphertext only. The AES-256-GCM key stays in the landing URL fragment (`config.landingUrl`, production `https://zelf.world`).
 - Focused check: `PORT=3003 npm run test:password-shares`.
