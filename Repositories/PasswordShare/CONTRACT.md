@@ -131,7 +131,7 @@ When `remainingViews` reaches 0 the ciphertext and IV are deleted. A second conc
 | 400 | `INVALID_LABEL` | Label is not a string, is longer than 60, or contains control characters |
 | 400 | `SHARE_KEY_NOT_ACCEPTED` | Body includes `key`, `password`, `plaintext`, `secret`, `dek`, `contentKey`, `aesKey`, or `encryptionKey` |
 | 401 | `ERR_ZELF_IDENTITY_REQUIRED` | Owner route whose session has no current `verifiedTagName`. `message` is `Authenticated Zelf identity is required` |
-| 403 | `SHARE_FORBIDDEN` | Authenticated delete of a share owned by another `identifier` |
+| 403 | `SHARE_FORBIDDEN` | Authenticated delete of a share owned by another verified Zelf name (`ownerZelfName`) |
 | 404 | `SHARE_NOT_FOUND` | Unknown id, revoked, or consumed. These cases use the same code |
 | 410 | `SHARE_EXPIRED` | The row is past `expiresAt` and has not been reaped. Revoked rows stay `404` |
 | 413 | `SHARE_TOO_LARGE` | Decoded ciphertext is larger than 16384 bytes |
