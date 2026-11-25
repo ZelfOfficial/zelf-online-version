@@ -1,8 +1,10 @@
+const crypto = require("crypto");
 const IPFS = require("../../../Core/ipfs");
 const ZNSSearchModule = require("../../ZelfNameService/modules/zns-search.module");
 const ZNSTokenModule = require("../../ZelfNameService/modules/zns-token.module");
 const NotificationService = require("../services/notification.service");
 const Model = require("../models/rewards.model"); // MongoDB model for TTL cache
+const RewardTransfer = require("../../Tags/modules/referral-reward-transfer");
 const moment = require("moment");
 const ZNSTransactionDetector = require("../../ZelfNameService/modules/zns-transaction-detector.module");
 const { normalizeZelfName } = require("../middlewares/rewards.middleware");
@@ -24,6 +26,12 @@ const REWARD_IDENTITY_STATUS = {
     ERR_SESSION_OWNER_MISMATCH: 403,
 };
 
+const DAILY_REWARD_ALREADY_CLAIMED = "DAILY_REWARD_ALREADY_CLAIMED";
+const DAILY_REWARD_PAYOUT_FAILED = "DAILY_REWARD_PAYOUT_FAILED";
+const DAILY_REWARD_CLAIM_IN_PROGRESS = "DAILY_REWARD_CLAIM_IN_PROGRESS";
+/** A processing row with no stored signature can be taken again once the request that held it is gone. */
+const DAILY_CLAIM_LOCK_STALE_MS = 90 * 1000;
+
 const throwRewardIdentityError = (code) => {
     const status = REWARD_IDENTITY_STATUS[code] || 422;
     const error = new Error(`${status}:${code}`);
@@ -35,6 +43,23 @@ const throwRewardIdentityError = (code) => {
 
     throw error;
 };
+
+const throwDailyRewardError = (status, code, clientMessage = code) => {
+    const error = new Error(`${status}:${code}`);
+
+    error.status = status;
+    error.code = code;
+    error.clientCode = code;
+    error.clientMessage = clientMessage;
+
+    throw error;
+};
+
+const _modifiedCount = (result) => result?.modifiedCount ?? result?.nModified ?? 0;
+
+const _isDuplicateKey = (error) => error?.code === 11000 || /E11000|duplicate key/i.test(String(error?.message || ""));
+
+const _dailyClaimExpiresAt = () => moment().add(2, "days").toDate();
 
 const isRewardIdentityError = (error) => {
     const message = typeof error?.message === "string" ? error.message.trim() : "";
@@ -384,6 +409,283 @@ const _filterByMultipleKeys = async (filters) => {
     }
 };
 
+const _isStaleDailyProcessing = (record) => {
+    if (record?.status !== "processing" || record.payload?.transferSignature) return false;
+
+    const lockedAt = Date.parse(record.payload?.lockedAt || "");
+
+    if (!Number.isFinite(lockedAt)) return true;
+
+    return Date.now() - lockedAt > DAILY_CLAIM_LOCK_STALE_MS;
+};
+
+const _releaseDailyClaim = async (record, lockToken, errorMessage) => {
+    await Model.updateOne(
+        { _id: record._id, status: "processing", "payload.lockToken": lockToken },
+        {
+            $set: {
+                status: "failed",
+                payload: {
+                    lockToken: null,
+                    requiresReconciliation: false,
+                    error: errorMessage,
+                    winningIndex: record.payload?.winningIndex,
+                    segments: record.payload?.segments,
+                },
+            },
+        }
+    );
+};
+
+const _pinDailyRewardReceipt = async ({ record, tagName, solanaAddress }) => {
+    const signature = record.payload?.signature || record.payload?.transferSignature;
+    const rewardDate = moment().format("YYYY-MM-DD");
+    const redeemedAt = moment().format("YYYY-MM-DD HH:mm:ss");
+    const rewardData = {
+        rewardsTagName: tagName,
+        rewardPrimaryKey: record.rewardPrimaryKey,
+        amount: record.amount,
+        winningIndex: record.payload?.winningIndex,
+        segments: record.payload?.segments,
+        type: "daily",
+        status: "claimed",
+        description: record.description,
+        rewardDate,
+        redeemedAt,
+        zelfNameType: record.zelfNameType,
+        tokenTransfer: {
+            success: true,
+            signature,
+            amount: record.amount,
+            recipientAddress: solanaAddress,
+        },
+    };
+    const metadata = {
+        rewardsTagName: tagName,
+        rewardPrimaryKey: record.rewardPrimaryKey,
+        rewardType: "daily",
+        rewardDate,
+        redeemedAt,
+        zelfNameType: record.zelfNameType,
+        amount: String(record.amount),
+        signature: signature || "",
+    };
+
+    try {
+        const base64Json = Buffer.from(JSON.stringify(rewardData)).toString("base64");
+        const filename = `daily-reward-${record.rewardPrimaryKey}.json`;
+        const ipfsResult = await IPFS.pinFile(`data:application/json;base64,${base64Json}`, filename, "application/json", metadata);
+        const ipfsCid = ipfsResult?.IpfsHash || null;
+
+        if (ipfsCid) {
+            await Model.updateOne({ _id: record._id, status: "claimed" }, { $set: { ipfsCid } });
+            record.ipfsCid = ipfsCid;
+        }
+
+        return ipfsCid;
+    } catch (error) {
+        console.error("Error storing daily reward receipt:", error?.message || error);
+        return record.ipfsCid || null;
+    }
+};
+
+const _dailyRewardSuccess = ({ record, solanaAddress, ipfsCid, signature }) => {
+    const amount = record.amount;
+    const transferSignature = signature || record.payload?.signature || record.payload?.transferSignature;
+
+    return {
+        success: true,
+        message: "Congratulations! You've spun the wheel and won your daily reward!",
+        reward: {
+            rewardPrimaryKey: record.rewardPrimaryKey,
+            amount,
+            winningIndex: record.payload?.winningIndex,
+            segments: record.payload?.segments,
+            currency: "ZNS",
+            type: "daily",
+            zelfNameType: record.zelfNameType,
+            claimedAt: moment().format("YYYY-MM-DD HH:mm:ss"),
+            nextClaimAvailable: moment().add(1, "day").startOf("day").toISOString(),
+            ipfsCid: ipfsCid || record.ipfsCid || null,
+            mongoId: record._id,
+            tokenTransfer: {
+                success: true,
+                signature: transferSignature,
+                amount,
+                recipientAddress: solanaAddress,
+            },
+            storage: {
+                mongodb: "claimed",
+                ipfs: ipfsCid || record.ipfsCid ? "stored" : "pending",
+            },
+        },
+        tokenTransferStatus: "success",
+        tokenTransferMessage: `${amount} ZNS tokens have been sent to your Solana address!`,
+    };
+};
+
+/**
+ * A processing claim with a stored signature is settled from that signature.
+ * Confirmed payouts become claimed. A transfer that failed or expired releases the day.
+ * @param {Object|null} record
+ * @returns {Promise<Object|null>}
+ */
+const _settleProcessingDailyClaim = async (record) => {
+    if (!record || record.status !== "processing") return record;
+
+    const signature = record.payload?.transferSignature;
+
+    if (!signature) return record;
+
+    let outcome;
+
+    try {
+        outcome = await RewardTransfer.getRewardTransferOutcome({
+            signature,
+            lastValidBlockHeight: record.payload.lastValidBlockHeight,
+        });
+    } catch (error) {
+        console.error("Daily reward reconciliation failed:", error?.message || error);
+        return record;
+    }
+
+    if (outcome.state === "confirmed") {
+        const saved = await Model.updateOne(
+            { _id: record._id, status: "processing", "payload.transferSignature": signature },
+            {
+                $set: {
+                    status: "claimed",
+                    redeemedAt: new Date(),
+                    "payload.payoutConfirmed": true,
+                    "payload.signature": signature,
+                    "payload.requiresReconciliation": false,
+                    "payload.error": null,
+                },
+            }
+        );
+
+        if (_modifiedCount(saved) !== 1) {
+            return (await Model.findOne({ rewardPrimaryKey: record.rewardPrimaryKey })) || record;
+        }
+
+        record.status = "claimed";
+        record.redeemedAt = new Date();
+        record.payload = {
+            ...record.payload,
+            payoutConfirmed: true,
+            signature,
+            requiresReconciliation: false,
+            error: null,
+        };
+        record.justConfirmed = true;
+        return record;
+    }
+
+    if (outcome.state === "failed" || outcome.state === "expired") {
+        const saved = await Model.updateOne(
+            { _id: record._id, status: "processing", "payload.transferSignature": signature },
+            {
+                $set: {
+                    status: "failed",
+                    payload: {
+                        lockToken: null,
+                        requiresReconciliation: false,
+                        error: outcome.state === "expired" ? "reward_transfer_expired" : outcome.error || "reward_transfer_failed",
+                        winningIndex: record.payload?.winningIndex,
+                        segments: record.payload?.segments,
+                    },
+                },
+            }
+        );
+
+        if (_modifiedCount(saved) === 1) {
+            record.status = "failed";
+            record.payload = {
+                lockToken: null,
+                requiresReconciliation: false,
+                error: outcome.state === "expired" ? "reward_transfer_expired" : outcome.error || "reward_transfer_failed",
+                winningIndex: record.payload?.winningIndex,
+                segments: record.payload?.segments,
+            };
+        }
+    }
+
+    return record;
+};
+
+const _acquireDailyClaim = async (rewardPrimaryKey, fields) => {
+    const lockToken = crypto.randomUUID();
+    const payload = {
+        lockToken,
+        lockedAt: new Date().toISOString(),
+        requiresReconciliation: false,
+        winningIndex: fields.winningIndex,
+        segments: fields.segments,
+    };
+    const expiresAt = _dailyClaimExpiresAt();
+    const createdFields = {
+        name: fields.name,
+        rewardPrimaryKey,
+        amount: fields.amount,
+        type: "daily",
+        status: "processing",
+        description: fields.description,
+        rewardDate: moment().startOf("day").toDate(),
+        zelfNameType: fields.zelfNameType,
+        payload,
+        expiresAt,
+    };
+
+    try {
+        return await Model.create(createdFields);
+    } catch (error) {
+        if (!_isDuplicateKey(error)) throw error;
+    }
+
+    const current = await Model.findOne({ rewardPrimaryKey });
+
+    if (!current) throwDailyRewardError(503, DAILY_REWARD_CLAIM_IN_PROGRESS);
+
+    if (current.status === "claimed" || current.payload?.payoutConfirmed) {
+        throwDailyRewardError(
+            409,
+            DAILY_REWARD_ALREADY_CLAIMED,
+            "You have already claimed your daily reward today. Come back tomorrow!"
+        );
+    }
+
+    if (current.status === "processing" && current.payload?.transferSignature) {
+        throwDailyRewardError(503, DAILY_REWARD_CLAIM_IN_PROGRESS);
+    }
+
+    if (current.status !== "failed" && !_isStaleProcessing(current)) {
+        throwDailyRewardError(503, DAILY_REWARD_CLAIM_IN_PROGRESS);
+    }
+
+    const updated = await Model.findOneAndUpdate(
+        {
+            _id: current._id,
+            status: current.status,
+            "payload.lockToken": current.payload?.lockToken ?? null,
+        },
+        {
+            $set: {
+                status: "processing",
+                amount: fields.amount,
+                zelfNameType: fields.zelfNameType,
+                description: fields.description,
+                payload,
+                expiresAt,
+            },
+        },
+        { new: true }
+    );
+
+    if (!updated) throwDailyRewardError(503, DAILY_REWARD_CLAIM_IN_PROGRESS);
+
+    return updated;
+};
+
 // Helper function to check if user already claimed today
 const _getTodayReward = async (zelfName) => {
     try {
@@ -392,14 +694,15 @@ const _getTodayReward = async (zelfName) => {
 
         const rewardPrimaryKey = `${zelfName}${todayKey}`;
 
-        // Step 1: Check MongoDB first (TTL cache for first 5 minutes)
+        // A row that is not confirmed does not use up the day, and it must not fall through to an older receipt.
         const mongoReward = await Model.findOne({ rewardPrimaryKey });
         if (mongoReward) {
-            // FIX: If status is failed, allow retry (return null)
-            if (mongoReward.status === "failed") return null;
+            if (mongoReward.status !== "claimed") return null;
+
+            const plain = typeof mongoReward.toObject === "function" ? mongoReward.toObject() : mongoReward;
 
             return {
-                ...mongoReward.toObject(),
+                ...plain,
                 source: "mongodb",
                 metadata: { rewardPrimaryKey },
             };
@@ -422,18 +725,68 @@ const _getTodayReward = async (zelfName) => {
     }
 };
 
+const _finishConfirmedDailyClaim = async ({ record, tagName, solanaAddress, signature }) => {
+    const saved = await Model.updateOne(
+        {
+            _id: record._id,
+            status: "processing",
+            "payload.lockToken": record.payload?.lockToken,
+            "payload.transferSignature": signature,
+        },
+        {
+            $set: {
+                status: "claimed",
+                redeemedAt: new Date(),
+                "payload.payoutConfirmed": true,
+                "payload.signature": signature,
+                "payload.requiresReconciliation": false,
+                "payload.error": null,
+            },
+        }
+    );
+
+    if (_modifiedCount(saved) !== 1) {
+        const current = await Model.findOne({ rewardPrimaryKey: record.rewardPrimaryKey });
+
+        if (current?.status !== "claimed") throwDailyRewardError(503, DAILY_REWARD_CLAIM_IN_PROGRESS);
+
+        record = current;
+    } else {
+        record.status = "claimed";
+        record.payload = {
+            ...record.payload,
+            payoutConfirmed: true,
+            signature,
+            requiresReconciliation: false,
+            error: null,
+        };
+    }
+
+    const ipfsCid = await _pinDailyRewardReceipt({ record, tagName, solanaAddress });
+
+    try {
+        await _sendRewardNotification(tagName, record.amount, "claimed");
+    } catch (error) {
+        console.error("Error sending daily reward notification:", error?.message || error);
+    }
+
+    return _dailyRewardSuccess({ record, solanaAddress, ipfsCid, signature });
+};
+
 const dailyRewards = async (data, authUser) => {
     try {
         const { tagName, domain } = data;
 
-        const { tagObject, _tagName, domainConfig } = await _getTagObject(tagName, domain, authUser);
+        const { tagObject, _tagName } = await _getTagObject(tagName, domain, authUser);
 
         await assertDailyRewardIdentity(data, tagObject, authUser);
 
-        assertPayoutAddressAllowed(tagObject?.publicData?.solanaAddress);
+        const solanaAddress = tagObject?.publicData?.solanaAddress;
+
+        assertPayoutAddressAllowed(solanaAddress);
 
         // Check if the user's Solana account is active/funded
-        const isAccountActive = await ZNSTokenModule.isAccountActive(tagObject.publicData.solanaAddress);
+        const isAccountActive = await ZNSTokenModule.isAccountActive(solanaAddress);
 
         if (!isAccountActive) {
             return {
@@ -443,176 +796,121 @@ const dailyRewards = async (data, authUser) => {
             };
         }
 
-        // Check if user already claimed today
-        const todayReward = await _getTodayReward(_tagName);
+        const rewardPrimaryKey = `${_tagName}${moment().format("YYYY-MM-DD")}`;
+        const zelfNameType = tagObject.publicData.type;
 
-        if (todayReward) {
-            return {
-                success: false,
-                reward: todayReward,
-                message: "You have already claimed your daily reward today. Come back tomorrow!",
-                nextClaimAvailable: moment().add(1, "day").startOf("day").toISOString(),
-            };
+        let record = await _settleProcessingDailyClaim(await Model.findOne({ rewardPrimaryKey }));
+
+        if (record?.justConfirmed) {
+            const ipfsCid = await _pinDailyRewardReceipt({ record, tagName: _tagName, solanaAddress });
+
+            return _dailyRewardSuccess({ record, solanaAddress, ipfsCid, signature: record.payload?.signature });
         }
 
-        // Generate wheel reward based on type
-        const wheelResult = _generateWheelReward(tagObject.publicData.type);
-        const rewardAmount = wheelResult.amount;
+        if (record?.status === "claimed") {
+            throwDailyRewardError(
+                409,
+                DAILY_REWARD_ALREADY_CLAIMED,
+                "You have already claimed your daily reward today. Come back tomorrow!"
+            );
+        }
 
-        const todayKey = moment().format("YYYY-MM-DD");
-        const rewardPrimaryKey = `${_tagName}${todayKey}`;
-        // Create reward data
-        const rewardData = {
-            rewardsTagName: _tagName,
-            rewardPrimaryKey,
-            amount: rewardAmount,
+        if (record?.status === "processing" && record.payload?.transferSignature) {
+            throwDailyRewardError(503, DAILY_REWARD_CLAIM_IN_PROGRESS);
+        }
+
+        // Mongo rows expire. A receipt already stored for this day means the payout was confirmed.
+        if (!record) {
+            try {
+                const existingReceipt = await IPFS.filter("rewardPrimaryKey", rewardPrimaryKey);
+
+                if (Array.isArray(existingReceipt) && existingReceipt.length > 0) {
+                    throwDailyRewardError(
+                        409,
+                        DAILY_REWARD_ALREADY_CLAIMED,
+                        "You have already claimed your daily reward today. Come back tomorrow!"
+                    );
+                }
+            } catch (error) {
+                if (error?.clientCode) throw error;
+
+                console.error("Daily reward receipt lookup failed:", error?.message || error);
+            }
+        }
+
+        const wheelResult = _generateWheelReward(zelfNameType);
+        const description = `Daily wheel reward for ${zelfNameType} ZelfName`;
+
+        record = await _acquireDailyClaim(rewardPrimaryKey, {
+            name: _tagName,
+            amount: wheelResult.amount,
             winningIndex: wheelResult.winningIndex,
             segments: wheelResult.segments,
-            type: "daily",
-            status: "claimed",
-            description: `Daily wheel reward for ${tagObject.publicData.type} ZelfName`,
-            rewardDate: moment().format("YYYY-MM-DD"),
-            redeemedAt: moment().format("YYYY-MM-DD HH:mm:ss"),
-            zelfNameType: tagObject.publicData.type,
-            wheelSpin: true,
-            rewardRange: tagObject.publicData.type === "hold" ? "1-12" : "2-24",
-        };
-
-        // Metadata for IPFS querying (key-value pairs)
-        const metadata = {
-            rewardsTagName: _tagName,
-            rewardPrimaryKey, // Composite key for direct lookup
-            rewardType: "daily",
-            rewardDate: moment().format("YYYY-MM-DD"), // Date without time for easy querying
-            redeemedAt: moment().format("YYYY-MM-DD HH:mm:ss"), // Exact timestamp when redeemed
-            zelfNameType: tagObject.publicData.type,
-            amount: rewardAmount.toString(),
-        };
-
-        // Store reward as JSON in IPFS
-        const rewardJson = JSON.stringify(rewardData);
-        const base64Json = Buffer.from(rewardJson).toString("base64");
-        const filename = `daily-reward-${rewardPrimaryKey}.json`;
-
-        // FIX: Remove any existing "failed" record to avoid duplicate key error on unique index
-        await Model.deleteOne({ rewardPrimaryKey, status: "failed" });
-
-        // Step 1: Save to MongoDB with TTL (5 minutes) for immediate availability
-        const mongoReward = new Model({
-            name: _tagName,
-            rewardPrimaryKey,
-            amount: rewardAmount,
-            type: "daily",
-            status: "claimed",
-            description: `Daily wheel reward for ${tagObject.publicData.type} ZelfName`,
-            claimedAt: new Date(),
-            zelfNameType: tagObject.publicData.type,
-            metadata: {
-                wheelSpin: true,
-                rewardRange: tagObject.publicData.type === "hold" ? "0.1-1.0" : "0.2-2.0",
-            },
+            zelfNameType,
+            description,
         });
 
-        await mongoReward.save();
-
-        // Step 2: Save to IPFS for permanent storage (async, non-blocking)
-        const ipfsResult = await IPFS.pinFile(`data:application/json;base64,${base64Json}`, filename, "application/json", metadata);
-
-        if (ipfsResult) {
-            // Update MongoDB record with IPFS CID
-            mongoReward.ipfsCid = ipfsResult.IpfsHash;
-            await mongoReward.save();
-        }
-
-        // Trigger notification
-        await _sendRewardNotification(_tagName, rewardAmount, "claimed");
-
-        // Step 3: Send ZNS tokens to user's Solana address
-        let tokenTransferResult = null;
-        let tokenTransferError = null;
+        const lockToken = record.payload?.lockToken;
+        let storedSignature = null;
+        let transfer;
 
         try {
-            const transferSignature = await ZNSTokenModule.giveTokensAfterPurchase(rewardAmount, tagObject.publicData.solanaAddress);
+            transfer = await RewardTransfer.sendRewardTransfer(wheelResult.amount, solanaAddress, {
+                onSigned: async ({ signature, lastValidBlockHeight }) => {
+                    const stored = await Model.updateOne(
+                        { _id: record._id, status: "processing", "payload.lockToken": lockToken },
+                        {
+                            $set: {
+                                "payload.transferSignature": signature,
+                                "payload.lastValidBlockHeight": lastValidBlockHeight,
+                                "payload.requiresReconciliation": true,
+                            },
+                        }
+                    );
 
-            tokenTransferResult = {
-                success: true,
-                signature: transferSignature,
-                amount: rewardAmount,
-                recipientAddress: tagObject.publicData.solanaAddress,
-            };
+                    if (_modifiedCount(stored) !== 1) throw new Error("reward_reservation_lost");
 
-            // Update reward status to include token transfer success
-            rewardData.tokenTransfer = tokenTransferResult;
-            mongoReward.tokenTransfer = tokenTransferResult;
-            await mongoReward.save();
-        } catch (tokenError) {
-            console.error("Failed to send ZNS tokens:", tokenError);
-
-            tokenTransferError = {
-                success: false,
-                error: tokenError.message,
-                amount: rewardAmount,
-                recipientAddress: tagObject.publicData.solanaAddress,
-            };
-
-            // Update reward status to include token transfer failure
-            // FIX: Update status to failed so user can try again
-            rewardData.tokenTransfer = tokenTransferError;
-            mongoReward.tokenTransfer = tokenTransferError;
-            mongoReward.tokenTransferStatus = "failed";
-            mongoReward.status = "failed"; // Mark as failed in DB
-
-            // FIX: Remove IPFS CID reference since we are going to unpin it
-            mongoReward.ipfsCid = null;
-            await mongoReward.save();
-
-            // FIX: Unpin from IPFS so it doesn't show up in future checks
-            if (ipfsResult && ipfsResult.IpfsHash) {
-                try {
-                    console.log(`Unpinning failed reward from IPFS: ${ipfsResult.IpfsHash}`);
-                    await IPFS.unPinFiles([ipfsResult.IpfsHash]);
-                } catch (unpinError) {
-                    console.error("Failed to unpin IPFS file:", unpinError);
-                }
+                    storedSignature = signature;
+                },
+            });
+        } catch (error) {
+            if (storedSignature || error?.message === "reward_reservation_lost") {
+                throwDailyRewardError(503, DAILY_REWARD_CLAIM_IN_PROGRESS);
             }
 
-            // FIX: Return success: false so frontend shows error instead of claimed
-            return {
-                success: false,
-                message: `Failed to transfer tokens: ${tokenError.message}. Please try again later.`,
-                tokenTransferStatus: "failed",
-                tokenTransferMessage: tokenError.message,
-            };
+            console.error("Daily reward payout was not sent:", error?.message || error);
+
+            try {
+                await _releaseDailyClaim(record, lockToken, error?.message || "reward_transfer_not_sent");
+            } catch (releaseError) {
+                console.error("Daily reward lock release failed:", releaseError?.message || releaseError);
+            }
+
+            throwDailyRewardError(502, DAILY_REWARD_PAYOUT_FAILED);
         }
 
-        return {
-            success: true,
-            message: "Congratulations! You've spun the wheel and won your daily reward!",
-            reward: {
-                rewardPrimaryKey,
-                amount: rewardAmount,
-                winningIndex: wheelResult.winningIndex,
-                segments: wheelResult.segments,
-                currency: "ZNS",
-                type: "daily",
-                zelfNameType: tagObject.publicData.type,
-                claimedAt: rewardData.claimedAt,
-                nextClaimAvailable: moment().add(1, "day").startOf("day").toISOString(),
-                ipfsCid: ipfsResult?.IpfsHash || null,
-                mongoId: mongoReward._id,
-                tokenTransfer: tokenTransferResult || tokenTransferError,
-                storage: {
-                    mongodb: "immediate (5min TTL)",
-                    ipfs: ipfsResult ? "stored" : "failed",
-                },
-            },
-            tokenTransferStatus: tokenTransferResult ? "success" : "failed",
-            tokenTransferMessage: tokenTransferResult
-                ? `${rewardAmount} ZNS tokens have been sent to your Solana address!`
-                : `Reward claimed but token transfer failed. Please contact support with error: ${tokenTransferError?.error}`,
-        };
+        if (transfer.state === "failed") {
+            console.error("Daily reward payout failed:", transfer.signature, transfer.error || "");
+
+            try {
+                await _releaseDailyClaim(record, lockToken, transfer.error || "reward_transfer_failed");
+            } catch (releaseError) {
+                console.error("Daily reward lock release failed:", releaseError?.message || releaseError);
+            }
+
+            throwDailyRewardError(502, DAILY_REWARD_PAYOUT_FAILED);
+        }
+
+        if (transfer.state !== "confirmed") throwDailyRewardError(503, DAILY_REWARD_CLAIM_IN_PROGRESS);
+
+        return _finishConfirmedDailyClaim({
+            record,
+            tagName: _tagName,
+            solanaAddress,
+            signature: transfer.signature,
+        });
     } catch (error) {
-        if (isRewardIdentityError(error) || isPayoutAddressBlockedError(error)) throw error;
+        if (isRewardIdentityError(error) || isPayoutAddressBlockedError(error) || error?.clientCode) throw error;
 
         console.error("Error in dailyRewards:", safeRewardErrorText(error));
         throw new Error(error.message || "Failed to process daily reward");

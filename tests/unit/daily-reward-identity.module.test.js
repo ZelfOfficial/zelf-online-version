@@ -31,6 +31,11 @@ jest.mock("../../Repositories/ZelfNameService/modules/zns-token.module", () => (
     giveTokensAfterPurchase: jest.fn(async () => "sig-daily"),
 }));
 
+jest.mock("../../Repositories/Tags/modules/referral-reward-transfer", () => ({
+    sendRewardTransfer: jest.fn(),
+    getRewardTransferOutcome: jest.fn(async () => ({ state: "confirmed" })),
+}));
+
 jest.mock("../../Repositories/ZelfNameService/modules/zns-search.module", () => ({
     searchZelfName: jest.fn(),
 }));
@@ -47,15 +52,67 @@ jest.mock("../../Core/ipfs", () => ({
 }));
 
 jest.mock("../../Repositories/Rewards/models/rewards.model", () => {
+    const getPath = (doc, path) => path.split(".").reduce((cursor, key) => (cursor == null ? undefined : cursor[key]), doc);
+
+    const setPath = (doc, path, value) => {
+        const keys = path.split(".");
+        let cursor = doc;
+
+        for (let index = 0; index < keys.length - 1; index += 1) {
+            if (cursor[keys[index]] == null || typeof cursor[keys[index]] !== "object") cursor[keys[index]] = {};
+            cursor = cursor[keys[index]];
+        }
+
+        cursor[keys[keys.length - 1]] = value;
+    };
+
+    const matches = (doc, filter = {}) =>
+        Object.entries(filter).every(([key, expected]) => {
+            const actual = getPath(doc, key);
+
+            if (expected == null) return actual == null;
+
+            return actual === expected;
+        });
+
+    const applyUpdate = (doc, update = {}) => {
+        for (const [key, value] of Object.entries(update.$set || {})) setPath(doc, key, value);
+    };
+
     function Reward(doc) {
         Object.assign(this, doc);
-        this._id = "mongo-reward-id";
+        this._id = doc._id || `mongo-reward-${Reward.instances.length + 1}`;
         this.save = jest.fn(async () => this);
         Reward.instances.push(this);
     }
 
     Reward.instances = [];
-    Reward.findOne = jest.fn(async () => null);
+    Reward.create = jest.fn(async (doc) => {
+        if (Reward.instances.some((item) => item.rewardPrimaryKey === doc.rewardPrimaryKey)) {
+            const error = new Error("E11000 duplicate key");
+            error.code = 11000;
+            throw error;
+        }
+
+        return new Reward(doc);
+    });
+    Reward.findOne = jest.fn(async (query) => Reward.instances.find((item) => matches(item, query)) || null);
+    Reward.updateOne = jest.fn(async (filter, update) => {
+        const doc = Reward.instances.find((item) => matches(item, filter));
+
+        if (!doc) return { modifiedCount: 0 };
+
+        applyUpdate(doc, update);
+        return { modifiedCount: 1 };
+    });
+    Reward.findOneAndUpdate = jest.fn(async (filter, update) => {
+        const doc = Reward.instances.find((item) => matches(item, filter));
+
+        if (!doc) return null;
+
+        applyUpdate(doc, update);
+        return doc;
+    });
     Reward.deleteOne = jest.fn(async () => ({ deletedCount: 0 }));
 
     return Reward;
@@ -65,6 +122,7 @@ const TagsModule = require("../../Repositories/Tags/modules/tags.module");
 const TagsSearchModule = require("../../Repositories/Tags/modules/tags-search.module");
 const ZelfProofModule = require("../../Repositories/ZelfProof/modules/zelf-proof.module");
 const ZNSTokenModule = require("../../Repositories/ZelfNameService/modules/zns-token.module");
+const RewardTransfer = require("../../Repositories/Tags/modules/referral-reward-transfer");
 const IPFS = require("../../Core/ipfs");
 const Reward = require("../../Repositories/Rewards/models/rewards.model");
 const { dailyRewards } = require("../../Repositories/Rewards/modules/rewards.module");
@@ -106,9 +164,22 @@ const claimBody = (extra = {}) => ({
 beforeEach(() => {
     jest.clearAllMocks();
     Reward.instances.length = 0;
-    Reward.findOne.mockResolvedValue(null);
+    Reward.findOne.mockImplementation(async (query = {}) => {
+        const getPath = (doc, path) => path.split(".").reduce((cursor, key) => (cursor == null ? undefined : cursor[key]), doc);
+
+        return (
+            Reward.instances.find((item) =>
+                Object.entries(query).every(([key, expected]) => (expected == null ? getPath(item, key) == null : getPath(item, key) === expected))
+            ) || null
+        );
+    });
     ZNSTokenModule.isAccountActive.mockResolvedValue(true);
     ZNSTokenModule.giveTokensAfterPurchase.mockResolvedValue("sig-daily");
+    RewardTransfer.sendRewardTransfer.mockImplementation(async (_amount, _address, options) => {
+        if (options?.onSigned) await options.onSigned({ signature: "sig-daily", lastValidBlockHeight: 1 });
+
+        return { state: "confirmed", signature: "sig-daily", lastValidBlockHeight: 1 };
+    });
     IPFS.filter.mockResolvedValue([]);
     IPFS.pinFile.mockResolvedValue({ IpfsHash: "cid-daily" });
     TagsModule.decryptTag.mockResolvedValue({});
@@ -141,7 +212,8 @@ describe("POST /api/rewards/daily identity", () => {
         expect(result.reward.amount).toBe(1);
         expect(result.reward.winningIndex).toBe(0);
         expect(result.reward.segments).toEqual(HOLD_SEGMENTS);
-        expect(ZNSTokenModule.giveTokensAfterPurchase).toHaveBeenCalledWith(1, "SoLanaAddress111");
+        expect(RewardTransfer.sendRewardTransfer).toHaveBeenCalledWith(1, "SoLanaAddress111", expect.any(Object));
+        expect(ZNSTokenModule.giveTokensAfterPurchase).not.toHaveBeenCalled();
         expect(IPFS.pinFile).toHaveBeenCalledWith(
             expect.any(String),
             expect.any(String),
@@ -164,6 +236,7 @@ describe("POST /api/rewards/daily identity", () => {
                 code: "PAYOUT_ADDRESS_BLOCKED",
             });
             expect(ZNSTokenModule.giveTokensAfterPurchase).not.toHaveBeenCalled();
+            expect(RewardTransfer.sendRewardTransfer).not.toHaveBeenCalled();
             expect(IPFS.pinFile).not.toHaveBeenCalled();
             expect(Reward.deleteOne).not.toHaveBeenCalled();
             expect(Reward.instances).toHaveLength(0);
@@ -209,7 +282,7 @@ describe("POST /api/rewards/daily identity", () => {
 
         expect(result.reward.amount).toBe(2);
         expect(result.reward.segments).toEqual(MAINNET_SEGMENTS);
-        expect(ZNSTokenModule.giveTokensAfterPurchase).toHaveBeenCalledWith(2, "SoLanaAddress111");
+        expect(RewardTransfer.sendRewardTransfer).toHaveBeenCalledWith(2, "SoLanaAddress111", expect.any(Object));
     });
 
     it("requires masterPassword when the proof has a password layer", async () => {
@@ -222,6 +295,7 @@ describe("POST /api/rewards/daily identity", () => {
 
         expect(TagsModule.decryptTag).not.toHaveBeenCalled();
         expect(ZNSTokenModule.giveTokensAfterPurchase).not.toHaveBeenCalled();
+        expect(RewardTransfer.sendRewardTransfer).not.toHaveBeenCalled();
         expect(IPFS.pinFile).not.toHaveBeenCalled();
         expect(Reward.instances).toHaveLength(0);
         expect(Reward.findOne).not.toHaveBeenCalled();
@@ -258,7 +332,7 @@ describe("POST /api/rewards/daily identity", () => {
             }),
             authUser
         );
-        expect(ZNSTokenModule.giveTokensAfterPurchase).toHaveBeenCalledWith(1, "SoLanaAddress111");
+        expect(RewardTransfer.sendRewardTransfer).toHaveBeenCalledWith(1, "SoLanaAddress111", expect.any(Object));
     });
 
     it("accepts password as the Zelf ID secret when masterPassword is omitted", async () => {
@@ -289,6 +363,7 @@ describe("POST /api/rewards/daily identity", () => {
             code: "ERR_VERIFICATION_FAILED",
         });
         expect(ZNSTokenModule.giveTokensAfterPurchase).not.toHaveBeenCalled();
+        expect(RewardTransfer.sendRewardTransfer).not.toHaveBeenCalled();
         expect(IPFS.pinFile).not.toHaveBeenCalled();
         expect(Reward.instances).toHaveLength(0);
         expect(Reward.findOne).not.toHaveBeenCalled();
@@ -309,6 +384,7 @@ describe("POST /api/rewards/daily identity", () => {
         expect(ctx.status).toBe(401);
         expect(ctx.body.code).toBe("ERR_INVALID_PASSWORD");
         expect(ZNSTokenModule.giveTokensAfterPurchase).not.toHaveBeenCalled();
+        expect(RewardTransfer.sendRewardTransfer).not.toHaveBeenCalled();
         expect(Reward.instances).toHaveLength(0);
     });
 
@@ -321,12 +397,15 @@ describe("POST /api/rewards/daily identity", () => {
             },
         });
 
-        const result = await dailyRewards(claimBody(), authUser);
+        await expect(dailyRewards(claimBody(), authUser)).rejects.toMatchObject({
+            status: 409,
+            code: "DAILY_REWARD_ALREADY_CLAIMED",
+            clientMessage: expect.stringMatching(/already claimed/i),
+        });
 
         expect(TagsModule.decryptTag).toHaveBeenCalledTimes(1);
-        expect(result.success).toBe(false);
-        expect(result.message).toMatch(/already claimed/i);
         expect(ZNSTokenModule.giveTokensAfterPurchase).not.toHaveBeenCalled();
+        expect(RewardTransfer.sendRewardTransfer).not.toHaveBeenCalled();
         expect(IPFS.pinFile).not.toHaveBeenCalled();
         expect(Reward.instances).toHaveLength(0);
     });
@@ -348,5 +427,6 @@ describe("POST /api/rewards/daily identity", () => {
         });
         expect(Reward.instances).toHaveLength(0);
         expect(ZNSTokenModule.giveTokensAfterPurchase).not.toHaveBeenCalled();
+        expect(RewardTransfer.sendRewardTransfer).not.toHaveBeenCalled();
     });
 });
