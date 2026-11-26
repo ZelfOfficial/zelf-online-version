@@ -122,6 +122,11 @@ const schemas = {
 						)
 						.required(),
 				}).required(),
+				referrals: object({
+					limit: number().integer().min(1).allow(null).optional(),
+				})
+					.unknown(true)
+					.optional(),
 			}).required(),
 			zelfkeys: object({
 				plans: array().items(object()).default([]),

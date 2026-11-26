@@ -14,7 +14,16 @@ const referralSettings = (referrals) => {
 
     const next = {};
     for (const [key, value] of Object.entries(referrals)) {
-        if (key === "limit" || value == null || typeof value === "function") continue;
+        if (
+            key === "limit" ||
+            key === "__proto__" ||
+            key === "constructor" ||
+            key === "prototype" ||
+            value == null ||
+            typeof value === "function"
+        ) {
+            continue;
+        }
         next[key] = value;
     }
 

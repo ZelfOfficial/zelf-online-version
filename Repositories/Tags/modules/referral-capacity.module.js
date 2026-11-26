@@ -124,8 +124,8 @@ const assertReferrerAcceptsNewReferral = async (tagObject, domainConfig) => {
 };
 
 /**
- * Public summary before signup. `limit` and `tags.referrals.limit` are the same cap
- * (license, otherwise env, otherwise 10). The extension already reads `tags.referrals.limit`.
+ * Public summary before signup. Only the four fields the apps need; `limit` comes from
+ * the domain license (`tags.referrals.limit`), otherwise env, otherwise 10.
  * @param {number} limit
  * @param {boolean} exists
  * @param {number} spotsRemaining
@@ -136,7 +136,6 @@ const publicReferralSummary = (limit, exists, spotsRemaining, acceptsNewReferral
     limit,
     spotsRemaining,
     acceptsNewReferrals,
-    tags: { referrals: { limit } },
 });
 
 /**

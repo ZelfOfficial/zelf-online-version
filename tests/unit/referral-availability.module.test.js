@@ -77,7 +77,6 @@ describe("referral availability (#647)", () => {
             limit: 10,
             spotsRemaining: 0,
             acceptsNewReferrals: false,
-            tags: { referrals: { limit: 10 } },
         });
         expect(TagsSearchModule.searchIPFS).not.toHaveBeenCalled();
     });
@@ -96,10 +95,8 @@ describe("referral availability (#647)", () => {
             limit: 10,
             spotsRemaining: 7,
             acceptsNewReferrals: true,
-            tags: { referrals: { limit: 10 } },
         });
-        expect(summary.tags.referrals.limit).toBe(summary.limit);
-        expect(Object.keys(summary).sort()).toEqual(["acceptsNewReferrals", "exists", "limit", "spotsRemaining", "tags"]);
+        expect(Object.keys(summary).sort()).toEqual(["acceptsNewReferrals", "exists", "limit", "spotsRemaining"]);
         const encoded = JSON.stringify(summary);
         expect(encoded).not.toContain("SECRET_SOL");
         expect(encoded).not.toContain("alice@example.com");
@@ -117,7 +114,6 @@ describe("referral availability (#647)", () => {
             limit: 10,
             spotsRemaining: 0,
             acceptsNewReferrals: false,
-            tags: { referrals: { limit: 10 } },
         });
 
         await expect(_validateReferral("alice", {}, domainConfig, { enforceLimit: true })).rejects.toMatchObject({
@@ -153,7 +149,6 @@ describe("referral availability (#647)", () => {
                 limit: 4,
                 spotsRemaining: 0,
                 acceptsNewReferrals: false,
-                tags: { referrals: { limit: 4 } },
             });
 
             TagsSearchModule.searchTag.mockResolvedValue(PRIVATE_REFERRER);
@@ -164,7 +159,6 @@ describe("referral availability (#647)", () => {
                 limit: 4,
                 spotsRemaining: 1,
                 acceptsNewReferrals: true,
-                tags: { referrals: { limit: 4 } },
             });
             await expect(_validateReferral("alice", {}, licensed, { enforceLimit: true })).resolves.toMatchObject({
                 publicData: { tagName: "alice.zelf" },
@@ -176,7 +170,6 @@ describe("referral availability (#647)", () => {
                 limit: 4,
                 spotsRemaining: 0,
                 acceptsNewReferrals: false,
-                tags: { referrals: { limit: 4 } },
             });
             await expect(_validateReferral("alice", {}, licensed, { enforceLimit: true })).rejects.toMatchObject({
                 message: "409:REFERRAL_LIMIT_REACHED",

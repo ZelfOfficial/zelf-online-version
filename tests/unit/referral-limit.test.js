@@ -56,6 +56,10 @@ describe("referral reward limit (#45)", () => {
             expect(referralRewardLimit({ tags: { referrals: { limit: 1.5 } } })).toBe(7);
             expect(referralRewardLimit({ tags: { referrals: { limit: "x" } } })).toBe(7);
             expect(referralRewardLimit({ tags: { referrals: { limit: true } } })).toBe(7);
+            expect(referralRewardLimit({ tags: { referrals: { limit: "1e2" } } })).toBe(7);
+            expect(referralRewardLimit({ tags: { referrals: { limit: "+5" } } })).toBe(7);
+            expect(referralRewardLimit({ tags: { referrals: { limit: Symbol("cap") } } })).toBe(7);
+            expect(referralRewardLimit({ tags: { referrals: { limit: () => 5 } } })).toBe(7);
             expect(referralRewardLimit("5")).toBe(5);
             expect(referralRewardLimit("x")).toBe(10);
         });
@@ -67,6 +71,10 @@ describe("referral reward limit (#45)", () => {
         expect(kept.toJSON().tags.referrals.limit).toBe(6);
         expect(new Domain(kept.toJSON()).tags.referrals.limit).toBe(6);
         expect(referralRewardLimit(kept)).toBe(6);
+
+        const safe = license(JSON.parse('{"limit":5,"__proto__":{"polluted":true}}'));
+        expect(safe.tags.referrals).toEqual({ limit: 5 });
+        expect(({}).polluted).toBeUndefined();
 
         withReferralEnv("7", () => {
             const dropped = license({ limit: 0 });

@@ -46,19 +46,13 @@ Registered in `Routes/protected-repositories.js`. `GET /referral-availability` i
 
 ### Referral cap
 
-`GET /api/zelf-ids/referral-availability?tagName=alice&domain=zelf` (also accepts `referralTagName` or `referral`). No session. Response `data`:
+`GET /api/zelf-ids/referral-availability?tagName=alice&domain=zelf` (also accepts `referralTagName` or `referral`). No session. Response `data` is only:
 
 ```json
-{
-  "exists": true,
-  "limit": 5,
-  "spotsRemaining": 2,
-  "acceptsNewReferrals": true,
-  "tags": { "referrals": { "limit": 5 } }
-}
+{ "exists": true, "limit": 5, "spotsRemaining": 2, "acceptsNewReferrals": true }
 ```
 
-`limit` and `tags.referrals.limit` are the same cap. A positive integer on the domain license (`tags.referrals.limit`) wins. Otherwise `REFERRAL_REWARD_LIMIT`, otherwise 10. `Domain` keeps that license field when it rebuilds `tags`. Unknown inviter: `exists: false`, `spotsRemaining: 0`, `acceptsNewReferrals: false`, and that same cap. The body never includes the referral list, friend names, wallet addresses, emails, or plan.
+A positive integer on the domain license (`tags.referrals.limit`) wins. Otherwise `REFERRAL_REWARD_LIMIT`, otherwise 10. `Domain` keeps that license field when it rebuilds `tags`. Unknown inviter: `exists: false`, `spotsRemaining: 0`, `acceptsNewReferrals: false`, and that same `limit`. The body never includes the referral list, friend names, wallet addresses, emails, or plan.
 
 A new signup (`POST /lease`, `POST /lease-offline`) or a checkout that attaches a referral not already stored on the record returns `409` with `code` and `message` `REFERRAL_LIMIT_REACHED` once `spotsRemaining` is 0. Address sync (`sync: true`) is not a new referral. The count is the same set used by `GET /api/my-tags/referrals` and `POST /api/my-tags/referrals/claim` (`countedFriends` / the reward cap). A claim past the cap returns `409` `REFERRAL_LIMIT_REACHED`. Referrals already stored stay as they are, including ones over the cap. `POST /lease-recovery` does not return this error.
 

@@ -45,11 +45,12 @@ const DEFAULT_REFERRAL_REWARD_LIMIT = 10;
 
 /** Positive integer cap. Numeric strings count. Booleans, blanks, and fractions do not. */
 const positiveReferralLimit = (value) => {
-    if (typeof value === "boolean" || value == null || typeof value === "object") return null;
-    const raw = typeof value === "string" ? value.trim() : value;
-    if (raw === "") return null;
+    if (typeof value === "number") return Number.isSafeInteger(value) && value > 0 ? value : null;
+    if (typeof value !== "string") return null;
+    const raw = value.trim();
+    if (!/^\d+$/.test(raw)) return null;
     const n = Number(raw);
-    return Number.isInteger(n) && n > 0 ? n : null;
+    return Number.isSafeInteger(n) && n > 0 ? n : null;
 };
 
 /**
