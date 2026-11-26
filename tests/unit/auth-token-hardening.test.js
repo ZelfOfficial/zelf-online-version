@@ -643,4 +643,85 @@ describe("verifySuperAdmin", () => {
             expect(deleteRes.body.code).toBe("SUPER_ADMIN_REQUIRED");
         });
     });
+
+    describe("GET /api/super-admins/verify", () => {
+        const buildVerifyApp = () => {
+            const app = new Koa();
+            app.use(createBodyParser());
+            const router = new Router();
+            require("../../Repositories/SuperAdmin/routes/super-admin.route")(router);
+            app.use(router.routes());
+            return app;
+        };
+
+        test("accepts valid super_admin and blog role tokens", async () => {
+            const app = buildVerifyApp();
+            const fullAdmin = await createAdmin({ role: SUPER_ADMIN_ROLES.superAdmin });
+            const fullToken = SuperAdminModule.signSuperAdminToken(fullAdmin);
+
+            const fullRes = await request(app.callback())
+                .get("/api/super-admins/verify")
+                .set("Authorization", `Bearer ${fullToken}`);
+            expect(fullRes.status).toBe(200);
+            expect(fullRes.body.data).toMatchObject({
+                ok: true,
+                superAdminId: String(fullAdmin._id),
+                role: "super_admin",
+                email: fullAdmin.email,
+            });
+
+            const blogAdmin = await createAdmin({ role: SUPER_ADMIN_ROLES.blog });
+            const blogToken = SuperAdminModule.signSuperAdminToken(blogAdmin);
+
+            const blogRes = await request(app.callback())
+                .get("/api/super-admins/verify")
+                .set("Authorization", `Bearer ${blogToken}`);
+            expect(blogRes.status).toBe(200);
+            expect(blogRes.body.data).toMatchObject({
+                ok: true,
+                superAdminId: String(blogAdmin._id),
+                role: "blog",
+                email: blogAdmin.email,
+            });
+        });
+
+        test("rejects missing, non-admin, revoked, and inactive tokens", async () => {
+            const app = buildVerifyApp();
+
+            const missingRes = await request(app.callback()).get("/api/super-admins/verify");
+            expect(missingRes.status).toBe(401);
+            expect(missingRes.body.code).toBe("SUPER_ADMIN_REQUIRED");
+
+            const sessionToken = signToken(
+                { identifier: "wallet-device", session: new mongoose.Types.ObjectId().toString() },
+                config.JWT_SECRET,
+                { typ: TOKEN_TYPES.session, expiresIn: "10m" }
+            );
+            const sessionRes = await request(app.callback())
+                .get("/api/super-admins/verify")
+                .set("Authorization", `Bearer ${sessionToken}`);
+            expect(sessionRes.status).toBe(403);
+            expect(sessionRes.body.code).toBe("SUPER_ADMIN_REQUIRED");
+
+            const revokedAdmin = await createAdmin({ tokenVersion: 1 });
+            const staleToken = signToken(
+                { tokenVersion: 0, exp: moment().add(1, "hour").unix() },
+                config.JWT_SECRET,
+                { typ: TOKEN_TYPES.superAdmin, superAdminId: String(revokedAdmin._id) }
+            );
+            const revokedRes = await request(app.callback())
+                .get("/api/super-admins/verify")
+                .set("Authorization", `Bearer ${staleToken}`);
+            expect(revokedRes.status).toBe(403);
+            expect(revokedRes.body.code).toBe("TOKEN_REVOKED");
+
+            const inactiveAdmin = await createAdmin({ active: false });
+            const inactiveToken = SuperAdminModule.signSuperAdminToken(inactiveAdmin);
+            const inactiveRes = await request(app.callback())
+                .get("/api/super-admins/verify")
+                .set("Authorization", `Bearer ${inactiveToken}`);
+            expect(inactiveRes.status).toBe(403);
+            expect(inactiveRes.body.code).toBe("SUPER_ADMIN_INACTIVE");
+        });
+    });
 });

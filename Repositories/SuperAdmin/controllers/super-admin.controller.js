@@ -110,6 +110,19 @@ const destroy = async (ctx) => {
     }
 };
 
+const verify = async (ctx) => {
+    const user = ctx.state.user || {};
+    const admin = ctx.state.superAdmin;
+    ctx.body = {
+        data: {
+            ok: true,
+            superAdminId: String(user.superAdminId || admin?._id || ""),
+            role: user.role || "super_admin",
+            email: admin?.email || undefined,
+        },
+    };
+};
+
 module.exports = {
     get,
     show,
@@ -119,4 +132,5 @@ module.exports = {
     auth,
     requestOtp,
     verifyOtp,
+    verify,
 };
