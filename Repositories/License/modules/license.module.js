@@ -504,6 +504,11 @@ const filterUserModifiableFields = (domainConfig, existingLicense = null) => {
         if (existingData.stripe) {
             domainConfig.stripe = existingData.stripe;
         }
+
+        // Preserve referral settings when an update omits tags.referrals (e.g. older dashboard clients)
+        if (domainConfig.tags && domainConfig.tags.referrals === undefined && existingData.tags?.referrals !== undefined) {
+            domainConfig.tags.referrals = existingData.tags.referrals;
+        }
     } else {
         // For new licenses, set default system-managed fields
         domainConfig.startDate = moment().format("YYYY-MM-DD HH:mm:ss");

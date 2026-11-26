@@ -1,6 +1,38 @@
 const config = require("../../../Core/config");
 const { codedError } = require("../../../Core/http-handler");
 const { isUnsupportedDomain, omitUnsupportedCurrencies, omitUnsupportedNetworks, presentDomainRecord } = require("../../../Core/unsupported-networks");
+const { positiveReferralLimit } = require("./referral-reward.util");
+
+/**
+ * Keep `tags.referrals` when the license is rebuilt. Only a positive integer `limit`
+ * is stored; an invalid cap is omitted so callers fall back to the env default.
+ * @param {Object} [referrals]
+ * @returns {Object|undefined}
+ */
+const referralSettings = (referrals) => {
+    if (!referrals || typeof referrals !== "object" || Array.isArray(referrals)) return undefined;
+
+    const next = {};
+    for (const [key, value] of Object.entries(referrals)) {
+        if (
+            key === "limit" ||
+            key === "__proto__" ||
+            key === "constructor" ||
+            key === "prototype" ||
+            value == null ||
+            typeof value === "function"
+        ) {
+            continue;
+        }
+        next[key] = value;
+    }
+
+    const limit = positiveReferralLimit(referrals.limit);
+    if (limit != null) next.limit = limit;
+
+    return Object.keys(next).length ? next : undefined;
+};
+
 /**
  * Domain Class
  *
@@ -24,6 +56,7 @@ class Domain {
         this.startDate = domainData.startDate || "";
         this.endDate = domainData.endDate || "";
         this.features = domainData.features || [];
+        const referrals = referralSettings(domainData.tags?.referrals);
         // Validation rules
         this.tags = {
             minLength: domainData.tags?.minLength || 3,
@@ -54,6 +87,7 @@ class Domain {
             wallet: {
                 networks: omitUnsupportedNetworks(domainData.tags?.wallet?.networks || domainData.wallet?.networks) || {},
             },
+            ...(referrals ? { referrals } : {}),
         };
 
         this.zelfkeys = {

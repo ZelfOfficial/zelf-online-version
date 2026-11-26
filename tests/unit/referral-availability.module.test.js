@@ -134,6 +134,53 @@ describe("referral availability (#647)", () => {
         });
     });
 
+    test("a license cap replaces the env default for signup and the public summary", async () => {
+        const previous = process.env.REFERRAL_REWARD_LIMIT;
+        process.env.REFERRAL_REWARD_LIMIT = "9";
+        const licensed = {
+            ...domainConfig,
+            tags: { ...domainConfig.tags, referrals: { limit: 4 } },
+        };
+
+        try {
+            TagsSearchModule.searchTag.mockResolvedValue({ available: true });
+            await expect(getReferralAvailability("missing", licensed)).resolves.toEqual({
+                exists: false,
+                limit: 4,
+                spotsRemaining: 0,
+                acceptsNewReferrals: false,
+            });
+
+            TagsSearchModule.searchTag.mockResolvedValue(PRIVATE_REFERRER);
+            TagsSearchModule.searchIPFS.mockResolvedValue(friends(3));
+
+            await expect(getReferralAvailability("alice", licensed)).resolves.toEqual({
+                exists: true,
+                limit: 4,
+                spotsRemaining: 1,
+                acceptsNewReferrals: true,
+            });
+            await expect(_validateReferral("alice", {}, licensed, { enforceLimit: true })).resolves.toMatchObject({
+                publicData: { tagName: "alice.zelf" },
+            });
+
+            TagsSearchModule.searchIPFS.mockResolvedValue(friends(4));
+            await expect(getReferralAvailability("alice", licensed)).resolves.toMatchObject({
+                exists: true,
+                limit: 4,
+                spotsRemaining: 0,
+                acceptsNewReferrals: false,
+            });
+            await expect(_validateReferral("alice", {}, licensed, { enforceLimit: true })).rejects.toMatchObject({
+                message: "409:REFERRAL_LIMIT_REACHED",
+                clientCode: "REFERRAL_LIMIT_REACHED",
+            });
+        } finally {
+            if (previous === undefined) delete process.env.REFERRAL_REWARD_LIMIT;
+            else process.env.REFERRAL_REWARD_LIMIT = previous;
+        }
+    });
+
     test("recovery does not enforce the cap when the inviter is already full", async () => {
         TagsSearchModule.searchTag.mockResolvedValue(PRIVATE_REFERRER);
         TagsSearchModule.searchIPFS.mockResolvedValue(friends(10));

@@ -42,9 +42,34 @@ const explicitReferralPrice = (record) => {
 
 /** Referrals that count toward the reward. Existing extras stay as history; new signups are rejected once this is full. */
 const DEFAULT_REFERRAL_REWARD_LIMIT = 10;
-const referralRewardLimit = (value = process.env.REFERRAL_REWARD_LIMIT) => {
-    const n = Number(value);
-    return Number.isInteger(n) && n > 0 ? n : DEFAULT_REFERRAL_REWARD_LIMIT;
+
+/** Positive integer cap. Numeric strings count. Booleans, blanks, and fractions do not. */
+const positiveReferralLimit = (value) => {
+    if (typeof value === "number") return Number.isSafeInteger(value) && value > 0 ? value : null;
+    if (typeof value !== "string") return null;
+    const raw = value.trim();
+    if (!/^\d+$/.test(raw)) return null;
+    const n = Number(raw);
+    return Number.isSafeInteger(n) && n > 0 ? n : null;
+};
+
+/**
+ * Reward cap for a domain.
+ * A positive integer on the license (`tags.referrals.limit`) wins and is not replaced by 10.
+ * A bare number or numeric string is that cap (invalid values are 10, not the env).
+ * Anything else falls back to `REFERRAL_REWARD_LIMIT`, then 10.
+ * @param {Object|number|string} [domainConfig]
+ * @returns {number}
+ */
+const referralRewardLimit = (domainConfig) => {
+    if (typeof domainConfig === "number" || typeof domainConfig === "string") {
+        return positiveReferralLimit(domainConfig) ?? DEFAULT_REFERRAL_REWARD_LIMIT;
+    }
+
+    const fromLicense = positiveReferralLimit(domainConfig?.tags?.referrals?.limit);
+    if (fromLicense != null) return fromLicense;
+
+    return positiveReferralLimit(process.env.REFERRAL_REWARD_LIMIT) ?? DEFAULT_REFERRAL_REWARD_LIMIT;
 };
 
 const _recordTime = (record) => {
@@ -115,6 +140,7 @@ const referralCapacity = (friends, rewarded, limit = referralRewardLimit()) => {
 
 module.exports = {
     DEFAULT_REFERRAL_REWARD_LIMIT,
+    positiveReferralLimit,
     referralRewardLimit,
     countedReferralFriends,
     canonicalReferralTagName,

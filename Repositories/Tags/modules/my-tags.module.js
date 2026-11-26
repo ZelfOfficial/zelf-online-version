@@ -14,6 +14,7 @@ const {
     loadReferralRecords,
 } = require("./referral-capacity.module");
 const config = require("../../../Core/config");
+const { codedError } = require("../../../Core/http-handler");
 const { assertPayoutAddressAllowed } = require("../../ZelfNameService/modules/zns-payout-denylist");
 const { searchTag } = require("./tags.module");
 const moment = require("moment");
@@ -966,12 +967,12 @@ const claimReferralReward = async (tagName, domain, friendTagName, friendDomain,
     const rewardRecord = await _checkIfRewardAlreadyClaimed(friendFullTagName, referralTagName, rewardType);
 
     // Same counted set as signup and GET /api/zelf-ids/referral-availability.
-    const limit = referralRewardLimit();
+    const limit = referralRewardLimit(domainConfig);
     const rewardedFriends = await rewardedReferralFriends(referralTagName);
     const counted = referralCapacity(groupReferralRecords(domainReferralRecords), rewardedFriends, limit).counted;
     const friendKey = referralName(friendFullTagName);
     if (!rewardedFriends.has(friendKey) && (rewardedFriends.size >= limit || !counted.has(friendKey))) {
-        throw _claimError(409, "referral_limit_reached");
+        throw codedError("409:REFERRAL_LIMIT_REACHED");
     }
 
     const rewardAmount = _calculateReferralRewardAmount(friendRecord, domainConfig, rewardType);
@@ -1020,7 +1021,7 @@ const getMyReferrals = async (tagName, domain, authUser) => {
     const referrals = [];
     let totalEarnedInZNS = 0;
 
-    const limit = referralRewardLimit();
+    const limit = referralRewardLimit(domainConfig);
     const counted = referralCapacity(map, await rewardedReferralFriends(referralTagName), limit).counted;
 
     for (const [name, record] of map) {

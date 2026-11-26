@@ -95,7 +95,7 @@ const capacityForReferrer = async (referralTagName, domain, domainConfig, authUs
     const fullName = canonicalReferralTagName(referralTagName, domain || domainConfig?.name);
     const records = await loadReferralRecords(fullName, domain || domainConfig?.name, domainConfig, authUser);
     const rewarded = await rewardedReferralFriends(fullName);
-    return referralCapacity(groupReferralRecords(records), rewarded, referralRewardLimit());
+    return referralCapacity(groupReferralRecords(records), rewarded, referralRewardLimit(domainConfig));
 };
 
 /** The referral key that a new friend's record would store for this inviter. */
@@ -124,26 +124,33 @@ const assertReferrerAcceptsNewReferral = async (tagObject, domainConfig) => {
 };
 
 /**
- * Public summary. Only the four fields the apps need before signup.
+ * Public summary before signup. Only the four fields the apps need; `limit` comes from
+ * the domain license (`tags.referrals.limit`), otherwise env, otherwise 10.
+ * @param {number} limit
+ * @param {boolean} exists
+ * @param {number} spotsRemaining
+ * @param {boolean} acceptsNewReferrals
+ */
+const publicReferralSummary = (limit, exists, spotsRemaining, acceptsNewReferrals) => ({
+    exists,
+    limit,
+    spotsRemaining,
+    acceptsNewReferrals,
+});
+
+/**
  * @param {string} referralTagName
  * @param {Object} domainConfig
  * @param {boolean} exists
  */
 const publicReferralAvailability = async (referralTagName, domainConfig, exists) => {
-    const limit = referralRewardLimit();
+    const limit = referralRewardLimit(domainConfig);
 
-    if (!exists) {
-        return { exists: false, limit, spotsRemaining: 0, acceptsNewReferrals: false };
-    }
+    if (!exists) return publicReferralSummary(limit, false, 0, false);
 
     const capacity = await capacityForReferrer(referralTagName, domainConfig.name, domainConfig, {});
 
-    return {
-        exists: true,
-        limit: capacity.limit,
-        spotsRemaining: capacity.spotsRemaining,
-        acceptsNewReferrals: capacity.acceptsNewReferrals,
-    };
+    return publicReferralSummary(capacity.limit, true, capacity.spotsRemaining, capacity.acceptsNewReferrals);
 };
 
 module.exports = {

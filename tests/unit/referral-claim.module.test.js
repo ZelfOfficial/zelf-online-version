@@ -347,7 +347,43 @@ describe("referral claim (#515)", () => {
 		expect(byName(list.referrals, "f10.zelf")).toMatchObject({ countsForReward: false, claimed: false });
 		expect(byName(list.referrals, "f0.zelf")).toMatchObject({ countsForReward: true, claimed: false });
 
-		await expect(claim("f10")).rejects.toMatchObject({ status: 409, code: "referral_limit_reached" });
+		await expect(claim("f10")).rejects.toMatchObject({
+			message: "409:REFERRAL_LIMIT_REACHED",
+			clientCode: "REFERRAL_LIMIT_REACHED",
+		});
+		expect(RewardTransfer.sendRewardTransfer).not.toHaveBeenCalled();
+	});
+
+	test("tags.referrals.limit from the license caps the list and the claim", async () => {
+		const licensed = {
+			...ZELF,
+			tags: { ...ZELF.tags, referrals: { limit: 2 } },
+		};
+		getDomainConfig.mockReturnValue(licensed);
+		const three = Array.from({ length: 3 }, (_, i) => ({
+			id: `ipfs-g${i}`,
+			publicData: {
+				tagName: `g${i}.zelf.hold`,
+				zelfName: `g${i}.zelf.hold`,
+				domain: "zelf",
+				referralTagName: "qa99.zelf",
+				type: "hold",
+				registeredAt: `2026-02-${String(i + 1).padStart(2, "0")} 00:00:00`,
+			},
+		}));
+		TagsSearchModule.searchIPFS.mockResolvedValue(three);
+		TagsSearchModule.searchArweave.mockResolvedValue([]);
+
+		const list = await Module.getMyReferrals("qa99", "zelf", {});
+		expect(list.limit).toBe(2);
+		expect(list.countedFriends).toBe(2);
+		expect(byName(list.referrals, "g2.zelf")).toMatchObject({ countsForReward: false, claimed: false });
+		expect(byName(list.referrals, "g0.zelf")).toMatchObject({ countsForReward: true });
+
+		await expect(claim("g2")).rejects.toMatchObject({
+			message: "409:REFERRAL_LIMIT_REACHED",
+			clientCode: "REFERRAL_LIMIT_REACHED",
+		});
 		expect(RewardTransfer.sendRewardTransfer).not.toHaveBeenCalled();
 	});
 });

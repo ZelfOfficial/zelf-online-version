@@ -9,6 +9,7 @@ const IPFS = require("../../Repositories/IPFS/modules/ipfs.module");
 const ClientModule = require("../../Repositories/Client/modules/client.module");
 const TagsIPFSModule = require("../../Repositories/Tags/modules/tags-ipfs.module");
 const { createOrUpdateLicense } = require("../../Repositories/License/modules/license.module");
+const { createValidation } = require("../../Repositories/License/middlewares/license.middleware");
 
 const OWNER = "miguel@zelf.world";
 const STAFF = "jim@mg.zelf.world";
@@ -89,5 +90,59 @@ describe("createOrUpdateLicense as staff", () => {
         IPFS.get.mockResolvedValue([]);
         await expect(createOrUpdateLicense(body(), staffJwt)).rejects.toThrow("403:staff_cannot_create_license");
         expect(IPFS.insert).not.toHaveBeenCalled();
+    });
+
+    test("preserves tags.referrals when an update omits it and replaces it when provided", async () => {
+        const initialBody = body();
+        initialBody.domainConfig.tags.referrals = { limit: 5 };
+        await createOrUpdateLicense(initialBody, staffJwt);
+        expect(insertedJson().tags.referrals).toEqual({ limit: 5 });
+
+        await createOrUpdateLicense(body(), staffJwt);
+        const omittedJson = JSON.parse(Buffer.from(IPFS.insert.mock.calls[1][0].base64, "base64").toString());
+        expect(omittedJson.tags.referrals).toEqual({ limit: 5 });
+
+        const updatedBody = body();
+        updatedBody.domainConfig.tags.referrals = { limit: 12 };
+        await createOrUpdateLicense(updatedBody, staffJwt);
+        const replacedJson = JSON.parse(Buffer.from(IPFS.insert.mock.calls[2][0].base64, "base64").toString());
+        expect(replacedJson.tags.referrals).toEqual({ limit: 12 });
+    });
+
+    test("createValidation allows a positive integer tags.referrals.limit and rejects non-positive values", async () => {
+        const validPayload = (referrals) => ({
+            domain: "zelf",
+            faceBase64: Buffer.from("face").toString("base64"),
+            domainConfig: {
+                name: "zelf",
+                tags: {
+                    minLength: 3,
+                    maxLength: 50,
+                    payment: { methods: ["crypto"], pricingTable: { "6-15": { 1: 24 } } },
+                    storage: { keyPrefix: "tagName" },
+                    wallet: { networks: { eth: { enabled: true } } },
+                    ...(referrals !== undefined ? { referrals } : {}),
+                },
+                zelfkeys: { storage: { keyPrefix: "tagName" } },
+            },
+        });
+
+        const runValidation = async (referrals) => {
+            const ctx = { request: { query: {}, body: validPayload(referrals) } };
+            const next = jest.fn(async () => {});
+            await createValidation(ctx, next);
+            return { ctx, next };
+        };
+
+        const ok = await runValidation({ limit: 5 });
+        expect(ok.next).toHaveBeenCalledTimes(1);
+        expect(ok.ctx.status).toBeUndefined();
+
+        for (const bad of [{ limit: 0 }, { limit: -2 }, { limit: 1.5 }]) {
+            const res = await runValidation(bad);
+            expect(res.next).not.toHaveBeenCalled();
+            expect(res.ctx.status).toBe(409);
+            expect(res.ctx.body.validationError).toBeTruthy();
+        }
     });
 });
