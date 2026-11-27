@@ -128,8 +128,7 @@ const Reward = require("../../Repositories/Rewards/models/rewards.model");
 const { dailyRewards } = require("../../Repositories/Rewards/modules/rewards.module");
 const Controller = require("../../Repositories/Rewards/controllers/rewards.controller");
 
-const HOLD_SEGMENTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-const MAINNET_SEGMENTS = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24];
+const WHEEL_SEGMENTS = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
 
 const authUser = { tagName: "session-other", domain: "avax", identifier: "session-other" };
 
@@ -193,7 +192,7 @@ afterEach(() => {
 });
 
 describe("POST /api/rewards/daily identity", () => {
-    it("claims a face-only Zelf ID with a valid face and keeps the hold wheel amount", async () => {
+    it("claims a face-only Zelf ID with a valid face and pays the first wheel slot", async () => {
         jest.spyOn(Math, "random").mockReturnValue(0);
 
         const result = await dailyRewards(claimBody(), authUser);
@@ -209,19 +208,19 @@ describe("POST /api/rewards/daily identity", () => {
             authUser
         );
         expect(result.success).toBe(true);
-        expect(result.reward.amount).toBe(1);
+        expect(result.reward.amount).toBe(11);
         expect(result.reward.winningIndex).toBe(0);
-        expect(result.reward.segments).toEqual(HOLD_SEGMENTS);
-        expect(RewardTransfer.sendRewardTransfer).toHaveBeenCalledWith(1, "SoLanaAddress111", expect.any(Object));
+        expect(result.reward.segments).toEqual(WHEEL_SEGMENTS);
+        expect(RewardTransfer.sendRewardTransfer).toHaveBeenCalledWith(11, "SoLanaAddress111", expect.any(Object));
         expect(ZNSTokenModule.giveTokensAfterPurchase).not.toHaveBeenCalled();
         expect(IPFS.pinFile).toHaveBeenCalledWith(
             expect.any(String),
             expect.any(String),
             "application/json",
-            expect.objectContaining({ amount: "1", rewardType: "daily" })
+            expect.objectContaining({ amount: "11", rewardType: "daily" })
         );
         expect(Reward.instances).toHaveLength(1);
-        expect(Reward.instances[0].amount).toBe(1);
+        expect(Reward.instances[0].amount).toBe(11);
         expect(JSON.stringify(result)).not.toMatch(/face-ok|mnemonic|secretKey/i);
     });
 
@@ -268,11 +267,11 @@ describe("POST /api/rewards/daily identity", () => {
         const result = await dailyRewards(claimBody(), authUser);
 
         expect(result.success).toBe(true);
-        expect(result.reward.amount).toBe(1);
+        expect(result.reward.amount).toBe(11);
         expect(TagsModule.decryptTag).toHaveBeenCalledWith(expect.objectContaining({ password: undefined }), authUser);
     });
 
-    it("uses the mainnet wheel (even amounts) after a valid face", async () => {
+    it("uses the same 11-20 wheel for a mainnet name after a valid face", async () => {
         jest.spyOn(Math, "random").mockReturnValue(0);
         TagsSearchModule.searchTag.mockResolvedValue({
             tagObject: tagObject({ publicData: { type: "mainnet" } }),
@@ -280,9 +279,9 @@ describe("POST /api/rewards/daily identity", () => {
 
         const result = await dailyRewards(claimBody(), authUser);
 
-        expect(result.reward.amount).toBe(2);
-        expect(result.reward.segments).toEqual(MAINNET_SEGMENTS);
-        expect(RewardTransfer.sendRewardTransfer).toHaveBeenCalledWith(2, "SoLanaAddress111", expect.any(Object));
+        expect(result.reward.amount).toBe(11);
+        expect(result.reward.segments).toEqual(WHEEL_SEGMENTS);
+        expect(RewardTransfer.sendRewardTransfer).toHaveBeenCalledWith(11, "SoLanaAddress111", expect.any(Object));
     });
 
     it("requires masterPassword when the proof has a password layer", async () => {
@@ -322,7 +321,7 @@ describe("POST /api/rewards/daily identity", () => {
         const result = await dailyRewards(claimBody({ masterPassword: "vault-secret" }), authUser);
 
         expect(result.success).toBe(true);
-        expect(result.reward.amount).toBe(1);
+        expect(result.reward.amount).toBe(11);
         expect(TagsModule.decryptTag).toHaveBeenCalledWith(
             expect.objectContaining({
                 tagName: "owner",
@@ -332,7 +331,7 @@ describe("POST /api/rewards/daily identity", () => {
             }),
             authUser
         );
-        expect(RewardTransfer.sendRewardTransfer).toHaveBeenCalledWith(1, "SoLanaAddress111", expect.any(Object));
+        expect(RewardTransfer.sendRewardTransfer).toHaveBeenCalledWith(11, "SoLanaAddress111", expect.any(Object));
     });
 
     it("accepts password as the Zelf ID secret when masterPassword is omitted", async () => {

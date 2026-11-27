@@ -145,4 +145,48 @@ describe("createOrUpdateLicense as staff", () => {
             expect(res.ctx.body.validationError).toBeTruthy();
         }
     });
+
+    test("preserves tags.rewards.wheelSegments when an update omits it", async () => {
+        const initialBody = body();
+        initialBody.domainConfig.tags.rewards = { wheelSegments: [11, 12, 20] };
+        await createOrUpdateLicense(initialBody, staffJwt);
+        expect(insertedJson().tags.rewards.wheelSegments).toEqual([11, 12, 20]);
+
+        await createOrUpdateLicense(body(), staffJwt);
+        const omittedJson = JSON.parse(Buffer.from(IPFS.insert.mock.calls[1][0].base64, "base64").toString());
+        expect(omittedJson.tags.rewards.wheelSegments).toEqual([11, 12, 20]);
+    });
+
+    test("createValidation accepts a positive wheel and rejects a non-positive segment", async () => {
+        const payload = (wheelSegments) => ({
+            domain: "zelf",
+            faceBase64: Buffer.from("face").toString("base64"),
+            domainConfig: {
+                name: "zelf",
+                tags: {
+                    minLength: 3,
+                    maxLength: 50,
+                    payment: { methods: ["crypto"], pricingTable: { "6-15": { 1: 24 } } },
+                    storage: { keyPrefix: "tagName" },
+                    wallet: { networks: { eth: { enabled: true } } },
+                    ...(wheelSegments !== undefined ? { rewards: { wheelSegments } } : {}),
+                },
+                zelfkeys: { storage: { keyPrefix: "tagName" } },
+            },
+        });
+
+        const runValidation = async (wheelSegments) => {
+            const ctx = { request: { query: {}, body: payload(wheelSegments) } };
+            const next = jest.fn(async () => {});
+            await createValidation(ctx, next);
+            return { ctx, next };
+        };
+
+        const ok = await runValidation([11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+        expect(ok.next).toHaveBeenCalledTimes(1);
+
+        const rejected = await runValidation([11, 0]);
+        expect(rejected.next).not.toHaveBeenCalled();
+        expect(rejected.ctx.status).toBe(409);
+    });
 });

@@ -3,7 +3,6 @@ const {
     rewardFriendKeys,
     findReferralRecord,
     groupReferralRecords,
-    explicitReferralPrice,
     referralRewardLimit,
     canonicalReferralTagName,
     referralCapacity,
@@ -836,63 +835,27 @@ const _findReferralRecordInStorage = async (referralTagName, friendFullTagName, 
     return { friendRecord, records };
 };
 
-/**
- * Derive duration string for getPrice from tag's registeredAt and expiresAt.
- * @param {string} registeredAt - e.g. '2026-01-29 11:30:07'
- * @param {string} expiresAt - e.g. '2027-01-29 11:30:07'
- * @returns {string} "1" | "2" | "3" | "4" | "5" | "lifetime"
- */
-const _durationFromRegisteredAndExpires = (registeredAt, expiresAt) => {
-    if (!registeredAt || !expiresAt) return "1";
-    const start = parseLeaseDate(registeredAt);
-    const end = parseLeaseDate(expiresAt);
-    if (!start.isValid() || !end.isValid() || end.isSameOrBefore(start)) return "1";
-    const years = end.diff(start, "years", true);
-    if (years >= 5) return "lifetime";
-    const durationYears = Math.min(5, Math.max(1, Math.round(years)));
-    return String(durationYears);
-};
+/** Flat ZNS paid to the referrer for one registration and for one purchased name. */
+const REFERRAL_REWARD_ZNS = 10;
 
 /**
  * Step 3: Calculate referral reward amount (ZNS tokens).
- * - Registration (hold): fixed 10 ZNS.
- * - Purchase (mainnet): 10% of friend's tag purchase price, converted to ZNS.
+ * Registrations and purchases both pay a flat 10 ZNS. The referral cap
+ * (`tags.referrals.limit` → `REFERRAL_REWARD_LIMIT` → default) is enforced by the caller.
  * @param {Object} friendRecord - Friend's IPFS/Arweave record
- * @param {Object} domainConfig - Domain config
+ * @param {Object} domainConfig - Domain config (cap only; it does not change this amount)
  * @param {string} rewardType - "registration" or "purchase"
  * @returns {number} ZNS reward amount
  */
-const _calculateReferralRewardAmount = (friendRecord, domainConfig, rewardType = null) => {
-    // If rewardType is not provided, derive it from record status (for backward compatibility if needed)
+const _calculateReferralRewardAmount = (friendRecord, _domainConfig, rewardType = null) => {
     if (!rewardType) {
         const type = friendRecord.publicData?.type || friendRecord.metadata?.extraParams?.type || "hold";
         rewardType = type === "mainnet" ? "purchase" : "registration";
     }
 
-    if (rewardType === "registration") {
-        return 10; // Flat 10 ZNS for registration
-    }
+    if (rewardType !== "registration" && rewardType !== "purchase") return 0;
 
-    // Purchase reward: 10% of tag price
-    let tagPrice = explicitReferralPrice(friendRecord);
-
-    if (tagPrice === null) {
-        const registeredAt = friendRecord.publicData?.registeredAt || friendRecord.metadata?.extraParams?.registeredAt;
-        const expiresAt = friendRecord.publicData?.expiresAt || friendRecord.metadata?.extraParams?.expiresAt;
-        const duration = _durationFromRegisteredAndExpires(registeredAt, expiresAt);
-        const tagNameForPrice = friendRecord.name || friendRecord.tagName || friendRecord.publicData?.tagName || friendRecord.publicData?.zelfName;
-        const priceResult = domainConfig.getPrice(tagNameForPrice, duration);
-        tagPrice = priceResult?.price ?? 0;
-    }
-
-    const znsPrice = config.getTokenPriceUsd(); // USD per ZNS token
-    let rewardAmount = 0;
-
-    if (tagPrice > 0) {
-        rewardAmount = (tagPrice * 0.1) / znsPrice;
-    }
-
-    return Math.round(rewardAmount * 10000) / 10000;
+    return REFERRAL_REWARD_ZNS;
 };
 
 /**
@@ -1054,7 +1017,7 @@ const getMyReferrals = async (tagName, domain, authUser) => {
             countsForReward: countsForReward || !!regClaimed,
         });
 
-        // 2. Check Purchase Reward (10%) - only if mainnet
+        // 2. Check Purchase Reward (flat 10 ZNS) - only if mainnet
         if (type === "mainnet") {
             const {
                 ipfsReward: ipfsPurReward,

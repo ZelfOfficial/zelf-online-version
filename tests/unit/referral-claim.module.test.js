@@ -134,7 +134,13 @@ describe("referral list (#514)", () => {
 
 		expect(loadDynamicDomains).toHaveBeenCalledTimes(1);
 		expect(TagsSearchModule.searchIPFS.mock.calls[0][0].domainConfig).toBe(ZELF);
-		expect(referrals.map((item) => item.name).sort()).toEqual(["2026qa.zelf", "qa94.zelf", "qa95.zelf"]);
+		expect(referrals.map((item) => `${item.rewardType}:${item.name}`).sort()).toEqual([
+			"purchase:2026qa.zelf",
+			"registration:2026qa.zelf",
+			"registration:qa94.zelf",
+			"registration:qa95.zelf",
+		]);
+		expect(referrals.find((item) => item.rewardType === "purchase")).toMatchObject({ rewardZNS: 10, claimed: false });
 	});
 
 	test("reports the outage when the licenses cannot be loaded", async () => {
@@ -165,7 +171,8 @@ describe("referral list (#514)", () => {
 
 		const { referrals, totalEarnedInZNS } = await Module.getMyReferrals("qa99", "zelf", {});
 
-		expect(referrals).toHaveLength(3);
+		expect(referrals.filter((item) => item.rewardType === "registration")).toHaveLength(3);
+		expect(referrals.find((item) => item.rewardType === "purchase")).toMatchObject({ name: "2026qa.zelf", rewardZNS: 10, claimed: false });
 		expect(byName(referrals, "2026qa.zelf")).toMatchObject({ claimStatus: "processing", claimed: false });
 		expect(totalEarnedInZNS).toBe(0);
 		// Without a stored transfer signature only a person can decide it.
@@ -385,5 +392,40 @@ describe("referral claim (#515)", () => {
 			clientCode: "REFERRAL_LIMIT_REACHED",
 		});
 		expect(RewardTransfer.sendRewardTransfer).not.toHaveBeenCalled();
+	});
+
+	test("registration and purchase both pay a flat 10 ZNS", async () => {
+		RewardTransfer.sendRewardTransfer.mockImplementation(confirmedWith("sig-flat"));
+
+		await expect(claim("qa95")).resolves.toMatchObject({ success: true, rewardAmount: 10 });
+		expect(RewardTransfer.sendRewardTransfer).toHaveBeenCalledWith(10, REFERRER_ADDRESS, expect.any(Object));
+
+		// A free mainnet name used to be rejected: 10% of a 0 price is 0.
+		await expect(Module.claimReferralReward("qa99", "zelf", "2026qa", "zelf", {}, "purchase")).resolves.toMatchObject({
+			success: true,
+			rewardAmount: 10,
+		});
+		expect(RewardTransfer.sendRewardTransfer).toHaveBeenLastCalledWith(10, REFERRER_ADDRESS, expect.any(Object));
+
+		TagsSearchModule.searchArweave.mockResolvedValue([
+			{
+				id: "arweave-paid",
+				publicData: {
+					zelfName: "paid.zelf",
+					domain: "zelf",
+					referralTagName: "qa99.zelf",
+					type: "mainnet",
+					price: 50,
+				},
+				name: "paid.zelf",
+			},
+		]);
+		TagsSearchModule.searchIPFS.mockResolvedValue([]);
+
+		await expect(Module.claimReferralReward("qa99", "zelf", "paid", "zelf", {}, "purchase")).resolves.toMatchObject({
+			success: true,
+			rewardAmount: 10,
+		});
+		expect(RewardTransfer.sendRewardTransfer).toHaveBeenLastCalledWith(10, REFERRER_ADDRESS, expect.any(Object));
 	});
 });
