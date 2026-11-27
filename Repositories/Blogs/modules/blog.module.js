@@ -9,10 +9,15 @@ const BLOG_WRITABLE_FIELDS = [
     "markdownContent",
     "coverImage",
     "imageAlt",
+    "caption",
     "tags",
+    "categories",
     "published",
     "canonicalSlug",
     "locale",
+    "metaTitle",
+    "metaDescription",
+    "faqs",
 ];
 
 const pickWritable = (data = {}) => {

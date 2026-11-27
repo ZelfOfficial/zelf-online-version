@@ -1,36 +1,50 @@
-const { string, boolean, array, any, validateStrict } = require("../../../Core/JoiUtils");
+const { string, boolean, array, any, object, validateStrict } = require("../../../Core/JoiUtils");
 const { verifyBlogSuperAdmin } = require("../../SuperAdmin/middlewares/verify-super-admin.middleware");
 
 const SUPPORTED_LOCALES = ["en", "es", "fr", "ja", "ko", "pt", "zh", "zh-TW"];
+
+/** Optional editor text. Joi string() rejects "" unless empty is explicitly allowed. */
+const optionalText = () => string().allow("");
+
+const faqItem = () =>
+    object({
+        question: optionalText().required(),
+        answer: optionalText().required(),
+    }).unknown(false);
+
+/**
+ * Fields shared by create and update.
+ * `unknown(false)` on the root schema (validateStrict) still rejects every other key.
+ */
+const editorFields = () => ({
+    description: optionalText(),
+    author: optionalText(),
+    date: any(),
+    coverImage: optionalText(),
+    imageAlt: optionalText(),
+    caption: optionalText(),
+    tags: array().items(string()),
+    categories: array().items(string()),
+    published: boolean(),
+    canonicalSlug: optionalText(),
+    locale: string(),
+    metaTitle: optionalText(),
+    metaDescription: optionalText(),
+    faqs: array().items(faqItem()),
+});
 
 const schemas = {
     create: {
         slug: string().required(),
         title: string().required(),
-        description: string(),
-        author: string(),
-        date: any(),
         markdownContent: string().required(),
-        coverImage: string(),
-        imageAlt: any(),
-        tags: array().items(string()),
-        published: boolean(),
-        canonicalSlug: string(),
-        locale: string(),
+        ...editorFields(),
     },
     update: {
         slug: string(),
         title: string(),
-        description: string(),
-        author: string(),
-        date: any(),
         markdownContent: string(),
-        coverImage: string(),
-        imageAlt: any(),
-        tags: array().items(string()),
-        published: boolean(),
-        canonicalSlug: string(),
-        locale: string(),
+        ...editorFields(),
     },
 };
 
