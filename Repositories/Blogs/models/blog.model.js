@@ -13,14 +13,31 @@ const BlogSchema = new Schema({
     markdownContent: requiredField(String),
     coverImage: { type: String, required: false },
     imageAlt: { type: String, required: false },
+    caption: { type: String, required: false },
     tags: [
         {
             type: String,
         },
     ],
+    categories: {
+        type: [{ type: String }],
+        default: undefined,
+    },
     published: defaultField(Boolean, true),
     canonicalSlug: { type: String, required: false },
     locale: defaultField(String, "en"),
+    metaTitle: { type: String, required: false },
+    metaDescription: { type: String, required: false },
+    faqs: {
+        type: [
+            {
+                _id: false,
+                question: { type: String, required: false },
+                answer: { type: String, required: false },
+            },
+        ],
+        default: undefined,
+    },
 });
 
 // Compound index for slug and locale mapping (since multiple locales might share same slug base or translations)
