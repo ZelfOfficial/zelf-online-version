@@ -509,6 +509,11 @@ const filterUserModifiableFields = (domainConfig, existingLicense = null) => {
         if (domainConfig.tags && domainConfig.tags.referrals === undefined && existingData.tags?.referrals !== undefined) {
             domainConfig.tags.referrals = existingData.tags.referrals;
         }
+
+        // Preserve a daily-wheel override when an update omits tags.rewards.
+        if (domainConfig.tags && domainConfig.tags.rewards === undefined && existingData.tags?.rewards !== undefined) {
+            domainConfig.tags.rewards = existingData.tags.rewards;
+        }
     } else {
         // For new licenses, set default system-managed fields
         domainConfig.startDate = moment().format("YYYY-MM-DD HH:mm:ss");

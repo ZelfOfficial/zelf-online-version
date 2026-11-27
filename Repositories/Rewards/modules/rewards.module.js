@@ -31,6 +31,10 @@ const DAILY_REWARD_PAYOUT_FAILED = "DAILY_REWARD_PAYOUT_FAILED";
 const DAILY_REWARD_CLAIM_IN_PROGRESS = "DAILY_REWARD_CLAIM_IN_PROGRESS";
 /** A processing row with no stored signature can be taken again once the request that held it is gone. */
 const DAILY_CLAIM_LOCK_STALE_MS = 90 * 1000;
+/** Rolling window from the last successful claim. A calendar date does not open a new spin. */
+const DAILY_REWARD_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_WHEEL_SEGMENTS = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+const DAILY_REWARD_COOLDOWN_MESSAGE = "You have already claimed your daily reward. Come back when 24 hours have passed.";
 
 const throwRewardIdentityError = (code) => {
     const status = REWARD_IDENTITY_STATUS[code] || 422;
@@ -44,7 +48,7 @@ const throwRewardIdentityError = (code) => {
     throw error;
 };
 
-const throwDailyRewardError = (status, code, clientMessage = code) => {
+const throwDailyRewardError = (status, code, clientMessage = code, extra) => {
     const error = new Error(`${status}:${code}`);
 
     error.status = status;
@@ -52,8 +56,95 @@ const throwDailyRewardError = (status, code, clientMessage = code) => {
     error.clientCode = code;
     error.clientMessage = clientMessage;
 
+    if (extra?.nextClaimAvailable) error.nextClaimAvailable = extra.nextClaimAvailable;
+
     throw error;
 };
+
+const _parseRewardTime = (value) => {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+        const date = new Date(value);
+
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    if (typeof value !== "string" || !value.trim()) return null;
+
+    const parsed = moment(value.trim(), ["YYYY-MM-DD HH:mm:ss", moment.ISO_8601, "YYYY-MM-DD"], true);
+
+    return parsed.isValid() ? parsed.toDate() : null;
+};
+
+const _claimTime = (record) => {
+    const candidates = [
+        record?.redeemedAt,
+        record?.payload?.redeemedAt,
+        record?.claimedAt,
+        record?.publicData?.redeemedAt,
+        record?.metadata?.redeemedAt,
+        record?.publicData?.claimedAt,
+        record?.metadata?.claimedAt,
+        record?.rewardDate,
+        record?.publicData?.rewardDate,
+        record?.metadata?.rewardDate,
+    ];
+
+    for (const candidate of candidates) {
+        const parsed = _parseRewardTime(candidate);
+
+        if (parsed) return parsed;
+    }
+
+    return null;
+};
+
+/** A stored daily payout, including an IPFS receipt that has no Mongo status. */
+const _isConfirmedDailyClaim = (record) => {
+    if (!record) return false;
+
+    if (record.status === "claimed" || record.payload?.payoutConfirmed === true || record.source === "ipfs") return true;
+
+    return !record.status && Boolean(record.metadata || record.publicData || record.ipfs_pin_hash);
+};
+
+/**
+ * True while a confirmed claim is less than 24 hours old.
+ * A confirmed row with no timestamp still blocks, so a receipt cannot be paid twice.
+ * @param {Object|null} record
+ * @param {number} [now]
+ * @returns {boolean}
+ */
+const _isWithinDailyCooldown = (record, now = Date.now()) => {
+    if (!_isConfirmedDailyClaim(record)) return false;
+
+    const claimTime = _claimTime(record);
+
+    if (!claimTime) return true;
+
+    return now - claimTime.getTime() < DAILY_REWARD_COOLDOWN_MS;
+};
+
+const _nextClaimAvailableAt = (record, now = Date.now()) => {
+    const claimTime = _claimTime(record);
+
+    return new Date((claimTime ? claimTime.getTime() : now) + DAILY_REWARD_COOLDOWN_MS).toISOString();
+};
+
+const _throwDailyCooldown = (record) => {
+    throwDailyRewardError(409, DAILY_REWARD_ALREADY_CLAIMED, DAILY_REWARD_COOLDOWN_MESSAGE, {
+        nextClaimAvailable: _nextClaimAvailableAt(record),
+    });
+};
+
+const _dailyRewardSlotKey = (zelfName) => `${zelfName}:daily`;
+
+const _dailyRewardLookupKeys = (zelfName) => [
+    _dailyRewardSlotKey(zelfName),
+    `${zelfName}${moment().format("YYYY-MM-DD")}`,
+    `${zelfName}${moment().subtract(1, "day").format("YYYY-MM-DD")}`,
+];
 
 const _modifiedCount = (result) => result?.modifiedCount ?? result?.nModified ?? 0;
 
@@ -307,24 +398,38 @@ const _getZelfNamePublicData = async (zelfName) => {
     }
 };
 
-// Helper function to get wheel segments based on type
-const _getWheelSegments = (type) => {
-    if (type === "hold") {
-        // .hold domains: 1 to 12 ZNS (12 slots)
-        return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-    } else if (type === "mainnet") {
-        // Purchased domains (mainnet): 2, 4, 6, ... 24 ZNS (12 slots, even numbers)
-        return [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24];
-    } else {
-        throw new Error("Invalid ZelfName type");
+/**
+ * License override for the daily wheel. A non-empty list of positive finite numbers
+ * replaces the default. Anything else keeps `[11..20]` for every name type.
+ * @param {Object} [domainConfig]
+ * @returns {number[]|null}
+ */
+const _licenseWheelSegments = (domainConfig) => {
+    const raw = domainConfig?.tags?.rewards?.wheelSegments;
+
+    if (!Array.isArray(raw) || raw.length === 0) return null;
+
+    const segments = [];
+
+    for (const value of raw) {
+        if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+
+        segments.push(value);
     }
+
+    return segments;
 };
 
-// Helper function to generate wheel reward based on type
-const _generateWheelReward = (type) => {
-    const segments = _getWheelSegments(type);
+// Ten slots, 11–20 ZNS, for every name type unless the license sets `tags.rewards.wheelSegments`.
+const _getWheelSegments = (type, domainConfig) => {
+    if (type !== "hold" && type !== "mainnet") throw new Error("Invalid ZelfName type");
 
-    // Select a random segment index
+    return _licenseWheelSegments(domainConfig) || DEFAULT_WHEEL_SEGMENTS.slice();
+};
+
+// Uniform index over the wheel. Each segment has the same chance.
+const _generateWheelReward = (type, domainConfig) => {
+    const segments = _getWheelSegments(type, domainConfig);
     const winningIndex = Math.floor(Math.random() * segments.length);
     const rewardAmount = segments[winningIndex];
 
@@ -342,17 +447,17 @@ const getRouletteWheel = async (data, authUser) => {
 
         const { tagObject, _tagName, domainConfig } = await _getTagObject(tagName, domain, authUser);
 
-        // Check if user already claimed today
+        // Last successful claim inside the rolling 24-hour window, including yesterday's key after midnight.
         const todayReward = await _getTodayReward(_tagName);
 
         const type = tagObject.publicData.type || "hold";
-        const segments = _getWheelSegments(type);
+        const segments = _getWheelSegments(type, domainConfig);
 
         // Check if the user's Solana account is active/funded
         const isAccountActive = await ZNSTokenModule.isAccountActive(tagObject.publicData.solanaAddress);
 
-        // Calculate next claim time (tomorrow at midnight UTC)
-        const nextClaimAvailable = moment().add(1, "day").startOf("day").toISOString();
+        const onCooldown = Boolean(todayReward);
+        const nextClaimAvailable = onCooldown ? _nextClaimAvailableAt(todayReward) : new Date().toISOString();
 
         // If user already claimed, extract the reward details
         let todayRewardData = null;
@@ -376,8 +481,8 @@ const getRouletteWheel = async (data, authUser) => {
             type,
             segments,
             segmentCount: segments.length,
-            canSpin: isAccountActive && !todayReward,
-            alreadyClaimedToday: !!todayReward,
+            canSpin: isAccountActive && !onCooldown,
+            alreadyClaimedToday: onCooldown,
             isAccountActive, // Tell frontend if account is active or not
             nextClaimAvailable,
             todayReward: todayRewardData,
@@ -492,6 +597,7 @@ const _pinDailyRewardReceipt = async ({ record, tagName, solanaAddress }) => {
 const _dailyRewardSuccess = ({ record, solanaAddress, ipfsCid, signature }) => {
     const amount = record.amount;
     const transferSignature = signature || record.payload?.signature || record.payload?.transferSignature;
+    const claimedAtDate = _claimTime(record) || new Date();
 
     return {
         success: true,
@@ -504,8 +610,8 @@ const _dailyRewardSuccess = ({ record, solanaAddress, ipfsCid, signature }) => {
             currency: "ZNS",
             type: "daily",
             zelfNameType: record.zelfNameType,
-            claimedAt: moment().format("YYYY-MM-DD HH:mm:ss"),
-            nextClaimAvailable: moment().add(1, "day").startOf("day").toISOString(),
+            claimedAt: moment(claimedAtDate).format("YYYY-MM-DD HH:mm:ss"),
+            nextClaimAvailable: new Date(claimedAtDate.getTime() + DAILY_REWARD_COOLDOWN_MS).toISOString(),
             ipfsCid: ipfsCid || record.ipfsCid || null,
             mongoId: record._id,
             tokenTransfer: {
@@ -646,19 +752,17 @@ const _acquireDailyClaim = async (rewardPrimaryKey, fields) => {
 
     if (!current) throwDailyRewardError(503, DAILY_REWARD_CLAIM_IN_PROGRESS);
 
-    if (current.status === "claimed" || current.payload?.payoutConfirmed) {
-        throwDailyRewardError(
-            409,
-            DAILY_REWARD_ALREADY_CLAIMED,
-            "You have already claimed your daily reward today. Come back tomorrow!"
-        );
-    }
-
     if (current.status === "processing" && current.payload?.transferSignature) {
         throwDailyRewardError(503, DAILY_REWARD_CLAIM_IN_PROGRESS);
     }
 
-    if (current.status !== "failed" && !_isStaleProcessing(current)) {
+    const cooldownElapsed = (current.status === "claimed" || current.payload?.payoutConfirmed) && !_isWithinDailyCooldown(current);
+    const failed = current.status === "failed";
+    const staleProcessing = current.status === "processing" && !current.payload?.transferSignature && _isStaleDailyProcessing(current);
+
+    if (!failed && !cooldownElapsed && !staleProcessing) {
+        if (current.status === "claimed" || current.payload?.payoutConfirmed) _throwDailyCooldown(current);
+
         throwDailyRewardError(503, DAILY_REWARD_CLAIM_IN_PROGRESS);
     }
 
@@ -686,40 +790,93 @@ const _acquireDailyClaim = async (rewardPrimaryKey, fields) => {
     return updated;
 };
 
-// Helper function to check if user already claimed today
+const _loadMongoDailyClaims = async (zelfName) => {
+    const records = [];
+
+    for (const rewardPrimaryKey of _dailyRewardLookupKeys(zelfName)) {
+        const record = await Model.findOne({ rewardPrimaryKey });
+
+        if (record) records.push(record);
+    }
+
+    return records;
+};
+
+/** Latest confirmed claim that is still inside the 24-hour window. */
+const _blockingClaim = (records, now = Date.now()) => {
+    let chosen = null;
+    let chosenTime = null;
+
+    for (const record of records) {
+        if (!_isWithinDailyCooldown(record, now)) continue;
+
+        const claimTime = _claimTime(record);
+
+        if (!chosen || (claimTime && (!chosenTime || claimTime.getTime() > chosenTime.getTime()))) {
+            chosen = record;
+            chosenTime = claimTime;
+        }
+    }
+
+    return chosen;
+};
+
+const _inFlightDailyClaim = (records) => records.find((record) => record?.status === "processing" && record.payload?.transferSignature) || null;
+
+/**
+ * IPFS is the backup when Mongo no longer has the payout. A receipt blocks only while it is
+ * inside 24 hours (or when it has no timestamp, so it cannot be paid again by mistake).
+ * @param {string} zelfName
+ * @param {number} [now]
+ * @returns {Promise<Object|null>}
+ */
+const _findBlockingReceipt = async (zelfName, now = Date.now()) => {
+    for (const rewardPrimaryKey of _dailyRewardLookupKeys(zelfName)) {
+        try {
+            const receipts = await IPFS.filter("rewardPrimaryKey", rewardPrimaryKey);
+            const receipt = Array.isArray(receipts) ? receipts.find(Boolean) : null;
+
+            if (receipt && _isWithinDailyCooldown({ ...receipt, source: "ipfs" }, now)) return receipt;
+        } catch (error) {
+            if (error?.clientCode) throw error;
+
+            console.error("Daily reward receipt lookup failed:", error?.message || error);
+        }
+    }
+
+    return null;
+};
+
+// Confirmed daily claim that still blocks a new spin. Null once 24 hours have passed.
 const _getTodayReward = async (zelfName) => {
     try {
-        // Create composite key for direct lookup
-        const todayKey = moment().format("YYYY-MM-DD");
+        const records = await _loadMongoDailyClaims(zelfName);
+        const blocking = _blockingClaim(records);
 
-        const rewardPrimaryKey = `${zelfName}${todayKey}`;
-
-        // A row that is not confirmed does not use up the day, and it must not fall through to an older receipt.
-        const mongoReward = await Model.findOne({ rewardPrimaryKey });
-        if (mongoReward) {
-            if (mongoReward.status !== "claimed") return null;
-
-            const plain = typeof mongoReward.toObject === "function" ? mongoReward.toObject() : mongoReward;
+        if (blocking) {
+            const plain = typeof blocking.toObject === "function" ? blocking.toObject() : blocking;
 
             return {
                 ...plain,
                 source: "mongodb",
-                metadata: { rewardPrimaryKey },
+                metadata: { rewardPrimaryKey: plain.rewardPrimaryKey },
             };
         }
 
-        // Step 2: If not in MongoDB, check IPFS (after 5 minutes)
-        const ipfsRewards = await IPFS.filter("rewardPrimaryKey", rewardPrimaryKey);
+        // A Mongo row already records this payout. Do not let an older receipt extend the window.
+        if (records.some(_isConfirmedDailyClaim)) return null;
 
-        if (ipfsRewards && ipfsRewards[0]) {
-            return {
-                ...ipfsRewards[0],
-                source: "ipfs",
-            };
-        }
+        const receipt = await _findBlockingReceipt(zelfName);
 
-        return null;
+        if (!receipt) return null;
+
+        return {
+            ...receipt,
+            source: "ipfs",
+        };
     } catch (error) {
+        if (error?.clientCode) throw error;
+
         console.error("Error checking today's reward:", error);
         return null;
     }
@@ -777,7 +934,7 @@ const dailyRewards = async (data, authUser) => {
     try {
         const { tagName, domain } = data;
 
-        const { tagObject, _tagName } = await _getTagObject(tagName, domain, authUser);
+        const { tagObject, _tagName, domainConfig } = await _getTagObject(tagName, domain, authUser);
 
         await assertDailyRewardIdentity(data, tagObject, authUser);
 
@@ -796,52 +953,41 @@ const dailyRewards = async (data, authUser) => {
             };
         }
 
-        const rewardPrimaryKey = `${_tagName}${moment().format("YYYY-MM-DD")}`;
+        const rewardPrimaryKey = _dailyRewardSlotKey(_tagName);
         const zelfNameType = tagObject.publicData.type;
 
-        let record = await _settleProcessingDailyClaim(await Model.findOne({ rewardPrimaryKey }));
+        let inFlight = _inFlightDailyClaim(await _loadMongoDailyClaims(_tagName));
 
-        if (record?.justConfirmed) {
-            const ipfsCid = await _pinDailyRewardReceipt({ record, tagName: _tagName, solanaAddress });
+        if (inFlight) {
+            inFlight = await _settleProcessingDailyClaim(inFlight);
 
-            return _dailyRewardSuccess({ record, solanaAddress, ipfsCid, signature: record.payload?.signature });
-        }
+            if (inFlight?.justConfirmed) {
+                const ipfsCid = await _pinDailyRewardReceipt({ record: inFlight, tagName: _tagName, solanaAddress });
 
-        if (record?.status === "claimed") {
-            throwDailyRewardError(
-                409,
-                DAILY_REWARD_ALREADY_CLAIMED,
-                "You have already claimed your daily reward today. Come back tomorrow!"
-            );
-        }
+                return _dailyRewardSuccess({ record: inFlight, solanaAddress, ipfsCid, signature: inFlight.payload?.signature });
+            }
 
-        if (record?.status === "processing" && record.payload?.transferSignature) {
-            throwDailyRewardError(503, DAILY_REWARD_CLAIM_IN_PROGRESS);
-        }
-
-        // Mongo rows expire. A receipt already stored for this day means the payout was confirmed.
-        if (!record) {
-            try {
-                const existingReceipt = await IPFS.filter("rewardPrimaryKey", rewardPrimaryKey);
-
-                if (Array.isArray(existingReceipt) && existingReceipt.length > 0) {
-                    throwDailyRewardError(
-                        409,
-                        DAILY_REWARD_ALREADY_CLAIMED,
-                        "You have already claimed your daily reward today. Come back tomorrow!"
-                    );
-                }
-            } catch (error) {
-                if (error?.clientCode) throw error;
-
-                console.error("Daily reward receipt lookup failed:", error?.message || error);
+            if (inFlight?.status === "processing" && inFlight.payload?.transferSignature) {
+                throwDailyRewardError(503, DAILY_REWARD_CLAIM_IN_PROGRESS);
             }
         }
 
-        const wheelResult = _generateWheelReward(zelfNameType);
+        const openClaims = await _loadMongoDailyClaims(_tagName);
+        const blocking = _blockingClaim(openClaims);
+
+        if (blocking) _throwDailyCooldown(blocking);
+
+        // Mongo rows expire. A receipt younger than 24 hours means the payout was confirmed.
+        if (!openClaims.some(_isConfirmedDailyClaim)) {
+            const receipt = await _findBlockingReceipt(_tagName);
+
+            if (receipt) _throwDailyCooldown({ ...receipt, source: "ipfs" });
+        }
+
+        const wheelResult = _generateWheelReward(zelfNameType, domainConfig);
         const description = `Daily wheel reward for ${zelfNameType} ZelfName`;
 
-        record = await _acquireDailyClaim(rewardPrimaryKey, {
+        let record = await _acquireDailyClaim(rewardPrimaryKey, {
             name: _tagName,
             amount: wheelResult.amount,
             winningIndex: wheelResult.winningIndex,
@@ -984,19 +1130,19 @@ const getUserRewardStats = async (tagName, domain) => {
         const startOfWeek = moment().startOf("week").toDate();
         const startOfMonth = moment().startOf("month").toDate();
 
-        const [dailyStreak, weeklyTotal, monthlyTotal, canClaimToday] = await Promise.all([
+        const [dailyStreak, weeklyTotal, monthlyTotal, activeClaim] = await Promise.all([
             _calculateDailyStreak(tagName, domain),
             _getTotalRewardsInPeriod(tagName, domain, startOfWeek),
             _getTotalRewardsInPeriod(tagName, domain, startOfMonth),
-            _hasClaimedToday(tagName, domain),
+            _getTodayReward(tagName),
         ]);
 
         return {
             dailyStreak,
             weeklyTotal,
             monthlyTotal,
-            canClaimToday: !canClaimToday,
-            nextClaimAvailable: canClaimToday ? moment().add(1, "day").startOf("day").toISOString() : moment().toISOString(),
+            canClaimToday: !activeClaim,
+            nextClaimAvailable: activeClaim ? _nextClaimAvailableAt(activeClaim) : new Date().toISOString(),
         };
     } catch (error) {
         throw new Error(`Failed to get reward stats: ${error.message}`);
@@ -1048,18 +1194,6 @@ const _calculateDailyStreak = async (tagName, domain) => {
     } catch (error) {
         console.error("Error calculating streak:", error);
         return 0;
-    }
-};
-
-// Helper function to check if user has claimed today
-const _hasClaimedToday = async (tagName, domain) => {
-    try {
-        const todayReward = await _getTodayReward(tagName);
-
-        return todayReward !== null;
-    } catch (error) {
-        console.error("Error checking if user claimed today:", error);
-        return false;
     }
 };
 

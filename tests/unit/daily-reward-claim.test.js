@@ -135,7 +135,11 @@ const ZNSTokenModule = require("../../Repositories/ZelfNameService/modules/zns-t
 const RewardTransfer = require("../../Repositories/Tags/modules/referral-reward-transfer");
 const IPFS = require("../../Core/ipfs");
 const Reward = require("../../Repositories/Rewards/models/rewards.model");
-const { dailyRewards } = require("../../Repositories/Rewards/modules/rewards.module");
+const { dailyRewards, getRouletteWheel } = require("../../Repositories/Rewards/modules/rewards.module");
+const { getDomainConfig } = require("../../Repositories/Tags/config/supported-domains");
+const { Domain } = require("../../Repositories/Tags/modules/domain.class");
+
+const WHEEL_SEGMENTS = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
 const Controller = require("../../Repositories/Rewards/controllers/rewards.controller");
 
 const authUser = { tagName: "session-other", domain: "avax", identifier: "session-other" };
@@ -214,7 +218,7 @@ describe("daily reward claim reliability", () => {
         await Controller.dailyRewards(retried);
 
         expect(retried.body.success).toBe(true);
-        expect(retried.body.reward.amount).toBe(1);
+        expect(retried.body.reward.amount).toBe(11);
         expect(retried.body.reward.tokenTransfer.signature).toBe("sig-daily");
         expect(RewardTransfer.sendRewardTransfer).toHaveBeenCalledTimes(2);
         expect(Reward.instances).toHaveLength(1);
@@ -349,5 +353,152 @@ describe("daily reward claim reliability", () => {
         expect(Reward.instances).toHaveLength(1);
         expect(Reward.instances[0].status).toBe("claimed");
         expect(Reward.instances[0].payload.payoutConfirmed).toBe(true);
+    });
+});
+
+describe("daily reward wheel and rolling 24-hour cooldown", () => {
+    const HOUR = 60 * 60 * 1000;
+    const claimedAt = new Date("2026-11-26T21:00:00.000Z");
+
+    const defaultDomain = () => ({
+        getTagKey: () => "tagName",
+        name: "zelf",
+    });
+
+    afterEach(() => {
+        jest.useRealTimers();
+        getDomainConfig.mockImplementation(defaultDomain);
+    });
+
+    it("exposes 10 segments from 11 through 20 for every name type", async () => {
+        const hold = await getRouletteWheel({ tagName: "owner", domain: "zelf" }, authUser);
+
+        expect(hold.segments).toEqual(WHEEL_SEGMENTS);
+        expect(hold.segmentCount).toBe(10);
+        expect(hold.type).toBe("hold");
+        expect(hold.canSpin).toBe(true);
+        expect(hold.alreadyClaimedToday).toBe(false);
+
+        TagsSearchModule.searchTag.mockResolvedValue({
+            tagObject: {
+                zelfProof: "proof-bytes",
+                publicData: {
+                    type: "mainnet",
+                    solanaAddress: "SoLanaAddress111",
+                    tagName: "owner.zelf",
+                    hasPassword: "false",
+                    domain: "zelf",
+                },
+            },
+        });
+
+        const mainnet = await getRouletteWheel({ tagName: "owner", domain: "zelf" }, authUser);
+
+        expect(mainnet.type).toBe("mainnet");
+        expect(mainnet.segments).toEqual(WHEEL_SEGMENTS);
+        expect(mainnet.segmentCount).toBe(10);
+    });
+
+    it("picks a segment uniformly, including the last slot of 20 ZNS", async () => {
+        Math.random.mockReturnValue(0.999);
+
+        const result = await dailyRewards(claimBody(), authUser);
+
+        expect(result.reward.winningIndex).toBe(9);
+        expect(result.reward.amount).toBe(20);
+        expect(result.reward.segments).toEqual(WHEEL_SEGMENTS);
+        expect(RewardTransfer.sendRewardTransfer).toHaveBeenCalledWith(20, "SoLanaAddress111", expect.any(Object));
+    });
+
+    it("uses a license wheel override and falls back when the override is invalid", async () => {
+        getDomainConfig.mockImplementation(() => ({
+            ...defaultDomain(),
+            tags: { rewards: { wheelSegments: [21, 22] } },
+        }));
+
+        const overridden = await dailyRewards(claimBody(), authUser);
+
+        expect(overridden.reward.segments).toEqual([21, 22]);
+        expect(overridden.reward.amount).toBe(21);
+
+        Reward.instances.length = 0;
+        getDomainConfig.mockImplementation(() => ({
+            ...defaultDomain(),
+            tags: { rewards: { wheelSegments: [11, 0] } },
+        }));
+
+        const wheel = await getRouletteWheel({ tagName: "owner", domain: "zelf" }, authUser);
+
+        expect(wheel.segments).toEqual(WHEEL_SEGMENTS);
+    });
+
+    it("keeps a license wheel override when the domain is rebuilt", () => {
+        const domain = new Domain({
+            name: "zelf",
+            tags: {
+                payment: { discounts: {}, whitelist: {}, pricingTable: {} },
+                rewards: { wheelSegments: [11, 15, 20] },
+            },
+        });
+
+        expect(domain.tags.rewards.wheelSegments).toEqual([11, 15, 20]);
+        expect(new Domain(domain.toJSON()).tags.rewards.wheelSegments).toEqual([11, 15, 20]);
+
+        const invalid = new Domain({
+            name: "zelf",
+            tags: {
+                payment: { discounts: {}, whitelist: {}, pricingTable: {} },
+                rewards: { wheelSegments: [11, -1] },
+            },
+        });
+
+        expect(invalid.tags.rewards).toBeUndefined();
+    });
+
+    it("blocks a claim across midnight while it is under 24 hours, then allows it at 24 hours", async () => {
+        jest.useFakeTimers({
+            now: new Date("2026-11-27T00:30:00.000Z"),
+            doNotFake: ["nextTick", "queueMicrotask", "setImmediate"],
+        });
+
+        await Reward.create({
+            name: "owner.zelf",
+            rewardPrimaryKey: "owner.zelf2026-11-26",
+            amount: 14,
+            type: "daily",
+            status: "claimed",
+            zelfNameType: "hold",
+            description: "claimed before midnight",
+            redeemedAt: claimedAt,
+            rewardDate: claimedAt,
+            payload: { payoutConfirmed: true, signature: "sig-night", winningIndex: 3, segments: WHEEL_SEGMENTS },
+        });
+
+        const blocked = ctxFor();
+
+        await Controller.dailyRewards(blocked);
+
+        expect(blocked.status).toBe(409);
+        expect(blocked.body.code).toBe("DAILY_REWARD_ALREADY_CLAIMED");
+        expect(blocked.body.message).toMatch(/already claimed/i);
+        expect(blocked.body.nextClaimAvailable).toBe(new Date(claimedAt.getTime() + 24 * HOUR).toISOString());
+        expect(RewardTransfer.sendRewardTransfer).not.toHaveBeenCalled();
+
+        const wheel = await getRouletteWheel({ tagName: "owner", domain: "zelf" }, authUser);
+
+        expect(wheel.canSpin).toBe(false);
+        expect(wheel.alreadyClaimedToday).toBe(true);
+        expect(wheel.segments).toEqual(WHEEL_SEGMENTS);
+        expect(wheel.nextClaimAvailable).toBe(blocked.body.nextClaimAvailable);
+
+        jest.setSystemTime(new Date(claimedAt.getTime() + 24 * HOUR));
+
+        const allowed = await dailyRewards(claimBody(), authUser);
+
+        expect(allowed.success).toBe(true);
+        expect(allowed.reward.amount).toBe(11);
+        expect(allowed.reward.segments).toEqual(WHEEL_SEGMENTS);
+        expect(allowed.reward.nextClaimAvailable).toBe(new Date(claimedAt.getTime() + 48 * HOUR).toISOString());
+        expect(RewardTransfer.sendRewardTransfer).toHaveBeenCalledTimes(1);
     });
 });

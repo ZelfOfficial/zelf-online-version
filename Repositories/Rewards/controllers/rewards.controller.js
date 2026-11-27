@@ -11,7 +11,11 @@ const dailyRewards = async (ctx) => {
 
         ctx.status = _exception.status;
 
-        ctx.body = { message: _exception.message, code: _exception.code };
+        ctx.body = {
+            message: _exception.message,
+            code: _exception.code,
+            ...(error.nextClaimAvailable ? { nextClaimAvailable: error.nextClaimAvailable } : {}),
+        };
     }
 };
 

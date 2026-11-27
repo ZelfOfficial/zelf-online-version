@@ -127,6 +127,11 @@ const schemas = {
 				})
 					.unknown(true)
 					.optional(),
+				rewards: object({
+					wheelSegments: array().items(number().positive()).min(1).optional(),
+				})
+					.unknown(true)
+					.optional(),
 			}).required(),
 			zelfkeys: object({
 				plans: array().items(object()).default([]),

@@ -4,6 +4,55 @@ const { isUnsupportedDomain, omitUnsupportedCurrencies, omitUnsupportedNetworks,
 const { positiveReferralLimit } = require("./referral-reward.util");
 
 /**
+ * Keep `tags.rewards.wheelSegments` when a license overrides the daily wheel.
+ * Only a non-empty list of positive finite numbers is stored. An invalid list is omitted
+ * so the wheel falls back to 11–20 ZNS.
+ * @param {Object} [rewards]
+ * @returns {Object|undefined}
+ */
+const rewardSettings = (rewards) => {
+    if (!rewards || typeof rewards !== "object" || Array.isArray(rewards)) return undefined;
+
+    const next = {};
+
+    for (const [key, value] of Object.entries(rewards)) {
+        if (
+            key === "wheelSegments" ||
+            key === "__proto__" ||
+            key === "constructor" ||
+            key === "prototype" ||
+            value == null ||
+            typeof value === "function"
+        ) {
+            continue;
+        }
+
+        next[key] = value;
+    }
+
+    const segments = wheelSegments(rewards.wheelSegments);
+
+    if (segments) next.wheelSegments = segments;
+
+    return Object.keys(next).length ? next : undefined;
+};
+
+/** @param {unknown} value @returns {number[]|null} */
+const wheelSegments = (value) => {
+    if (!Array.isArray(value) || value.length === 0) return null;
+
+    const segments = [];
+
+    for (const item of value) {
+        if (typeof item !== "number" || !Number.isFinite(item) || item <= 0) return null;
+
+        segments.push(item);
+    }
+
+    return segments;
+};
+
+/**
  * Keep `tags.referrals` when the license is rebuilt. Only a positive integer `limit`
  * is stored; an invalid cap is omitted so callers fall back to the env default.
  * @param {Object} [referrals]
@@ -57,6 +106,7 @@ class Domain {
         this.endDate = domainData.endDate || "";
         this.features = domainData.features || [];
         const referrals = referralSettings(domainData.tags?.referrals);
+        const rewards = rewardSettings(domainData.tags?.rewards);
         // Validation rules
         this.tags = {
             minLength: domainData.tags?.minLength || 3,
@@ -88,6 +138,7 @@ class Domain {
                 networks: omitUnsupportedNetworks(domainData.tags?.wallet?.networks || domainData.wallet?.networks) || {},
             },
             ...(referrals ? { referrals } : {}),
+            ...(rewards ? { rewards } : {}),
         };
 
         this.zelfkeys = {
